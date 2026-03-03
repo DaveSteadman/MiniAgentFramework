@@ -1,0 +1,22 @@
+{
+  "user_prompt": "Please timestamp this request and then answer hello world",
+  "selected_skills": [
+    {
+      "skill_name": "DateTime Skill",
+      "relative_path": "code/skills/DateTime/skill.md",
+      "module": "code/skills/DateTime/datetime_skill.py",
+      "reason": "To prepend the current date\u2011time to the user request before responding."
+    }
+  ],
+  "python_calls": [
+    {
+      "order": 1,
+      "module": "code/skills/DateTime/datetime_skill.py",
+      "function": "build_prompt_with_datetime",
+      "arguments": {
+        "prompt": "Hello world"
+      }
+    }
+  ],
+  "final_prompt_template": "The output string returned by build_prompt_with_datetime (which includes the current date\u2011time followed by the supplied prompt) will be fed directly to the LLM as the final answer to the user."
+}
