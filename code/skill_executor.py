@@ -22,10 +22,24 @@ def _resolve_workspace_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _normalize_module_path(module_path: str) -> str:
+    normalized = str(module_path).strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    if normalized.endswith(".py"):
+        normalized = normalized[:-3]
+    return normalized
+
+
 # ----------------------------------------------------------------------------------------------------
 def _load_callable_from_module_path(module_path: str, function_name: str):
     workspace_root        = _resolve_workspace_root()
-    absolute_module_path  = (workspace_root / module_path).resolve()
+
+    candidate_module_path = str(module_path).strip()
+    if not candidate_module_path.endswith(".py"):
+        candidate_module_path = f"{candidate_module_path}.py"
+
+    absolute_module_path  = (workspace_root / candidate_module_path).resolve()
 
     if not absolute_module_path.exists():
         raise RuntimeError(f"Module path does not exist: {module_path}")
@@ -48,7 +62,7 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
 def _build_allowlist(skills_payload: dict) -> set[tuple[str, str]]:
     allowlist = set()
     for skill in skills_payload.get("skills", []):
-        module = str(skill.get("module", "")).strip()
+        module = _normalize_module_path(skill.get("module", ""))
         for function_name in skill.get("functions", []):
             normalized = str(function_name).split("(")[0].strip()
             if module and normalized:
@@ -58,7 +72,7 @@ def _build_allowlist(skills_payload: dict) -> set[tuple[str, str]]:
 
 # ----------------------------------------------------------------------------------------------------
 def _validate_call_allowed(call: PythonCall, allowlist: set[tuple[str, str]]) -> None:
-    key = (call.module, call.function)
+    key = (_normalize_module_path(call.module), call.function)
     if key not in allowlist:
         raise RuntimeError(f"Planned call is not allow-listed by skills summary: {call.module}.{call.function}")
 

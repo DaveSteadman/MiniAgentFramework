@@ -17,7 +17,7 @@
     - Ollama process RSS baseline / peak / delta (GB)
     - System RAM baseline / peak / delta (GB)
 - Run with:
-    - `c:/Util/GithubRepos/Node74/.venv/Scripts/python.exe system_check.py`
+    - `python .\\code\\system_check.py`
 
 ## Preflight and error fixes
 - Added Ollama preflight utilities in `ollama_client.py`:

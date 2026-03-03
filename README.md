@@ -75,22 +75,22 @@ This project uses a local Ollama runtime and focuses on transparent, logged orch
 
 ### Regenerate skills summary
 ```powershell
-c:/Util/GithubRepos/Node74/.venv/Scripts/python.exe .\code\skills_catalog_builder.py
+python .\code\skills_catalog_builder.py
 ```
 
 ### Run main orchestration
 ```powershell
-c:/Util/GithubRepos/Node74/.venv/Scripts/python.exe .\code\main.py --user-prompt "what version of ollama is in use" --num-ctx 32768
+python .\code\main.py --user-prompt "what version of ollama is in use" --num-ctx 32768
 ```
 
 ### Generate plan only (no execution)
 ```powershell
-c:/Util/GithubRepos/Node74/.venv/Scripts/python.exe .\code\preprocess_prompt.py --user-prompt "output the time" --print-only
+python .\code\preprocess_prompt.py --user-prompt "output the time" --print-only
 ```
 
 ### Monitor model/system memory usage
 ```powershell
-c:/Util/GithubRepos/Node74/.venv/Scripts/python.exe .\code\system_check.py --num-ctx 32768
+python .\code\system_check.py --num-ctx 32768
 ```
 
 ## Logging and Evidence
