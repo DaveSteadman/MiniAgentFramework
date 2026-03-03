@@ -1,7 +1,7 @@
-# Node74
+# MiniAgentFramework
 
 ## Purpose
-Node74 is an orchestration experiment that blends LLM reasoning with Python tool execution.
+MiniAgentFramework is an orchestration experiment that blends LLM reasoning with Python tool execution.
 
 The core idea is:
 - let an LLM decide which Python skills to call,
