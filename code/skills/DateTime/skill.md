@@ -1,27 +1,19 @@
 # DateTime Skill
 
 ## Purpose
-Provide a current date-time string that can be prepended to a later LLM prompt.
+Return current date and current time as separate values.
 
 ## Interface
 - Module: `code/skills/DateTime/datetime_skill.py`
-- Primary function: `get_datetime_string()`
-- Optional function: `build_prompt_with_datetime(prompt: str)`
+- Function: `get_datetime_data()`
 
 ## Input
-- `get_datetime_string()`
+- `get_datetime_data()`
   - No arguments.
-- `build_prompt_with_datetime(prompt: str)`
-  - `prompt`: the downstream LLM prompt text.
 
 ## Output
-- `get_datetime_string()` returns a string in local time:
-  - Format: `Current date/time: YYYY-MM-DD HH:MM:SS`
-- `build_prompt_with_datetime(prompt: str)` returns:
-  - `Current date/time: YYYY-MM-DD HH:MM:SS\n<prompt>`
+- `get_datetime_data()` returns a structured object:
+  - `{ "date": "YYYY-MM-DD", "time": "HH:MM:SS" }`
 
 ## Example
-- `get_datetime_string()` -> `Current date/time: 2026-03-03 21:15:42`
-- `build_prompt_with_datetime("Summarize these notes")` ->
-  - `Current date/time: 2026-03-03 21:15:42`
-  - `Summarize these notes`
+- `get_datetime_data()` -> `{ "date": "2026-03-03", "time": "21:15:42" }`

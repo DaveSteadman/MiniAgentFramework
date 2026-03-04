@@ -3,10 +3,7 @@
 # ====================================================================================================
 # DateTime skill module for the MiniAgentFramework.
 #
-# Provides two callable functions that the orchestration planner can select when a user prompt
-# requires the current date or time:
-#   - get_datetime_string()          -- returns the current local date/time as a formatted string.
-#   - build_prompt_with_datetime()   -- prepends the date/time string to an arbitrary prompt.
+# Provides a single callable function that returns structured date and time values.
 #
 # This module is discovered automatically by skills_catalog_builder.py via the accompanying
 # skill.md definition file and added to the skills_summary.md catalog.
@@ -26,12 +23,9 @@ from datetime import datetime
 # ====================================================================================================
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
-def get_datetime_string() -> str:
-    current_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return f"Current date/time: {current_local}"
-
-
-# ----------------------------------------------------------------------------------------------------
-def build_prompt_with_datetime(prompt: str) -> str:
-    datetime_prefix = get_datetime_string()
-    return f"{datetime_prefix}\n{prompt}"
+def get_datetime_data() -> dict:
+    current_local = datetime.now()
+    return {
+        "date": current_local.strftime("%Y-%m-%d"),
+        "time": current_local.strftime("%H:%M:%S"),
+    }

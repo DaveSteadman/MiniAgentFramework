@@ -1,4 +1,7 @@
-/code/__pycache__
 *.pyc
+/code/__pycache__
+code/skills/Memory/memory_store.txt
+/data
 /logs
 /testcode/results
+

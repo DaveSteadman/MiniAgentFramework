@@ -24,7 +24,6 @@ import subprocess
 import sys
 import time
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 
 
@@ -49,6 +48,16 @@ DEFAULT_PROMPTS = [
     "give me python version and current time",
     "summarize system health in one line",
     "return only the current date and time",
+    "in this environment, our repository root path is c:/Util/GithubRepos/MiniAgentFramework",
+    "for this project, the preferred local model is gpt-oss:20b",
+    "what repository root path is stored in memory for this environment",
+    "write memory usage to file x.txt",
+    "append the date to file ./data/content.txt",
+    "append system check passed to file ./data/content.txt",
+    "read file x.txt",
+    "read file ./data/content.txt",
+    "list data files",
+    "write test to file ../outside.txt",
 ]
 
 # Maximum time in seconds to wait for a single framework invocation before aborting.
@@ -142,7 +151,7 @@ def extract_final_output(stdout_text: str, stderr_text: str, log_file: str) -> s
 # MARK: CSV OUTPUT
 # ====================================================================================================
 def build_output_path(output_dir: Path) -> Path:
-    timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return output_dir / f"test_results_{timestamp}.csv"
 
 
@@ -161,13 +170,20 @@ def initialize_csv(output_path: Path) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 def append_csv_row(output_path: Path, row: dict) -> None:
+    sanitized_row = {}
+    for key, value in row.items():
+        if isinstance(value, str):
+            sanitized_row[key] = value.replace("\r", " ")
+        else:
+            sanitized_row[key] = value
+
     with output_path.open("a", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(
             csv_file,
             fieldnames=CSV_FIELDS,
             quoting=csv.QUOTE_ALL,
         )
-        writer.writerow(row)
+        writer.writerow(sanitized_row)
         csv_file.flush()
         os.fsync(csv_file.fileno())
 
@@ -180,14 +196,39 @@ def run_tests(prompts: list[str], output_dir: Path) -> Path:
     initialize_csv(output_path)
     print(f"Results file initialized: {output_path}")
 
-    for prompt in prompts:
-        run_timestamp = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
-        print(f"[{run_timestamp}] Running prompt: {prompt!r}")
+    total_prompts = len(prompts)
 
-        duration, exit_code, stdout, stderr = invoke_framework(prompt)
+    for index, prompt in enumerate(prompts, start=1):
+        run_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{run_timestamp}] Running prompt {index}/{total_prompts}: {prompt!r}")
 
-        log_file     = extract_log_file(stdout_text=stdout)
-        final_output = extract_final_output(stdout_text=stdout, stderr_text=stderr, log_file=log_file)
+        stdout = ""
+        stderr = ""
+        exit_code = -1
+        duration = 0.0
+        log_file = ""
+        final_output = ""
+
+        try:
+            duration, exit_code, stdout, stderr = invoke_framework(prompt)
+            log_file     = extract_log_file(stdout_text=stdout)
+            final_output = extract_final_output(stdout_text=stdout, stderr_text=stderr, log_file=log_file)
+        except subprocess.TimeoutExpired as timeout_error:
+            # Record timeout as a failed row and continue running the rest of prompts.
+            duration = float(SUBPROCESS_TIMEOUT_SECONDS)
+            exit_code = 124
+            stderr = f"Timeout after {SUBPROCESS_TIMEOUT_SECONDS}s: {timeout_error}"
+            final_output = ""
+        except KeyboardInterrupt:
+            # Persist an interrupted row and stop the run gracefully.
+            exit_code = 130
+            stderr = "Interrupted by user (KeyboardInterrupt)."
+            final_output = ""
+        except Exception as unexpected_error:
+            # Record unexpected wrapper failures in CSV so no prompt is silently dropped.
+            exit_code = 125
+            stderr = f"Wrapper error: {unexpected_error}"
+            final_output = ""
 
         row = {
             "timestamp":        run_timestamp,
@@ -202,6 +243,10 @@ def run_tests(prompts: list[str], output_dir: Path) -> Path:
 
         status_label = "OK" if exit_code == 0 else "FAIL"
         print(f"  [{status_label}] duration={duration:.3f}s  exit_code={exit_code}")
+
+        if exit_code == 130:
+            print("Interrupted by user, ending test run after recording this prompt.")
+            break
 
     print(f"\nResults written to: {output_path}")
     return output_path

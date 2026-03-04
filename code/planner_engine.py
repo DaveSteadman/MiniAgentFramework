@@ -248,11 +248,11 @@ def build_fallback_plan(user_prompt: str, skills_payload: dict) -> ExecutionPlan
                 PythonCall(
                     order=1,
                     module=str(datetime_skill.get("module", "")),
-                    function="get_datetime_string",
+                    function="get_datetime_data",
                     arguments={},
                 )
             ],
-            final_prompt_template="Return the datetime string directly to the user.",
+            final_prompt_template="Return only the requested field from the date/time data.",
         )
 
     return ExecutionPlan(
@@ -279,7 +279,11 @@ def create_skill_execution_plan(
     )
 
     # Invoke LLM planner to propose skill calls in strict JSON shape.
-    llm_text = call_ollama(model_name=model_name, prompt=planner_prompt, num_ctx=num_ctx)
+    # If planner inference fails (timeout/network/server), fall back deterministically.
+    try:
+        llm_text = call_ollama(model_name=model_name, prompt=planner_prompt, num_ctx=num_ctx)
+    except Exception:
+        return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload)
 
     try:
         plan_dict = json.loads(extract_first_json_object(llm_text))

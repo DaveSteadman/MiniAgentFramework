@@ -22,6 +22,7 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import importlib.util
+import re
 from pathlib import Path
 
 from planner_engine import ExecutionPlan
@@ -100,7 +101,42 @@ def _validate_call_allowed(call: PythonCall, allowlist: set[tuple[str, str]]) ->
 
 
 # ----------------------------------------------------------------------------------------------------
-def _resolve_argument_placeholders(call_arguments: dict, previous_outputs: list[str], user_prompt: str) -> dict:
+def _resolve_indexed_path(index: int, path_segments: list[str], previous_results: list[object]):
+    if index < 0 or index >= len(previous_results):
+        return None, False
+
+    value = previous_results[index]
+    for segment in path_segments:
+        if isinstance(value, dict) and segment in value:
+            value = value[segment]
+            continue
+        return None, False
+
+    return value, True
+
+
+# ----------------------------------------------------------------------------------------------------
+def _resolve_structured_reference(reference: str, previous_results: list[object]):
+    brace_match = re.match(r"^\{(\d+)\}(?:\.[A-Za-z_][A-Za-z0-9_]*)*$", reference)
+    if brace_match:
+        index = int(brace_match.group(1))
+        path_segments = [segment for segment in reference.split(".")[1:] if segment]
+        return _resolve_indexed_path(index=index, path_segments=path_segments, previous_results=previous_results)
+
+    output_match = re.match(r"^\$\{output(\d+)(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}$", reference)
+    if output_match:
+        raw_index = int(output_match.group(1))
+        # `${output1...}` maps to the first prior result; `${output0...}` is also accepted.
+        index = raw_index - 1 if raw_index >= 1 else raw_index
+        inner = reference[2:-1]
+        path_segments = [segment for segment in inner.split(".")[1:] if segment]
+        return _resolve_indexed_path(index=index, path_segments=path_segments, previous_results=previous_results)
+
+    return None, False
+
+
+# ----------------------------------------------------------------------------------------------------
+def _resolve_argument_placeholders(call_arguments: dict, previous_results: list[object], user_prompt: str) -> dict:
     resolved = {}
 
     for key, value in call_arguments.items():
@@ -113,12 +149,20 @@ def _resolve_argument_placeholders(call_arguments: dict, previous_outputs: list[
             resolved[key] = user_prompt
             continue
 
-        if normalized == "{{output_of_first_call}}" and len(previous_outputs) >= 1:
-            resolved[key] = previous_outputs[0]
+        if normalized == "{{output_of_first_call}}" and len(previous_results) >= 1:
+            resolved[key] = previous_results[0]
             continue
 
-        if normalized == "{{output_of_previous_call}}" and previous_outputs:
-            resolved[key] = previous_outputs[-1]
+        if normalized == "{{output_of_previous_call}}" and previous_results:
+            resolved[key] = previous_results[-1]
+            continue
+
+        structured_value, resolved_structured = _resolve_structured_reference(
+            reference=normalized,
+            previous_results=previous_results,
+        )
+        if resolved_structured:
+            resolved[key] = structured_value
             continue
 
         resolved[key] = value
@@ -132,7 +176,7 @@ def _resolve_argument_placeholders(call_arguments: dict, previous_outputs: list[
 def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_payload: dict) -> tuple[list[dict], str]:
     allowlist     = _build_allowlist(skills_payload=skills_payload)
     call_outputs  = []
-    raw_outputs   = []
+    raw_results   = []
     latest_output = user_prompt
 
     for call in sorted(plan.python_calls, key=lambda item: item.order):
@@ -141,7 +185,7 @@ def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_paylo
 
         call_arguments = _resolve_argument_placeholders(
             call_arguments=dict(call.arguments),
-            previous_outputs=raw_outputs,
+            previous_results=raw_results,
             user_prompt=user_prompt,
         )
 
@@ -158,7 +202,7 @@ def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_paylo
                 "result": result,
             }
         )
-        raw_outputs.append(str(result))
+        raw_results.append(result)
         latest_output = str(result)
 
     return call_outputs, latest_output

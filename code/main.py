@@ -39,6 +39,8 @@ from planner_engine import load_skills_payload
 from runtime_logger import create_log_file_path
 from runtime_logger import SessionLogger
 from skill_executor import execute_skill_plan_calls
+from skills.Memory.memory_skill import recall_relevant_memories
+from skills.Memory.memory_skill import store_prompt_memories
 
 
 # ====================================================================================================
@@ -93,9 +95,16 @@ def resolve_execution_model() -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def build_prompt_context(user_prompt: str, plan, python_call_outputs: list[dict], final_prompt: str) -> dict:
+def build_prompt_context(
+    user_prompt: str,
+    plan,
+    python_call_outputs: list[dict],
+    final_prompt: str,
+    recalled_memories: str,
+) -> dict:
     return {
         "original_user_prompt": user_prompt,
+        "recalled_memories": recalled_memories,
         "selected_skills": [item.__dict__ for item in plan.selected_skills],
         "python_call_outputs": python_call_outputs,
         "final_prompt_template": plan.final_prompt_template,
@@ -104,7 +113,13 @@ def build_prompt_context(user_prompt: str, plan, python_call_outputs: list[dict]
 
 
 # ----------------------------------------------------------------------------------------------------
-def build_final_llm_prompt(user_prompt: str, plan, python_call_outputs: list[dict], fallback_prompt: str) -> str:
+def build_final_llm_prompt(
+    user_prompt: str,
+    plan,
+    python_call_outputs: list[dict],
+    fallback_prompt: str,
+    recalled_memories: str,
+) -> str:
     call_outputs_json = json.dumps(python_call_outputs, indent=2)
     template_text     = (plan.final_prompt_template or "").strip()
 
@@ -128,6 +143,9 @@ def build_final_llm_prompt(user_prompt: str, plan, python_call_outputs: list[dic
         "\n"
         "Python skill outputs (authoritative context):\n"
         f"{call_outputs_json}\n"
+        "\n"
+        "Relevant recalled memories (if any):\n"
+        f"{recalled_memories}\n"
         "\n"
         "Planner template (optional guidance):\n"
         f"{template_text or 'N/A'}\n"
@@ -160,6 +178,16 @@ def main() -> None:
     logger.log(f"Log file:        {log_path.as_posix()}")
 
     skills_payload = load_skills_payload(SKILLS_SUMMARY_PATH)
+    memory_store_result = store_prompt_memories(user_prompt=user_prompt)
+    recalled_memories = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
+    planner_user_prompt = user_prompt
+    if recalled_memories.startswith("Relevant memories:"):
+        planner_user_prompt = f"{user_prompt}\n\nRecalled memory context:\n{recalled_memories}"
+
+    logger.log_section("MEMORY")
+    logger.log(memory_store_result)
+    logger.log(recalled_memories)
+
     planner_feedback = ""
     run_success = False
 
@@ -171,7 +199,7 @@ def main() -> None:
             iteration_planner_ask = f"{PLANNER_ASK} Previous iteration feedback: {planner_feedback}"
 
         planner_prompt = build_planner_prompt(
-            user_prompt=user_prompt,
+            user_prompt=planner_user_prompt,
             planner_ask=iteration_planner_ask,
             skills_payload=skills_payload,
         )
@@ -180,7 +208,7 @@ def main() -> None:
         logger.log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON")
         # Request structured JSON execution plan from LLM planner (with fallback inside planner engine).
         plan = create_skill_execution_plan(
-            user_prompt=user_prompt,
+            user_prompt=planner_user_prompt,
             skills_summary_path=SKILLS_SUMMARY_PATH,
             planner_ask=iteration_planner_ask,
             model_name=resolved_model,
@@ -202,6 +230,7 @@ def main() -> None:
             plan=plan,
             python_call_outputs=python_call_outputs,
             fallback_prompt=fallback_prompt,
+            recalled_memories=recalled_memories,
         )
 
         prompt_context = build_prompt_context(
@@ -209,13 +238,22 @@ def main() -> None:
             plan=plan,
             python_call_outputs=python_call_outputs,
             final_prompt=final_prompt,
+            recalled_memories=recalled_memories,
         )
 
         logger.log_section(f"ITERATION {iteration} - PROMPT CONTEXT JSON")
         logger.log(json.dumps(prompt_context, indent=2))
 
         logger.log_section(f"ITERATION {iteration} - FINAL LLM EXECUTION")
-        final_response = call_ollama(model_name=resolved_model, prompt=final_prompt, num_ctx=args.num_ctx).strip()
+        try:
+            final_response = call_ollama(model_name=resolved_model, prompt=final_prompt, num_ctx=args.num_ctx).strip()
+        except Exception as error:
+            final_response = ""
+            planner_feedback = f"Final LLM execution failed: {error}"
+            logger.log(planner_feedback)
+            logger.log("Execution did not satisfy validation checks, retrying...")
+            continue
+
         logger.log(final_response)
 
         # Gate iteration success on strict validation of skill usage and visible time output.

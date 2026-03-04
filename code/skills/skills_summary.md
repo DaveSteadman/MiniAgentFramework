@@ -9,24 +9,86 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "DateTime Skill",
       "relative_path": "code/skills/DateTime/skill.md",
-      "purpose": "Provide a current date-time string that can be prepended to a later LLM prompt.",
+      "purpose": "Return current date and current time as separate values.",
       "module": "code/skills/DateTime/datetime_skill.py",
       "functions": [
-        "build_prompt_with_datetime(\"Summarize these notes\")",
-        "build_prompt_with_datetime(prompt: str)",
-        "get_datetime_string()"
+        "get_datetime_data()"
       ],
       "inputs": [
-        "`get_datetime_string()`",
-        "No arguments.",
-        "`build_prompt_with_datetime(prompt: str)`",
-        "`prompt`: the downstream LLM prompt text."
+        "`get_datetime_data()`",
+        "No arguments."
       ],
       "outputs": [
-        "`get_datetime_string()` returns a string in local time:",
-        "Format: `Current date/time: YYYY-MM-DD HH:MM:SS`",
-        "`build_prompt_with_datetime(prompt: str)` returns:",
-        "`Current date/time: YYYY-MM-DD HH:MM:SS\\n<prompt>`"
+        "`get_datetime_data()` returns a structured object:",
+        "`{ \"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM:SS\" }`"
+      ]
+    },
+    {
+      "skill_name": "FileAccess Skill",
+      "relative_path": "code/skills/FileAccess/skill.md",
+      "purpose": "Provide safe workspace-constrained file access for write, append, read, and listing operations.",
+      "module": "code/skills/FileAccess/file_access_skill.py",
+      "functions": [
+        "append_text_file(file_path: str, text: str)",
+        "execute_file_instruction(\"append done to file ./data/content.txt\")",
+        "execute_file_instruction(\"create file abc.csv and write header1,header2 into it\")",
+        "execute_file_instruction(\"read file ./data/content.txt\")",
+        "execute_file_instruction(\"write hello world to file x.txt\")",
+        "execute_file_instruction(user_prompt: str)",
+        "list_data_files()",
+        "read_text_file(file_path: str, max_chars: int = 8000)",
+        "write_text_file(file_path: str, text: str)"
+      ],
+      "inputs": [
+        "`file_path`: target file path.",
+        "`text`: content to write or append.",
+        "`user_prompt`: natural-language instruction for command parsing.",
+        "Typical trigger phrases:",
+        "`create file <name>`",
+        "`write ... to file <path>`",
+        "`append ... to file <path>`",
+        "`read file <path>`",
+        "`write ... in CSV format`"
+      ],
+      "outputs": [
+        "Returns status messages for write/append/list operations.",
+        "Returns file content for read operations.",
+        "Returns parse guidance when instruction intent/path cannot be resolved."
+      ]
+    },
+    {
+      "skill_name": "Memory Skill",
+      "relative_path": "code/skills/Memory/skill.md",
+      "purpose": "Extract environment-specific facts from user prompts, store unique facts in a local text memory file, and recall relevant memories for future prompts.",
+      "module": "code/skills/Memory/memory_skill.py",
+      "functions": [
+        "extract_environment_facts(...)",
+        "extract_environment_facts(user_prompt: str)",
+        "get_memory_store_text()",
+        "recall_relevant_memories(\"what is our workspace path\")",
+        "recall_relevant_memories(...)",
+        "recall_relevant_memories(user_prompt: str, limit: int = 5, min_score: float = 0.25)",
+        "store_prompt_memories(\"Our workspace path is c:/Util/GithubRepos/MiniAgentFramework\")",
+        "store_prompt_memories(...)",
+        "store_prompt_memories(user_prompt: str)"
+      ],
+      "inputs": [
+        "`extract_environment_facts(user_prompt: str)`",
+        "`user_prompt`: raw user text to inspect for durable environment facts.",
+        "`store_prompt_memories(user_prompt: str)`",
+        "`user_prompt`: prompt used for extraction and deduplicated storage.",
+        "`recall_relevant_memories(user_prompt: str, limit: int = 5, min_score: float = 0.25)`",
+        "`user_prompt`: current prompt to use as relevance query.",
+        "`limit`: max number of returned memories.",
+        "`min_score`: minimum token-overlap relevance threshold.",
+        "`get_memory_store_text()`",
+        "No arguments."
+      ],
+      "outputs": [
+        "`extract_environment_facts(...)` returns a list of candidate environment-specific facts.",
+        "`store_prompt_memories(...)` returns a status string describing what was stored.",
+        "`recall_relevant_memories(...)` returns a formatted, ranked memory recall string.",
+        "`get_memory_store_text()` returns the full text content of the memory store file."
       ]
     },
     {
@@ -43,7 +105,15 @@ Single JSON payload for orchestration planning.
         "`get_system_info_string()`",
         "No arguments.",
         "`build_prompt_with_system_info(prompt: str)`",
-        "`prompt`: downstream LLM prompt text."
+        "`prompt`: downstream LLM prompt text.",
+        "Typical trigger phrases:",
+        "`system information`",
+        "`system info`",
+        "`machine info`",
+        "`runtime info`",
+        "`environment information`",
+        "`RAM usage`",
+        "`disk usage`"
       ],
       "outputs": [
         "`get_system_info_string()` returns a string similar to:",

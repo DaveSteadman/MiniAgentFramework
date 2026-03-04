@@ -58,6 +58,10 @@ This project uses a local Ollama runtime and focuses on transparent, logged orch
 - `code/skills/SystemInfo/`
   - Runtime system info functions (including Python + Ollama versions).
 
+- `code/skills/Memory/`
+  - Memory extraction and relevance-recall functions.
+  - Stores durable environment facts in `code/skills/Memory/memory_store.txt`.
+
 ## Project Flow (High Level)
 1. Load `code/skills/skills_summary.md`.
 2. Ask planner LLM which skills/functions to execute.
