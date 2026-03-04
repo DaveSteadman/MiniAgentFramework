@@ -1,4 +1,22 @@
 # ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# Builds and parses LLM-driven skill execution plans for the MiniAgentFramework.
+#
+# Defines the ExecutionPlan data model (SelectedSkill, PythonCall, ExecutionPlan), constructs the
+# structured planner prompt from user input and the skills catalog, extracts and validates the JSON
+# response returned by the LLM, and falls back to a deterministic DateTime-based plan when the LLM
+# response cannot be parsed.
+#
+# Related modules:
+#   - ollama_client.py          -- issues the LLM call inside create_skill_execution_plan
+#   - skill_executor.py         -- consumes the ExecutionPlan produced here
+#   - orchestration_validation.py -- validates the plan and its outputs
+#   - main.py / preprocess_prompt.py -- entry points that call create_skill_execution_plan
+# ====================================================================================================
+
+
+# ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
 import json
@@ -64,6 +82,7 @@ def extract_first_json_object(text: str) -> str:
     if start_index < 0:
         raise RuntimeError("No JSON object found in provided text")
 
+    # Walk the text character-by-character, tracking brace depth and string context.
     depth     = 0
     in_string = False
     escaped   = False
@@ -192,6 +211,7 @@ def parse_execution_plan(plan_dict: dict) -> ExecutionPlan:
             )
         )
 
+    # Sort calls by their declared order field so execution always follows the planner's sequence.
     python_calls.sort(key=lambda call: call.order)
 
     return ExecutionPlan(
@@ -258,12 +278,12 @@ def create_skill_execution_plan(
         skills_payload=skills_payload,
     )
 
-    # One-line comment: Invoke LLM planner to propose skill calls in strict JSON shape.
+    # Invoke LLM planner to propose skill calls in strict JSON shape.
     llm_text = call_ollama(model_name=model_name, prompt=planner_prompt, num_ctx=num_ctx)
 
     try:
         plan_dict = json.loads(extract_first_json_object(llm_text))
         return parse_execution_plan(plan_dict)
     except Exception:
-        # One-line comment: Fall back deterministically so orchestration can proceed even with malformed planner output.
+        # Fall back deterministically so orchestration can proceed even with malformed planner output.
         return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload)

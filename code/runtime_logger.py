@@ -1,4 +1,19 @@
 # ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# Session logger that writes timestamped run output to both stdout and a persistent log file.
+#
+# SessionLogger is used by main.py to record every stage of an orchestration run — planner prompts,
+# execution plan JSON, skill call outputs, the final LLM response, and validation results — so that
+# runs can be reviewed after the fact without re-executing. Each session writes to a unique file
+# named with the run timestamp.
+#
+# Related modules:
+#   - main.py  -- creates a SessionLogger instance and logs all orchestration stages through it
+# ====================================================================================================
+
+
+# ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
 from datetime import datetime

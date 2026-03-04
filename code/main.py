@@ -1,4 +1,26 @@
 # ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# Main orchestration entrypoint for the MiniAgentFramework.
+#
+# Drives the full prompt-to-response pipeline:
+#   1. Resolves the configured LLM model alias to an installed Ollama model name.
+#   2. Builds a structured skill execution plan via the planner (LLM-driven JSON).
+#   3. Executes the approved Python skill calls and collects their outputs.
+#   4. Constructs the final enriched prompt from outputs and the planner template.
+#   5. Issues the final LLM call and validates the response.
+#   6. Retries up to MAX_ITERATIONS times when validation fails, feeding back error context.
+#
+# Related modules:
+#   - ollama_client.py              -- Ollama server management and LLM calls
+#   - planner_engine.py             -- structured plan construction and parsing
+#   - skill_executor.py             -- allow-listed skill call execution
+#   - orchestration_validation.py   -- per-iteration output validation
+#   - runtime_logger.py             -- session log file management
+# ====================================================================================================
+
+
+# ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
 import argparse
@@ -86,9 +108,11 @@ def build_final_llm_prompt(user_prompt: str, plan, python_call_outputs: list[dic
     call_outputs_json = json.dumps(python_call_outputs, indent=2)
     template_text     = (plan.final_prompt_template or "").strip()
 
+    # Extract convenience references to first and last skill call results.
     output_of_first_call = python_call_outputs[0]["result"] if python_call_outputs else ""
     output_of_last_call  = python_call_outputs[-1]["result"] if python_call_outputs else fallback_prompt
 
+    # Substitute supported template placeholders with actual runtime values.
     if template_text:
         template_text = template_text.replace("{user_prompt}", user_prompt)
         template_text = template_text.replace("{system_info}", str(output_of_first_call))
@@ -121,9 +145,9 @@ def main() -> None:
     log_path   = create_log_file_path(log_dir=LOG_DIR)
     logger     = SessionLogger(log_path)
 
-    # One-line comment: Ensure local Ollama server is ready before model discovery and LLM calls.
+    # Ensure local Ollama server is ready before model discovery and LLM calls.
     ensure_ollama_running()
-    # One-line comment: Resolve configured model alias/tag into an installed concrete model name.
+    # Resolve configured model alias/tag into an installed concrete model name.
     resolved_model = resolve_execution_model()
 
     logger.log_section("SYSTEM STATUS")
@@ -154,7 +178,7 @@ def main() -> None:
         logger.log(planner_prompt)
 
         logger.log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON")
-        # One-line comment: Request structured JSON execution plan from LLM planner (with fallback inside planner engine).
+        # Request structured JSON execution plan from LLM planner (with fallback inside planner engine).
         plan = create_skill_execution_plan(
             user_prompt=user_prompt,
             skills_summary_path=SKILLS_SUMMARY_PATH,
@@ -165,7 +189,7 @@ def main() -> None:
         logger.log(json.dumps(plan.to_dict(), indent=2))
 
         logger.log_section(f"ITERATION {iteration} - PYTHON CALL EXECUTION")
-        # One-line comment: Execute allow-listed skill functions declared in the plan and collect outputs.
+        # Execute allow-listed skill functions declared in the plan and collect outputs.
         python_call_outputs, fallback_prompt = execute_skill_plan_calls(
             plan=plan,
             user_prompt=user_prompt,
@@ -194,7 +218,7 @@ def main() -> None:
         final_response = call_ollama(model_name=resolved_model, prompt=final_prompt, num_ctx=args.num_ctx).strip()
         logger.log(final_response)
 
-        # One-line comment: Gate iteration success on strict validation of skill usage and visible time output.
+        # Gate iteration success on strict validation of skill usage and visible time output.
         is_valid, validation_message = validate_orchestration_iteration(
             plan=plan,
             python_call_outputs=python_call_outputs,
