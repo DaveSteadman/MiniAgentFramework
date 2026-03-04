@@ -4,11 +4,11 @@ SYSTEM STATUS
 ====================================================================================================
 Requested model: 20b
 Resolved model:  gpt-oss:20b
-User prompt:     what version of ollama is in use
+User prompt:     show system info including RAM and disk usage
 num_ctx:         32768
 Max iterations:  3
-Model runtime status: gpt-oss:20b | size=14 GB | processor=100% CPU | context=32768 | until=4 minutes from now
-Log file:        C:/Util/GithubRepos/Node74/logs/run_20260303_215352.txt
+Model runtime status: gpt-oss:20b not currently loaded (ollama ps).
+Log file:        C:/Util/GithubRepos/MiniAgentFramework/logs/run_20260304_072339.txt
 
 ====================================================================================================
 ITERATION 1 - PRE-PROCESSING PROMPT
@@ -17,7 +17,7 @@ You are an orchestration planner.
 Use the provided skills summary context to decide which python calls should run.
 
 Planner ask: Given the user prompt, select needed skills and return python_calls JSON. Choose the minimum required skills and provide explicit arguments for each python call.
-User prompt: what version of ollama is in use
+User prompt: show system info including RAM and disk usage
 
 Return ONLY one JSON object with this exact schema (no extra keys):
 {
@@ -58,34 +58,44 @@ Skills summary context:
       "purpose": "Provide a current date-time string that can be prepended to a later LLM prompt.",
       "module": "code/skills/DateTime/datetime_skill.py",
       "functions": [
-        "get_datetime_string()",
-        "build_prompt_with_datetime(prompt: str)"
+        "build_prompt_with_datetime(\"Summarize these notes\")",
+        "build_prompt_with_datetime(prompt: str)",
+        "get_datetime_string()"
       ],
       "inputs": [
-        "get_datetime_string() - No arguments",
-        "build_prompt_with_datetime(prompt: str)"
+        "`get_datetime_string()`",
+        "No arguments.",
+        "`build_prompt_with_datetime(prompt: str)`",
+        "`prompt`: the downstream LLM prompt text."
       ],
       "outputs": [
-        "get_datetime_string() returns a string: Current date/time: YYYY-MM-DD HH:MM:SS",
-        "build_prompt_with_datetime(prompt: str) returns: Current date/time: YYYY-MM-DD HH:MM:SS\\n<prompt>"
+        "`get_datetime_string()` returns a string in local time:",
+        "Format: `Current date/time: YYYY-MM-DD HH:MM:SS`",
+        "`build_prompt_with_datetime(prompt: str)` returns:",
+        "`Current date/time: YYYY-MM-DD HH:MM:SS\\n<prompt>`"
       ]
     },
     {
       "skill_name": "SystemInfo Skill",
       "relative_path": "code/skills/SystemInfo/skill.md",
-      "purpose": "Provide runtime system information for prompt-context enrichment, including Python and Ollama versions.",
+      "purpose": "Provide runtime system information for prompt-context enrichment, including Python/Ollama versions, RAM usage, and disk usage.",
       "module": "code/skills/SystemInfo/system_info_skill.py",
       "functions": [
-        "get_system_info_string",
-        "build_prompt_with_system_info"
+        "build_prompt_with_system_info(\"what version of python are we running\")",
+        "build_prompt_with_system_info(prompt: str)",
+        "get_system_info_string()"
       ],
       "inputs": [
-        "get_system_info_string: no arguments",
-        "build_prompt_with_system_info: prompt (str)"
+        "`get_system_info_string()`",
+        "No arguments.",
+        "`build_prompt_with_system_info(prompt: str)`",
+        "`prompt`: downstream LLM prompt text."
       ],
       "outputs": [
-        "get_system_info_string: string like 'System info: python=3.14.2; ollama=0.17.5'",
-        "build_prompt_with_system_info: string like 'System info: python=3.14.2; ollama=0.17.5'"
+        "`get_system_info_string()` returns a string similar to:",
+        "`System info: python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`",
+        "`build_prompt_with_system_info(prompt: str)` returns:",
+        "`System info: python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`"
       ]
     }
   ]
@@ -95,13 +105,13 @@ Skills summary context:
 ITERATION 1 - PRE-PROCESSING PLAN JSON
 ====================================================================================================
 {
-  "user_prompt": "what version of ollama is in use",
+  "user_prompt": "show system info including RAM and disk usage",
   "selected_skills": [
     {
       "skill_name": "SystemInfo Skill",
       "relative_path": "code/skills/SystemInfo/skill.md",
       "module": "code/skills/SystemInfo/system_info_skill.py",
-      "reason": "Provides the Ollama version as part of the system info string."
+      "reason": "Provide RAM and disk usage information"
     }
   ],
   "python_calls": [
@@ -112,7 +122,7 @@ ITERATION 1 - PRE-PROCESSING PLAN JSON
       "arguments": {}
     }
   ],
-  "final_prompt_template": "User prompt: {user_prompt}\n\nSystem info: {system_info}\n\nAnswer:"
+  "final_prompt_template": "Here is the system info: {system_info}\nPlease respond to the user request: {user_prompt}"
 }
 
 ====================================================================================================
@@ -124,7 +134,7 @@ ITERATION 1 - PYTHON CALL EXECUTION
     "module": "code/skills/SystemInfo/system_info_skill.py",
     "function": "get_system_info_string",
     "arguments": {},
-    "result": "System info: python=3.14.2; ollama=0.17.5"
+    "result": "System info: python=3.14.2; ollama=0.17.5; ram_used=35.42 GiB; ram_available=91.87 GiB; disk_used=933.06 GiB; disk_available=929.00 GiB"
   }
 ]
 
@@ -132,13 +142,13 @@ ITERATION 1 - PYTHON CALL EXECUTION
 ITERATION 1 - PROMPT CONTEXT JSON
 ====================================================================================================
 {
-  "original_user_prompt": "what version of ollama is in use",
+  "original_user_prompt": "show system info including RAM and disk usage",
   "selected_skills": [
     {
       "skill_name": "SystemInfo Skill",
       "relative_path": "code/skills/SystemInfo/skill.md",
       "module": "code/skills/SystemInfo/system_info_skill.py",
-      "reason": "Provides the Ollama version as part of the system info string."
+      "reason": "Provide RAM and disk usage information"
     }
   ],
   "python_call_outputs": [
@@ -147,17 +157,17 @@ ITERATION 1 - PROMPT CONTEXT JSON
       "module": "code/skills/SystemInfo/system_info_skill.py",
       "function": "get_system_info_string",
       "arguments": {},
-      "result": "System info: python=3.14.2; ollama=0.17.5"
+      "result": "System info: python=3.14.2; ollama=0.17.5; ram_used=35.42 GiB; ram_available=91.87 GiB; disk_used=933.06 GiB; disk_available=929.00 GiB"
     }
   ],
-  "final_prompt_template": "User prompt: {user_prompt}\n\nSystem info: {system_info}\n\nAnswer:",
-  "final_prompt": "System info: python=3.14.2; ollama=0.17.5"
+  "final_prompt_template": "Here is the system info: {system_info}\nPlease respond to the user request: {user_prompt}",
+  "final_prompt": "You are answering exactly one user question.\nPrioritize the user question over all other text.\nAnswer directly and concisely without generic assistant filler.\n\nUser question:\nshow system info including RAM and disk usage\n\nPython skill outputs (authoritative context):\n[\n  {\n    \"order\": 1,\n    \"module\": \"code/skills/SystemInfo/system_info_skill.py\",\n    \"function\": \"get_system_info_string\",\n    \"arguments\": {},\n    \"result\": \"System info: python=3.14.2; ollama=0.17.5; ram_used=35.42 GiB; ram_available=91.87 GiB; disk_used=933.06 GiB; disk_available=929.00 GiB\"\n  }\n]\n\nPlanner template (optional guidance):\nHere is the system info: System info: python=3.14.2; ollama=0.17.5; ram_used=35.42 GiB; ram_available=91.87 GiB; disk_used=933.06 GiB; disk_available=929.00 GiB\nPlease respond to the user request: show system info including RAM and disk usage\n\nReturn only the direct answer to the user question."
 }
 
 ====================================================================================================
 ITERATION 1 - FINAL LLM EXECUTION
 ====================================================================================================
-Thanks for the system details! How can I assist you today?
+System info: python=3.14.2; ollama=0.17.5; ram_used=35.42 GiB; ram_available=91.87 GiB; disk_used=933.06 GiB; disk_available=929.00 GiB
 
 ====================================================================================================
 ITERATION 1 - VALIDATION

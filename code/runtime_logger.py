@@ -18,6 +18,7 @@
 # ====================================================================================================
 from datetime import datetime
 from pathlib import Path
+import sys
 
 
 # ====================================================================================================
@@ -36,9 +37,17 @@ class SessionLogger:
 
     # ----------------------------------------------------------------------------------------------------
     def log(self, message: str = "") -> None:
-        print(message)
+        text = str(message)
+
+        try:
+            print(text)
+        except UnicodeEncodeError:
+            output_encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+            safe_text = text.encode(output_encoding, errors="replace").decode(output_encoding, errors="replace")
+            print(safe_text)
+
         with self.file_path.open("a", encoding="utf-8") as handle:
-            handle.write(message + "\n")
+            handle.write(text + "\n")
 
     # ----------------------------------------------------------------------------------------------------
     def log_section(self, title: str) -> None:

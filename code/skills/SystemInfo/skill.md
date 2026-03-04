@@ -1,7 +1,7 @@
 # SystemInfo Skill
 
 ## Purpose
-Provide runtime system information for prompt-context enrichment, including Python and Ollama versions.
+Provide runtime system information for prompt-context enrichment, including OS name, Python/Ollama versions, RAM usage, and disk usage.
 
 ## Interface
 - Module: `code/skills/SystemInfo/system_info_skill.py`
@@ -16,11 +16,11 @@ Provide runtime system information for prompt-context enrichment, including Pyth
 
 ## Output
 - `get_system_info_string()` returns a string similar to:
-  - `System info: python=3.14.2; ollama=0.17.5`
+  - `System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`
 - `build_prompt_with_system_info(prompt: str)` returns:
-  - `System info: python=3.14.2; ollama=0.17.5`
+  - `System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`
 
 ## Example
-- `get_system_info_string()` -> `System info: python=3.14.2; ollama=0.17.5`
+- `get_system_info_string()` -> `System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`
 - `build_prompt_with_system_info("what version of python are we running")` ->
-  - `System info: python=3.14.2; ollama=0.17.5`
+  - `System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`

@@ -248,11 +248,11 @@ def build_fallback_plan(user_prompt: str, skills_payload: dict) -> ExecutionPlan
                 PythonCall(
                     order=1,
                     module=str(datetime_skill.get("module", "")),
-                    function="build_prompt_with_datetime",
-                    arguments={"prompt": user_prompt},
+                    function="get_datetime_string",
+                    arguments={},
                 )
             ],
-            final_prompt_template="Use datetime-enriched prompt as final LLM prompt.",
+            final_prompt_template="Return the datetime string directly to the user.",
         )
 
     return ExecutionPlan(

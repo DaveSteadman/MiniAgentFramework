@@ -6,6 +6,7 @@
 - Added `ollama_client.py` with `call_ollama(model_name, prompt, host)` to return the generated response string.
 - Added `hello_world_models.py` to test calls against `20b` and `120b` using prompt `hello world`.
 - Executed the test script; Python call flow works, but local Ollama reports both models are missing (`404 model not found`).
+- We have a basic orchestrator running. Pleased with that! Now to build on the robustness and completeness of it.
 
 ## Next step
 - Pull or tag local models named `20b` and `120b` (or update `MODELS` in `hello_world_models.py` to installed model names), then rerun:
