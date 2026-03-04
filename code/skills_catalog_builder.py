@@ -1,4 +1,30 @@
 # ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# Discovers all skill.md definition files and builds a consolidated JSON catalog for orchestration.
+#
+# Scans the skills directory recursively for skill.md files, summarises each one into a structured
+# JSON record (skill name, module path, functions, inputs, outputs), then writes the full catalog
+# as a single skills_summary.md file. The planner engine reads this summary at runtime to decide
+# which skill calls to include in an execution plan.
+#
+# Supports two summarisation modes:
+#   - LLM-assisted: sends the skill.md text to an Ollama model and parses the JSON response.
+#   - Local (--no-llm): deterministic regex/text extraction, used as a fallback or for CI.
+#
+# Usage:
+#   python skills_catalog_builder.py
+#   python skills_catalog_builder.py --no-llm
+#   python skills_catalog_builder.py --skills-root /path/to/skills --output /path/to/output.md
+#
+# Related modules:
+#   - ollama_client.py    -- used for optional LLM-assisted summarisation
+#   - planner_engine.py   -- consumes the skills_summary.md produced here
+#   - MiniAgentFramework.py -- top-level entrypoint that calls main() in this module
+# ====================================================================================================
+
+
+# ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
 import argparse
@@ -89,6 +115,7 @@ def summarize_locally(skill_md_path: Path) -> dict:
     skill_text = skill_md_path.read_text(encoding="utf-8")
     lines      = [line.strip() for line in skill_text.splitlines() if line.strip()]
 
+    # Use the first Markdown heading as the skill title, falling back to the parent directory name.
     title = next((line.lstrip("# ").strip() for line in lines if line.startswith("#")), skill_md_path.parent.name)
     purpose = ""
     for index, line in enumerate(lines):
@@ -96,13 +123,16 @@ def summarize_locally(skill_md_path: Path) -> dict:
             purpose = lines[index + 1]
             break
 
+    # Extract the module path from a backtick-quoted "Module:" field in the file.
     module = ""
     module_match = re.search(r"-\s*Module:\s*`([^`]+)`", skill_text)
     if module_match:
         module = module_match.group(1)
 
+    # Collect all backtick-quoted function signatures (e.g. `func_name(args)`).
     functions = re.findall(r"`([A-Za-z_][A-Za-z0-9_]*\([^`]*\))`", skill_text)
 
+    # Extract bullet-point items from the Input and Output sections.
     input_section = re.findall(r"## Input(.*?)(##|$)", skill_text, re.DOTALL | re.IGNORECASE)
     output_section = re.findall(r"## Output(.*?)(##|$)", skill_text, re.DOTALL | re.IGNORECASE)
 
@@ -202,7 +232,7 @@ def main() -> None:
         relative_skill_file = to_workspace_relative_path(skill_file)
         print(f"Summarizing {relative_skill_file}...")
 
-        # One-line comment: Use LLM summary when available, with deterministic local fallback for robustness.
+        # Use LLM summary when available, with deterministic local fallback for robustness.
         summary = summarize_skill(
             skill_md_path=skill_file,
             use_llm=not args.no_llm,

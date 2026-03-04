@@ -1,4 +1,23 @@
 # ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# HTTP client and server-management utilities for the local Ollama inference service.
+#
+# Provides a thin layer over Ollama's REST API, covering:
+#   - Health-checking and auto-starting the Ollama background process.
+#   - Listing installed models and resolving short aliases to fully-qualified model tags.
+#   - Parsing `ollama ps` output to report real-time model runtime status.
+#   - Sending prompt/completion requests and surfacing actionable error messages.
+#
+# Related modules:
+#   - main.py                 -- uses ensure_ollama_running, call_ollama, and model utilities
+#   - planner_engine.py       -- uses call_ollama for planner LLM calls
+#   - skills_catalog_builder.py -- uses call_ollama for optional LLM skill summarisation
+#   - system_check.py         -- uses model listing and call_ollama for diagnostics
+# ====================================================================================================
+
+
+# ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
 import json
@@ -50,6 +69,7 @@ def is_ollama_running(host: str = DEFAULT_OLLAMA_HOST) -> bool:
 
 # ----------------------------------------------------------------------------------------------------
 def start_ollama_server() -> None:
+    # Build platform-specific flags to fully detach the server process from this parent.
     creation_flags = 0
     if hasattr(subprocess, "DETACHED_PROCESS"):
         creation_flags |= subprocess.DETACHED_PROCESS
@@ -78,6 +98,7 @@ def ensure_ollama_running(
         raise RuntimeError(f"Ollama is not reachable at {host}")
 
     start_ollama_server()
+    # Poll until the server responds or the deadline expires, then raise if still unreachable.
     deadline = time.time() + wait_seconds
     while time.time() < deadline:
         if is_ollama_running(host=host):
@@ -110,6 +131,7 @@ def get_ollama_ps_rows() -> list[dict[str, str]]:
     if not lines:
         return []
 
+    # Parse the header line to derive column names, then split each data row by the same spacing.
     columns = [column.lower() for column in re.split(r"\s{2,}", lines[0].strip())]
     rows    = []
 
@@ -164,10 +186,12 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
     if not requested_lower:
         return None
 
+    # Exact full-name match (case-insensitive).
     for model_name in available_models:
         if model_name.lower() == requested_lower:
             return model_name
 
+    # Match when the requested string is the base name part before a colon tag.
     exact_prefix_matches = [
         model_name
         for model_name in available_models
@@ -176,6 +200,7 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
     if len(exact_prefix_matches) == 1:
         return exact_prefix_matches[0]
 
+    # Match when the requested string is the tag part after the colon.
     exact_suffix_matches = [
         model_name
         for model_name in available_models
@@ -184,6 +209,7 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
     if len(exact_suffix_matches) == 1:
         return exact_suffix_matches[0]
 
+    # Substring match as a last resort — only accepted when exactly one model matches.
     token_matches = [
         model_name
         for model_name in available_models
@@ -225,6 +251,7 @@ def call_ollama(
         )
     except urllib.error.HTTPError as error:
         error_body = error.read().decode("utf-8", errors="replace")
+        # Provide a helpful message listing installed models when the requested model is absent.
         if error.code == 404 and "not found" in error_body.lower():
             available_models = []
             try:

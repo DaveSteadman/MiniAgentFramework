@@ -1,4 +1,24 @@
 # ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# Executes the approved Python skill calls declared in an ExecutionPlan.
+#
+# Loads skill modules dynamically at runtime using importlib, but only after verifying each call
+# against an allow-list derived from the skills_summary catalog. This two-step guard — allow-list
+# check then dynamic import — prevents arbitrary code execution if a malformed or adversarial plan
+# is received from the LLM planner.
+#
+# Also resolves template argument placeholders (e.g. {{user_prompt}}, {{output_of_previous_call}})
+# before each function call so that skill calls can chain outputs together.
+#
+# Related modules:
+#   - planner_engine.py         -- provides the ExecutionPlan and PythonCall types
+#   - main.py                   -- calls execute_skill_plan_calls inside the orchestration loop
+#   - skills_catalog_builder.py -- produces the skills_summary that drives the allow-list
+# ====================================================================================================
+
+
+# ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
 import importlib.util
@@ -23,6 +43,7 @@ def _resolve_workspace_root() -> Path:
 
 
 def _normalize_module_path(module_path: str) -> str:
+    # Strip leading ./ prefixes and the .py extension so paths can be compared uniformly.
     normalized = str(module_path).strip().replace("\\", "/")
     while normalized.startswith("./"):
         normalized = normalized[2:]
@@ -44,6 +65,7 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
     if not absolute_module_path.exists():
         raise RuntimeError(f"Module path does not exist: {module_path}")
 
+    # Generate a unique module name to avoid collisions when the same path is loaded multiple times.
     dynamic_module_name = f"skill_module_{absolute_module_path.stem}_{abs(hash(str(absolute_module_path)))}"
     spec                = importlib.util.spec_from_file_location(dynamic_module_name, absolute_module_path)
     if spec is None or spec.loader is None:
@@ -114,7 +136,7 @@ def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_paylo
     latest_output = user_prompt
 
     for call in sorted(plan.python_calls, key=lambda item: item.order):
-        # One-line comment: Enforce strict allow-list from skills_summary before any dynamic import execution.
+        # Enforce strict allow-list from skills_summary before any dynamic import execution.
         _validate_call_allowed(call=call, allowlist=allowlist)
 
         call_arguments = _resolve_argument_placeholders(
@@ -123,7 +145,7 @@ def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_paylo
             user_prompt=user_prompt,
         )
 
-        # One-line comment: Dynamically import the approved skill module and invoke the selected function.
+        # Dynamically import the approved skill module and invoke the selected function.
         function_ref = _load_callable_from_module_path(module_path=call.module, function_name=call.function)
         result       = function_ref(**call_arguments)
 

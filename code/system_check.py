@@ -1,4 +1,23 @@
 # ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# Diagnostic utility for monitoring memory usage while running Ollama model prompts.
+#
+# Spawns a background thread that samples the Ollama process RSS and total system RAM at a
+# configurable interval. A baseline is established before each model call and the peak and delta
+# values are reported afterwards. This helps characterise how much memory each model requires at
+# inference time and whether it fits within available system resources.
+#
+# Usage:
+#   python system_check.py
+#   python system_check.py --num-ctx 4096
+#
+# Related modules:
+#   - ollama_client.py  -- provides model listing, resolution, runtime reporting, and call_ollama
+# ====================================================================================================
+
+
+# ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
 import argparse
@@ -101,6 +120,7 @@ class MemorySampler:
 # MARK: REPORTING WORKFLOW
 # ====================================================================================================
 def _summarize_memory(samples: list[int]) -> tuple[int, int, int]:
+    # Use the early samples as the baseline so pre-call idle memory is captured accurately.
     baseline = int(statistics.median(samples[: max(1, int(BASELINE_SECONDS / SAMPLE_SECONDS))]))
     peak     = max(samples)
     delta    = peak - baseline

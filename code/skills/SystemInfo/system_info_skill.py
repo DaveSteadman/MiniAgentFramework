@@ -1,4 +1,23 @@
 # ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# SystemInfo skill module for the MiniAgentFramework.
+#
+# Provides two callable functions that the orchestration planner can select when a user prompt
+# requires information about the runtime environment:
+#   - get_system_info_string()         -- returns Python and Ollama version strings.
+#   - build_prompt_with_system_info()  -- returns the system info string to use as prompt context.
+#
+# This module is discovered automatically by skills_catalog_builder.py via the accompanying
+# skill.md definition file and added to the skills_summary.md catalog.
+#
+# Related modules:
+#   - skill_executor.py         -- dynamically imports and calls functions from this module
+#   - skills_catalog_builder.py -- reads skill.md to build the catalog entry for this skill
+# ====================================================================================================
+
+
+# ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
 import re

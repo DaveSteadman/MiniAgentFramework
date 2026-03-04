@@ -1,4 +1,25 @@
 # ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# Standalone CLI tool for converting a raw user prompt into a structured JSON skill execution plan.
+#
+# Wraps the shared planner_engine logic so that the planning step can be run and inspected in
+# isolation, independently of the full orchestration pipeline. Useful for debugging planner output
+# or pre-generating a plan file to feed into downstream tooling.
+#
+# Usage:
+#   python preprocess_prompt.py --user-prompt "output the time"
+#   python preprocess_prompt.py --user-prompt "output the time" --print-only
+#   python preprocess_prompt.py --user-prompt "..." --output /path/to/plan.json
+#
+# Related modules:
+#   - planner_engine.py     -- shared planning logic called here
+#   - ollama_client.py      -- Ollama server management called before planning
+#   - main.py               -- uses the same planner_engine functions inline
+# ====================================================================================================
+
+
+# ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
 import argparse
@@ -43,7 +64,7 @@ def main() -> None:
 
     ensure_ollama_running()
 
-    # One-line comment: Ask planner for structured skill execution plan using shared typed engine.
+    # Ask planner for structured skill execution plan using shared typed engine.
     plan = create_skill_execution_plan(
         user_prompt=args.user_prompt,
         skills_summary_path=skills_summary_path,
