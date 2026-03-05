@@ -56,6 +56,21 @@ class SessionLogger:
         self.log(title)
         self.log(SECTION_SEPARATOR)
 
+    # ----------------------------------------------------------------------------------------------------
+    def log_file_only(self, message: str = "") -> None:
+        """Write to the log file only — no stdout. Used for verbose orchestration detail in chat mode."""
+        text = str(message)
+        with self.file_path.open("a", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+
+    # ----------------------------------------------------------------------------------------------------
+    def log_section_file_only(self, title: str) -> None:
+        """Write a section header to the log file only — no stdout."""
+        self.log_file_only("")
+        self.log_file_only(SECTION_SEPARATOR)
+        self.log_file_only(title)
+        self.log_file_only(SECTION_SEPARATOR)
+
 
 # ====================================================================================================
 # MARK: HELPERS

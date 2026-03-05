@@ -94,31 +94,25 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "SystemInfo Skill",
       "relative_path": "code/skills/SystemInfo/skill.md",
-      "purpose": "Provide runtime system information for prompt-context enrichment, including OS name, Python/Ollama versions, RAM usage, and disk usage.",
+      "purpose": "Provide runtime system information for prompt-context enrichment, including OS name, Python/Ollama versions, RAM usage, and disk usage. Select this skill for any request about the system, machine, hardware, runtime, environment, OS, Python or Ollama version, RAM, memory, disk space, storage, available space, or free space — including indirect phrasing such as 'can we fit', 'do we have enough', 'how much is available', 'is there enough', or 'health'.",
       "module": "code/skills/SystemInfo/system_info_skill.py",
       "functions": [
-        "build_prompt_with_system_info(\"what version of python are we running\")",
-        "build_prompt_with_system_info(prompt: str)",
         "get_system_info_string()"
       ],
       "inputs": [
         "`get_system_info_string()`",
         "No arguments.",
-        "`build_prompt_with_system_info(prompt: str)`",
-        "`prompt`: downstream LLM prompt text.",
-        "Typical trigger phrases:",
-        "`system information`",
-        "`system info`",
-        "`machine info`",
-        "`runtime info`",
-        "`environment information`",
-        "`RAM usage`",
-        "`disk usage`"
+        "Typical trigger phrases (use this skill for any of these concepts):",
+        "`system information`, `system info`, `system health`",
+        "`machine info`, `runtime info`, `environment information`",
+        "`RAM usage`, `RAM available`, `how much RAM`, `available memory`, `used memory`",
+        "`disk usage`, `disk space`, `disk available`, `free disk`, `free space`, `available space`",
+        "`can we fit`, `do we have enough space`, `is there enough disk`, `enough storage`",
+        "`python version`, `what version of python`, `ollama version`, `what version of ollama`",
+        "`what OS`, `operating system`, `what platform`, `show specs`, `system stats`"
       ],
       "outputs": [
-        "`get_system_info_string()` returns a string similar to:",
-        "`System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`",
-        "`build_prompt_with_system_info(prompt: str)` returns:",
+        "`get_system_info_string()` returns a single string, for example:",
         "`System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`"
       ]
     }

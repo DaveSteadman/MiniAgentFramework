@@ -223,34 +223,95 @@ def parse_execution_plan(plan_dict: dict) -> ExecutionPlan:
 
 
 # ----------------------------------------------------------------------------------------------------
-def build_fallback_plan(user_prompt: str, skills_payload: dict) -> ExecutionPlan:
-    skills = skills_payload.get("skills", [])
+# ----------------------------------------------------------------------------------------------------
+_FALLBACK_SYSTEM_KEYWORDS = frozenset({
+    "system", "disk", "ram", "memory", "cpu", "storage", "space", "available",
+    "free", "os", "operating", "platform", "python", "ollama", "runtime",
+    "environment", "machine", "version", "health", "spec", "stat", "usage",
+})
+_FALLBACK_FILE_KEYWORDS = frozenset({
+    "file", "write", "read", "append", "create", "save", "store",
+    "csv", "txt", "open", "directory", "folder", "path",
+})
 
-    datetime_skill = None
+
+def _skill_by_module_fragment(skills: list[dict], fragment: str) -> dict | None:
     for item in skills:
-        module_value = str(item.get("module", ""))
-        if "datetime_skill.py" in module_value:
-            datetime_skill = item
-            break
+        if fragment in str(item.get("module", "")):
+            return item
+    return None
 
-    if datetime_skill is not None:
+
+def build_fallback_plan(user_prompt: str, skills_payload: dict) -> ExecutionPlan:
+    skills       = skills_payload.get("skills", [])
+    prompt_lower = user_prompt.lower()
+    prompt_words = set(prompt_lower.replace("?", " ").replace(",", " ").split())
+
+    # Pick skill based on keyword presence in the user prompt.
+    has_system_keyword = bool(prompt_words & _FALLBACK_SYSTEM_KEYWORDS)
+    has_file_keyword   = bool(prompt_words & _FALLBACK_FILE_KEYWORDS)
+
+    if has_system_keyword and not has_file_keyword:
+        skill = _skill_by_module_fragment(skills, "system_info_skill.py")
+        if skill is not None:
+            module = str(skill.get("module", ""))
+            return ExecutionPlan(
+                user_prompt=user_prompt,
+                selected_skills=[
+                    SelectedSkill(
+                        skill_name=str(skill.get("skill_name", "SystemInfo Skill")),
+                        relative_path=str(skill.get("relative_path", "")),
+                        module=module,
+                        reason="Fallback: system/resource keywords detected in prompt.",
+                    )
+                ],
+                python_calls=[
+                    PythonCall(order=1, module=module, function="get_system_info_string", arguments={})
+                ],
+                final_prompt_template="Use the system info output to answer the user question directly.",
+            )
+
+    if has_file_keyword:
+        skill = _skill_by_module_fragment(skills, "file_access_skill.py")
+        if skill is not None:
+            module = str(skill.get("module", ""))
+            return ExecutionPlan(
+                user_prompt=user_prompt,
+                selected_skills=[
+                    SelectedSkill(
+                        skill_name=str(skill.get("skill_name", "FileAccess Skill")),
+                        relative_path=str(skill.get("relative_path", "")),
+                        module=module,
+                        reason="Fallback: file operation keywords detected in prompt.",
+                    )
+                ],
+                python_calls=[
+                    PythonCall(
+                        order=1,
+                        module=module,
+                        function="execute_file_instruction",
+                        arguments={"user_prompt": user_prompt},
+                    )
+                ],
+                final_prompt_template="Report the result of the file operation to the user.",
+            )
+
+    # Default: DateTime (temporal questions or when no keywords matched).
+    skill = _skill_by_module_fragment(skills, "datetime_skill.py")
+    if skill is not None:
+        module = str(skill.get("module", ""))
         return ExecutionPlan(
             user_prompt=user_prompt,
             selected_skills=[
                 SelectedSkill(
-                    skill_name=str(datetime_skill.get("skill_name", "DateTime Skill")),
-                    relative_path=str(datetime_skill.get("relative_path", "")),
-                    module=str(datetime_skill.get("module", "")),
-                    reason="Deterministic fallback selected DateTime skill.",
+                    skill_name=str(skill.get("skill_name", "DateTime Skill")),
+                    relative_path=str(skill.get("relative_path", "")),
+                    module=module,
+                    reason="Fallback: default DateTime skill.",
                 )
             ],
             python_calls=[
-                PythonCall(
-                    order=1,
-                    module=str(datetime_skill.get("module", "")),
-                    function="get_datetime_data",
-                    arguments={},
-                )
+                PythonCall(order=1, module=module, function="get_datetime_data", arguments={})
             ],
             final_prompt_template="Return only the requested field from the date/time data.",
         )

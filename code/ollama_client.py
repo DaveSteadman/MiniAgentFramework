@@ -26,12 +26,25 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+
+
+# ====================================================================================================
+# MARK: DATA TYPES
+# ====================================================================================================
+@dataclass
+class OllamaCallResult:
+    """Structured return from call_ollama_extended, including token usage counts."""
+    response:          str
+    prompt_tokens:     int
+    completion_tokens: int
+    total_tokens:      int
 
 
 # ====================================================================================================
@@ -222,12 +235,13 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
 
 
 # ----------------------------------------------------------------------------------------------------
-def call_ollama(
+def call_ollama_extended(
     model_name: str,
     prompt: str,
     host: str = DEFAULT_OLLAMA_HOST,
     num_ctx: int | None = None,
-) -> str:
+) -> OllamaCallResult:
+    """Call the Ollama generate endpoint and return the response with token usage counts."""
     ensure_ollama_running(host=host, start_if_needed=True)
 
     options = {}
@@ -274,4 +288,22 @@ def call_ollama(
     if "response" not in body:
         raise RuntimeError(f"Ollama response missing 'response' field: {body}")
 
-    return body["response"]
+    prompt_tokens     = body.get("prompt_eval_count", 0)
+    completion_tokens = body.get("eval_count", 0)
+    return OllamaCallResult(
+        response=body["response"],
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+    )
+
+
+# ----------------------------------------------------------------------------------------------------
+def call_ollama(
+    model_name: str,
+    prompt: str,
+    host: str = DEFAULT_OLLAMA_HOST,
+    num_ctx: int | None = None,
+) -> str:
+    """Convenience wrapper — returns the response text only. See call_ollama_extended for token counts."""
+    return call_ollama_extended(model_name=model_name, prompt=prompt, host=host, num_ctx=num_ctx).response

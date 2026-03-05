@@ -3,7 +3,14 @@
 # ====================================================================================================
 # Main orchestration entrypoint for the MiniAgentFramework.
 #
-# Drives the full prompt-to-response pipeline:
+# Supports two modes:
+#   single-shot  Run one prompt through the full pipeline and exit (default).
+#   chat         Interactive REPL: each turn runs the full pipeline; conversation history
+#                is appended to the final prompt for multi-turn context.  Verbose
+#                orchestration detail goes to the log file only; the console shows one
+#                brief status line (context-token usage) and the LLM response per turn.
+#
+# Single-shot pipeline per prompt:
 #   1. Resolves the configured LLM model alias to an installed Ollama model name.
 #   2. Builds a structured skill execution plan via the planner (LLM-driven JSON).
 #   3. Executes the approved Python skill calls and collects their outputs.
@@ -27,7 +34,7 @@ import argparse
 import json
 from pathlib import Path
 
-from ollama_client import call_ollama
+from ollama_client import call_ollama_extended
 from ollama_client import ensure_ollama_running
 from ollama_client import format_running_model_report
 from ollama_client import list_ollama_models
@@ -41,6 +48,7 @@ from runtime_logger import SessionLogger
 from skill_executor import execute_skill_plan_calls
 from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
+from skills.SystemInfo.system_info_skill import get_system_info_string
 
 
 # ====================================================================================================
@@ -74,6 +82,12 @@ def parse_main_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_NUM_CTX,
         help="Context window for planner and final LLM calls.",
+    )
+    parser.add_argument(
+        "--chat",
+        action="store_true",
+        default=False,
+        help="Start an interactive multi-turn chat session instead of a single-shot run.",
     )
     return parser.parse_args()
 
@@ -119,6 +133,8 @@ def build_final_llm_prompt(
     python_call_outputs: list[dict],
     fallback_prompt: str,
     recalled_memories: str,
+    ambient_system_info: str = "",
+    conversation_history: list[dict] | None = None,
 ) -> str:
     call_outputs_json = json.dumps(python_call_outputs, indent=2)
     template_text     = (plan.final_prompt_template or "").strip()
@@ -134,13 +150,34 @@ def build_final_llm_prompt(
         template_text = template_text.replace("{output_of_first_call}", str(output_of_first_call))
         template_text = template_text.replace("{output_of_previous_call}", str(output_of_last_call))
 
+    # Build an optional conversation-history section for multi-turn chat context.
+    history_section = ""
+    if conversation_history:
+        lines = [
+            f"{'User' if turn['role'] == 'user' else 'Assistant'}: {turn['content']}"
+            for turn in conversation_history
+        ]
+        history_section = "Conversation history (most recent last):\n" + "\n".join(lines) + "\n\n"
+
+    # The ambient system context is always collected so the LLM can answer any runtime question
+    # even when the planner did not explicitly select the SystemInfo skill.
+    system_context_section = ""
+    if ambient_system_info:
+        system_context_section = (
+            "Runtime system context (always available):\n"
+            f"{ambient_system_info}\n"
+            "\n"
+        )
+
     return (
         "You are answering exactly one user question.\n"
         "Prioritize the user question over all other text.\n"
         "Answer directly and concisely without generic assistant filler.\n"
         "\n"
+        f"{history_section}"
         f"User question:\n{user_prompt}\n"
         "\n"
+        f"{system_context_section}"
         "Python skill outputs (authoritative context):\n"
         f"{call_outputs_json}\n"
         "\n"
@@ -155,44 +192,53 @@ def build_final_llm_prompt(
 
 
 # ====================================================================================================
-# MARK: MAIN ENTRYPOINT
+# MARK: ORCHESTRATION
 # ====================================================================================================
-def main() -> None:
-    args       = parse_main_args()
-    user_prompt = args.user_prompt
-    log_path   = create_log_file_path(log_dir=LOG_DIR)
-    logger     = SessionLogger(log_path)
+def orchestrate_prompt(
+    user_prompt: str,
+    resolved_model: str,
+    num_ctx: int,
+    logger: SessionLogger,
+    skills_payload,
+    conversation_history: list[dict] | None = None,
+    quiet: bool = False,
+) -> tuple[str, int, int, bool]:
+    """Run the full planner -> skill -> LLM pipeline for one prompt.
 
-    # Ensure local Ollama server is ready before model discovery and LLM calls.
-    ensure_ollama_running()
-    # Resolve configured model alias/tag into an installed concrete model name.
-    resolved_model = resolve_execution_model()
+    Returns (final_response, prompt_tokens, completion_tokens, run_success).
+    When quiet=True, verbose orchestration stages are written to the log file only,
+    which is the behaviour used during chat mode to keep the console clean.
+    """
+    def _log(msg: str = "") -> None:
+        logger.log_file_only(msg) if quiet else logger.log(msg)
 
-    logger.log_section("SYSTEM STATUS")
-    logger.log(f"Requested model: {REQUESTED_MODEL}")
-    logger.log(f"Resolved model:  {resolved_model}")
-    logger.log(f"User prompt:     {user_prompt}")
-    logger.log(f"num_ctx:         {args.num_ctx}")
-    logger.log(f"Max iterations:  {MAX_ITERATIONS}")
-    logger.log(format_running_model_report(resolved_model))
-    logger.log(f"Log file:        {log_path.as_posix()}")
+    def _log_section(title: str) -> None:
+        logger.log_section_file_only(title) if quiet else logger.log_section(title)
 
-    skills_payload = load_skills_payload(SKILLS_SUMMARY_PATH)
     memory_store_result = store_prompt_memories(user_prompt=user_prompt)
-    recalled_memories = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
+    recalled_memories   = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
     planner_user_prompt = user_prompt
     if recalled_memories.startswith("Relevant memories:"):
         planner_user_prompt = f"{user_prompt}\n\nRecalled memory context:\n{recalled_memories}"
 
-    logger.log_section("MEMORY")
-    logger.log(memory_store_result)
-    logger.log(recalled_memories)
+    _log_section("MEMORY")
+    _log(memory_store_result)
+    _log(recalled_memories)
 
-    planner_feedback = ""
-    run_success = False
+    # Collect system info unconditionally so every prompt has access to runtime context
+    # regardless of whether the planner selected the SystemInfo skill.
+    ambient_system_info = get_system_info_string()
+    _log_section("AMBIENT SYSTEM INFO")
+    _log(ambient_system_info)
+
+    planner_feedback  = ""
+    run_success       = False
+    prompt_tokens     = 0
+    completion_tokens = 0
+    final_response    = ""
 
     for iteration in range(1, MAX_ITERATIONS + 1):
-        logger.log_section(f"ITERATION {iteration} - PRE-PROCESSING PROMPT")
+        _log_section(f"ITERATION {iteration} - PRE-PROCESSING PROMPT")
 
         iteration_planner_ask = PLANNER_ASK
         if planner_feedback:
@@ -203,27 +249,27 @@ def main() -> None:
             planner_ask=iteration_planner_ask,
             skills_payload=skills_payload,
         )
-        logger.log(planner_prompt)
+        _log(planner_prompt)
 
-        logger.log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON")
+        _log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON")
         # Request structured JSON execution plan from LLM planner (with fallback inside planner engine).
         plan = create_skill_execution_plan(
             user_prompt=planner_user_prompt,
             skills_summary_path=SKILLS_SUMMARY_PATH,
             planner_ask=iteration_planner_ask,
             model_name=resolved_model,
-            num_ctx=args.num_ctx,
+            num_ctx=num_ctx,
         )
-        logger.log(json.dumps(plan.to_dict(), indent=2))
+        _log(json.dumps(plan.to_dict(), indent=2))
 
-        logger.log_section(f"ITERATION {iteration} - PYTHON CALL EXECUTION")
+        _log_section(f"ITERATION {iteration} - PYTHON CALL EXECUTION")
         # Execute allow-listed skill functions declared in the plan and collect outputs.
         python_call_outputs, fallback_prompt = execute_skill_plan_calls(
             plan=plan,
             user_prompt=user_prompt,
             skills_payload=skills_payload,
         )
-        logger.log(json.dumps(python_call_outputs, indent=2))
+        _log(json.dumps(python_call_outputs, indent=2))
 
         final_prompt = build_final_llm_prompt(
             user_prompt=user_prompt,
@@ -231,6 +277,8 @@ def main() -> None:
             python_call_outputs=python_call_outputs,
             fallback_prompt=fallback_prompt,
             recalled_memories=recalled_memories,
+            ambient_system_info=ambient_system_info,
+            conversation_history=conversation_history,
         )
 
         prompt_context = build_prompt_context(
@@ -241,20 +289,23 @@ def main() -> None:
             recalled_memories=recalled_memories,
         )
 
-        logger.log_section(f"ITERATION {iteration} - PROMPT CONTEXT JSON")
-        logger.log(json.dumps(prompt_context, indent=2))
+        _log_section(f"ITERATION {iteration} - PROMPT CONTEXT JSON")
+        _log(json.dumps(prompt_context, indent=2))
 
-        logger.log_section(f"ITERATION {iteration} - FINAL LLM EXECUTION")
+        _log_section(f"ITERATION {iteration} - FINAL LLM EXECUTION")
         try:
-            final_response = call_ollama(model_name=resolved_model, prompt=final_prompt, num_ctx=args.num_ctx).strip()
+            result            = call_ollama_extended(model_name=resolved_model, prompt=final_prompt, num_ctx=num_ctx)
+            final_response    = result.response.strip()
+            prompt_tokens     = result.prompt_tokens
+            completion_tokens = result.completion_tokens
         except Exception as error:
-            final_response = ""
+            final_response   = ""
             planner_feedback = f"Final LLM execution failed: {error}"
-            logger.log(planner_feedback)
-            logger.log("Execution did not satisfy validation checks, retrying...")
+            _log(planner_feedback)
+            _log("Execution did not satisfy validation checks, retrying...")
             continue
 
-        logger.log(final_response)
+        _log(final_response)
 
         # Gate iteration success on strict validation of skill usage and visible time output.
         is_valid, validation_message = validate_orchestration_iteration(
@@ -264,19 +315,138 @@ def main() -> None:
             final_response=final_response,
         )
 
-        logger.log_section(f"ITERATION {iteration} - VALIDATION")
-        logger.log(validation_message)
+        _log_section(f"ITERATION {iteration} - VALIDATION")
+        _log(validation_message)
 
         if is_valid:
             run_success = True
-            logger.log("Execution succeeded with valid output time.")
+            _log("Execution succeeded with valid output time.")
             break
 
         planner_feedback = validation_message
-        logger.log("Execution did not satisfy validation checks, retrying...")
+        _log("Execution did not satisfy validation checks, retrying...")
+
+    return final_response, prompt_tokens, completion_tokens, run_success
+
+
+# ====================================================================================================
+# MARK: CHAT MODE
+# ====================================================================================================
+def run_chat_mode(
+    resolved_model: str,
+    num_ctx: int,
+    logger: SessionLogger,
+    log_path: Path,
+    skills_payload,
+) -> None:
+    """Interactive multi-turn chat loop. Each turn runs the full orchestration pipeline.
+
+    Verbose orchestration detail (planner prompts, plan JSON, skill outputs, validation)
+    is written to the log file only.  The console shows one brief status line with context-
+    token usage and the LLM response per turn.
+    """
+    conversation_history: list[dict] = []
+    turn = 0
+
+    print(f"\nChat mode active \u2014 model: {resolved_model} | num_ctx: {num_ctx:,}")
+    print(f"Log file: {log_path.as_posix()}")
+    print("Type 'exit' or 'quit' to end the session.\n")
+
+    while True:
+        try:
+            user_prompt = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nChat session ended.")
+            break
+
+        if not user_prompt:
+            continue
+        if user_prompt.lower() in {"exit", "quit"}:
+            print("Chat session ended.")
+            break
+
+        turn += 1
+        logger.log_section_file_only(f"CHAT TURN {turn}")
+        logger.log_file_only(f"User prompt: {user_prompt}")
+
+        final_response, prompt_tokens, completion_tokens, run_success = orchestrate_prompt(
+            user_prompt=user_prompt,
+            resolved_model=resolved_model,
+            num_ctx=num_ctx,
+            logger=logger,
+            skills_payload=skills_payload,
+            conversation_history=conversation_history if conversation_history else None,
+            quiet=True,
+        )
+
+        ctx_pct     = f"{prompt_tokens / num_ctx * 100:.1f}%" if num_ctx > 0 else "?"
+        status_line = (
+            f"[Turn {turn} | {prompt_tokens:,} / {num_ctx:,} ctx tokens ({ctx_pct}) | {resolved_model}]"
+        )
+        print(status_line)
+
+        if not run_success:
+            print("(orchestration validation failed \u2014 response may be incomplete)")
+            logger.log_file_only("Orchestration validation failed.")
+
+        print(final_response)
+        print()
+
+        # Append this turn to the growing conversation history for subsequent context.
+        conversation_history.append({"role": "user",      "content": user_prompt})
+        conversation_history.append({"role": "assistant", "content": final_response})
+
+
+# ====================================================================================================
+# MARK: MAIN ENTRYPOINT
+# ====================================================================================================
+def main() -> None:
+    args     = parse_main_args()
+    log_path = create_log_file_path(log_dir=LOG_DIR)
+    logger   = SessionLogger(log_path)
+
+    # Ensure local Ollama server is ready before model discovery and LLM calls.
+    ensure_ollama_running()
+    # Resolve configured model alias/tag into an installed concrete model name.
+    resolved_model = resolve_execution_model()
+
+    logger.log_section("SYSTEM STATUS")
+    logger.log(f"Requested model: {REQUESTED_MODEL}")
+    logger.log(f"Resolved model:  {resolved_model}")
+    logger.log(f"Mode:            {'chat' if args.chat else 'single-shot'}")
+    logger.log(f"num_ctx:         {args.num_ctx}")
+    logger.log(f"Max iterations:  {MAX_ITERATIONS}")
+    logger.log(format_running_model_report(resolved_model))
+    logger.log(f"Log file:        {log_path.as_posix()}")
+
+    skills_payload = load_skills_payload(SKILLS_SUMMARY_PATH)
+
+    if args.chat:
+        run_chat_mode(
+            resolved_model=resolved_model,
+            num_ctx=args.num_ctx,
+            logger=logger,
+            log_path=log_path,
+            skills_payload=skills_payload,
+        )
+        return
+
+    # Single-shot mode: orchestrate one prompt and validate.
+    user_prompt = args.user_prompt
+    logger.log(f"User prompt:     {user_prompt}")
+
+    final_response, _, _, run_success = orchestrate_prompt(
+        user_prompt=user_prompt,
+        resolved_model=resolved_model,
+        num_ctx=args.num_ctx,
+        logger=logger,
+        skills_payload=skills_payload,
+    )
 
     if not run_success:
-        raise RuntimeError(f"Execution failed validation after {MAX_ITERATIONS} iterations. See log: {log_path.as_posix()}")
+        raise RuntimeError(
+            f"Execution failed validation after {MAX_ITERATIONS} iterations. See log: {log_path.as_posix()}"
+        )
 
 
 # ----------------------------------------------------------------------------------------------------

@@ -5,3 +5,4 @@ code/skills/Memory/memory_store.txt
 /logs
 /testcode/results
 
+*.pyc

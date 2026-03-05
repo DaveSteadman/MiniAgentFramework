@@ -3,10 +3,13 @@
 # ====================================================================================================
 # SystemInfo skill module for the MiniAgentFramework.
 #
-# Provides two callable functions that the orchestration planner can select when a user prompt
+# Provides a callable function that the orchestration planner can select when a user prompt
 # requires information about the runtime environment:
-#   - get_system_info_string()         -- returns Python and Ollama version strings.
-#   - build_prompt_with_system_info()  -- returns the system info string to use as prompt context.
+#   - get_system_info_string()  -- returns OS, Python version, Ollama version, RAM usage, and disk usage.
+#
+# This module is also imported directly by main.py to inject system info as ambient prompt context
+# on every orchestration turn, guaranteeing that any prompt touching hardware or runtime state
+# receives accurate data even when the planner does not explicitly select this skill.
 #
 # This module is discovered automatically by skills_catalog_builder.py via the accompanying
 # skill.md definition file and added to the skills_summary.md catalog.
@@ -155,8 +158,3 @@ def get_system_info_string() -> str:
         f"ram_used={ram_used_text}; ram_available={ram_available_text}; "
         f"disk_used={disk_used_text}; disk_available={disk_available_text}"
     )
-
-
-# ----------------------------------------------------------------------------------------------------
-def build_prompt_with_system_info(prompt: str) -> str:
-    return get_system_info_string()
