@@ -19,11 +19,13 @@
 import re
 from pathlib import Path
 
+from workspace_utils import get_workspace_root
+
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
+WORKSPACE_ROOT   = get_workspace_root()
 DEFAULT_DATA_DIR = WORKSPACE_ROOT / "data"
 
 

@@ -331,8 +331,20 @@ def create_skill_execution_plan(
     planner_ask: str,
     model_name: str,
     num_ctx: int,
-) -> ExecutionPlan:
-    skills_payload = load_skills_payload(skills_summary_path)
+    skills_payload: dict | None = None,
+) -> tuple["ExecutionPlan", str]:
+    """Build a skill execution plan for the given prompt.
+
+    Returns (plan, planner_prompt_text).  The planner_prompt_text is the exact text
+    sent to the LLM so that callers can log it without rebuilding it.
+
+    If skills_payload is provided it is used as-is; otherwise it is loaded from
+    skills_summary_path.  Callers that already hold the payload should pass it to
+    avoid a redundant disk read on every orchestration iteration.
+    """
+    if skills_payload is None:
+        skills_payload = load_skills_payload(skills_summary_path)
+
     planner_prompt = build_planner_prompt(
         user_prompt=user_prompt,
         planner_ask=planner_ask,
@@ -344,11 +356,11 @@ def create_skill_execution_plan(
     try:
         llm_text = call_ollama(model_name=model_name, prompt=planner_prompt, num_ctx=num_ctx)
     except Exception:
-        return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload)
+        return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload), planner_prompt
 
     try:
         plan_dict = json.loads(extract_first_json_object(llm_text))
-        return parse_execution_plan(plan_dict)
+        return parse_execution_plan(plan_dict), planner_prompt
     except Exception:
         # Fall back deterministically so orchestration can proceed even with malformed planner output.
-        return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload)
+        return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload), planner_prompt

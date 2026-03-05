@@ -32,6 +32,7 @@
 # ====================================================================================================
 import argparse
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from ollama_client import call_ollama_extended
@@ -40,7 +41,6 @@ from ollama_client import format_running_model_report
 from ollama_client import list_ollama_models
 from ollama_client import resolve_model_name
 from orchestration_validation import validate_orchestration_iteration
-from planner_engine import build_planner_prompt
 from planner_engine import create_skill_execution_plan
 from planner_engine import load_skills_payload
 from runtime_logger import create_log_file_path
@@ -54,16 +54,34 @@ from skills.SystemInfo.system_info_skill import get_system_info_string
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-USER_PROMPT         = "output the time"
-REQUESTED_MODEL     = "20b"
-DEFAULT_NUM_CTX     = 32768
-MAX_ITERATIONS      = 3
-SKILLS_SUMMARY_PATH = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
-PLANNER_ASK         = (
+USER_PROMPT              = "output the time"
+REQUESTED_MODEL          = "20b"
+DEFAULT_NUM_CTX          = 32768
+MAX_ITERATIONS           = 3
+MAX_CHAT_HISTORY_TURNS   = 10     # keep the last N user/assistant pairs; older turns are trimmed
+SKILLS_SUMMARY_PATH      = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
+PLANNER_ASK              = (
     "Given the user prompt, select needed skills and return python_calls JSON. "
     "Choose the minimum required skills and provide explicit arguments for each python call."
 )
-LOG_DIR             = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR                  = Path(__file__).resolve().parent.parent / "logs"
+
+
+# ====================================================================================================
+# MARK: CONFIG
+# ====================================================================================================
+@dataclass
+class OrchestratorConfig:
+    """Immutable session-level configuration bundle.
+
+    Passed through the orchestration layer so that adding new session-level settings
+    requires only a change to this dataclass and the one place it is constructed in
+    main() — not every intermediate function signature.
+    """
+    resolved_model: str
+    num_ctx:        int
+    max_iterations: int
+    skills_payload: dict
 
 
 # ====================================================================================================
@@ -75,7 +93,13 @@ def parse_main_args() -> argparse.Namespace:
         "--user-prompt",
         type=str,
         default=USER_PROMPT,
-        help="User prompt to orchestrate.",
+        help="User prompt to orchestrate (single-shot mode only).",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=REQUESTED_MODEL,
+        help="Ollama model alias or tag to use (e.g. '20b', 'llama3:8b').",
     )
     parser.add_argument(
         "--num-ctx",
@@ -95,15 +119,15 @@ def parse_main_args() -> argparse.Namespace:
 # ====================================================================================================
 # MARK: ORCHESTRATION HELPERS
 # ====================================================================================================
-def resolve_execution_model() -> str:
+def resolve_execution_model(requested_model: str) -> str:
     available_models = list_ollama_models()
     if not available_models:
         raise RuntimeError("No models are installed in Ollama. Pull models first, then rerun.")
 
-    resolved_model = resolve_model_name(REQUESTED_MODEL, available_models)
+    resolved_model = resolve_model_name(requested_model, available_models)
     if resolved_model is None:
         available_text = ", ".join(available_models)
-        raise RuntimeError(f"Model '{REQUESTED_MODEL}' not installed. Available: {available_text}")
+        raise RuntimeError(f"Model '{requested_model}' not installed. Available: {available_text}")
 
     return resolved_model
 
@@ -196,10 +220,8 @@ def build_final_llm_prompt(
 # ====================================================================================================
 def orchestrate_prompt(
     user_prompt: str,
-    resolved_model: str,
-    num_ctx: int,
+    config: OrchestratorConfig,
     logger: SessionLogger,
-    skills_payload,
     conversation_history: list[dict] | None = None,
     quiet: bool = False,
 ) -> tuple[str, int, int, bool]:
@@ -237,37 +259,33 @@ def orchestrate_prompt(
     completion_tokens = 0
     final_response    = ""
 
-    for iteration in range(1, MAX_ITERATIONS + 1):
-        _log_section(f"ITERATION {iteration} - PRE-PROCESSING PROMPT")
+    for iteration in range(1, config.max_iterations + 1):
+        _log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN")
 
         iteration_planner_ask = PLANNER_ASK
         if planner_feedback:
             iteration_planner_ask = f"{PLANNER_ASK} Previous iteration feedback: {planner_feedback}"
 
-        planner_prompt = build_planner_prompt(
-            user_prompt=planner_user_prompt,
-            planner_ask=iteration_planner_ask,
-            skills_payload=skills_payload,
-        )
-        _log(planner_prompt)
-
-        _log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON")
-        # Request structured JSON execution plan from LLM planner (with fallback inside planner engine).
-        plan = create_skill_execution_plan(
+        # create_skill_execution_plan returns (plan, planner_prompt_text).
+        # Passing config.skills_payload avoids reloading the catalog from disk on every iteration.
+        plan, planner_prompt = create_skill_execution_plan(
             user_prompt=planner_user_prompt,
             skills_summary_path=SKILLS_SUMMARY_PATH,
             planner_ask=iteration_planner_ask,
-            model_name=resolved_model,
-            num_ctx=num_ctx,
+            model_name=config.resolved_model,
+            num_ctx=config.num_ctx,
+            skills_payload=config.skills_payload,
         )
+        _log(planner_prompt)
+        _log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON")
         _log(json.dumps(plan.to_dict(), indent=2))
 
         _log_section(f"ITERATION {iteration} - PYTHON CALL EXECUTION")
         # Execute allow-listed skill functions declared in the plan and collect outputs.
-        python_call_outputs, fallback_prompt = execute_skill_plan_calls(
+        python_call_outputs, last_call_output = execute_skill_plan_calls(
             plan=plan,
             user_prompt=user_prompt,
-            skills_payload=skills_payload,
+            skills_payload=config.skills_payload,
         )
         _log(json.dumps(python_call_outputs, indent=2))
 
@@ -275,7 +293,7 @@ def orchestrate_prompt(
             user_prompt=user_prompt,
             plan=plan,
             python_call_outputs=python_call_outputs,
-            fallback_prompt=fallback_prompt,
+            fallback_prompt=last_call_output,
             recalled_memories=recalled_memories,
             ambient_system_info=ambient_system_info,
             conversation_history=conversation_history,
@@ -294,7 +312,7 @@ def orchestrate_prompt(
 
         _log_section(f"ITERATION {iteration} - FINAL LLM EXECUTION")
         try:
-            result            = call_ollama_extended(model_name=resolved_model, prompt=final_prompt, num_ctx=num_ctx)
+            result            = call_ollama_extended(model_name=config.resolved_model, prompt=final_prompt, num_ctx=config.num_ctx)
             final_response    = result.response.strip()
             prompt_tokens     = result.prompt_tokens
             completion_tokens = result.completion_tokens
@@ -307,7 +325,7 @@ def orchestrate_prompt(
 
         _log(final_response)
 
-        # Gate iteration success on strict validation of skill usage and visible time output.
+        # Gate iteration success on strict validation of skill usage and prompt completeness.
         is_valid, validation_message = validate_orchestration_iteration(
             plan=plan,
             python_call_outputs=python_call_outputs,
@@ -320,7 +338,7 @@ def orchestrate_prompt(
 
         if is_valid:
             run_success = True
-            _log("Execution succeeded with valid output time.")
+            _log("Orchestration succeeded.")
             break
 
         planner_feedback = validation_message
@@ -333,23 +351,25 @@ def orchestrate_prompt(
 # MARK: CHAT MODE
 # ====================================================================================================
 def run_chat_mode(
-    resolved_model: str,
-    num_ctx: int,
+    config: OrchestratorConfig,
     logger: SessionLogger,
     log_path: Path,
-    skills_payload,
 ) -> None:
     """Interactive multi-turn chat loop. Each turn runs the full orchestration pipeline.
 
     Verbose orchestration detail (planner prompts, plan JSON, skill outputs, validation)
     is written to the log file only.  The console shows one brief status line with context-
     token usage and the LLM response per turn.
+
+    Conversation history is capped at MAX_CHAT_HISTORY_TURNS pairs to prevent silent
+    context overflow as the session grows.
     """
     conversation_history: list[dict] = []
     turn = 0
 
-    print(f"\nChat mode active \u2014 model: {resolved_model} | num_ctx: {num_ctx:,}")
+    print(f"\nChat mode active \u2014 model: {config.resolved_model} | num_ctx: {config.num_ctx:,}")
     print(f"Log file: {log_path.as_posix()}")
+    print(f"History window: last {MAX_CHAT_HISTORY_TURNS} turns")
     print("Type 'exit' or 'quit' to end the session.\n")
 
     while True:
@@ -371,17 +391,15 @@ def run_chat_mode(
 
         final_response, prompt_tokens, completion_tokens, run_success = orchestrate_prompt(
             user_prompt=user_prompt,
-            resolved_model=resolved_model,
-            num_ctx=num_ctx,
+            config=config,
             logger=logger,
-            skills_payload=skills_payload,
             conversation_history=conversation_history if conversation_history else None,
             quiet=True,
         )
 
-        ctx_pct     = f"{prompt_tokens / num_ctx * 100:.1f}%" if num_ctx > 0 else "?"
+        ctx_pct     = f"{prompt_tokens / config.num_ctx * 100:.1f}%" if config.num_ctx > 0 else "?"
         status_line = (
-            f"[Turn {turn} | {prompt_tokens:,} / {num_ctx:,} ctx tokens ({ctx_pct}) | {resolved_model}]"
+            f"[Turn {turn} | {prompt_tokens:,} / {config.num_ctx:,} ctx tokens ({ctx_pct}) | {config.resolved_model}]"
         )
         print(status_line)
 
@@ -392,9 +410,15 @@ def run_chat_mode(
         print(final_response)
         print()
 
-        # Append this turn to the growing conversation history for subsequent context.
+        # Append this turn to the growing conversation history.
         conversation_history.append({"role": "user",      "content": user_prompt})
         conversation_history.append({"role": "assistant", "content": final_response})
+
+        # Trim history to the rolling window to prevent context overflow.
+        max_messages = MAX_CHAT_HISTORY_TURNS * 2
+        if len(conversation_history) > max_messages:
+            conversation_history = conversation_history[-max_messages:]
+            print(f"(history trimmed to last {MAX_CHAT_HISTORY_TURNS} turns)")
 
 
 # ====================================================================================================
@@ -407,11 +431,21 @@ def main() -> None:
 
     # Ensure local Ollama server is ready before model discovery and LLM calls.
     ensure_ollama_running()
-    # Resolve configured model alias/tag into an installed concrete model name.
-    resolved_model = resolve_execution_model()
+    # Resolve the requested model alias/tag into an installed concrete model name.
+    resolved_model = resolve_execution_model(args.model)
+
+    # Load the skills catalog once; it is passed through config so no module re-reads it.
+    skills_payload = load_skills_payload(SKILLS_SUMMARY_PATH)
+
+    config = OrchestratorConfig(
+        resolved_model=resolved_model,
+        num_ctx=args.num_ctx,
+        max_iterations=MAX_ITERATIONS,
+        skills_payload=skills_payload,
+    )
 
     logger.log_section("SYSTEM STATUS")
-    logger.log(f"Requested model: {REQUESTED_MODEL}")
+    logger.log(f"Requested model: {args.model}")
     logger.log(f"Resolved model:  {resolved_model}")
     logger.log(f"Mode:            {'chat' if args.chat else 'single-shot'}")
     logger.log(f"num_ctx:         {args.num_ctx}")
@@ -419,16 +453,8 @@ def main() -> None:
     logger.log(format_running_model_report(resolved_model))
     logger.log(f"Log file:        {log_path.as_posix()}")
 
-    skills_payload = load_skills_payload(SKILLS_SUMMARY_PATH)
-
     if args.chat:
-        run_chat_mode(
-            resolved_model=resolved_model,
-            num_ctx=args.num_ctx,
-            logger=logger,
-            log_path=log_path,
-            skills_payload=skills_payload,
-        )
+        run_chat_mode(config=config, logger=logger, log_path=log_path)
         return
 
     # Single-shot mode: orchestrate one prompt and validate.
@@ -437,10 +463,8 @@ def main() -> None:
 
     final_response, _, _, run_success = orchestrate_prompt(
         user_prompt=user_prompt,
-        resolved_model=resolved_model,
-        num_ctx=args.num_ctx,
+        config=config,
         logger=logger,
-        skills_payload=skills_payload,
     )
 
     if not run_success:

@@ -6,11 +6,14 @@ Calling an LLM from Python is easy, this is to call Python from the judgement of
 
 ### Run a single prompt
 ```powershell
-# Basic usage with default prompt
+# Basic usage with default prompt and model
 python code/main.py
 
 # Run with a custom prompt
 python code/main.py --user-prompt "output the time"
+
+# Run with a different model
+python code/main.py --model "llama3:8b" --user-prompt "what is today's date"
 
 # Run with a custom prompt and larger context window
 python code/main.py --user-prompt "summarize system health" --num-ctx 8192
@@ -21,8 +24,8 @@ python code/main.py --user-prompt "summarize system health" --num-ctx 8192
 # Start a multi-turn chat session (type 'exit' or 'quit' to end)
 python code/main.py --chat
 
-# Chat with a larger context window to accommodate longer conversations
-python code/main.py --chat --num-ctx 65536
+# Chat with a specific model and larger context window to accommodate longer conversations
+python code/main.py --chat --model "llama3:8b" --num-ctx 65536
 ```
 
 ### Run the test wrapper

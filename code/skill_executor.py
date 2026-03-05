@@ -27,6 +27,7 @@ from pathlib import Path
 
 from planner_engine import ExecutionPlan
 from planner_engine import PythonCall
+from workspace_utils import get_workspace_root
 
 
 # ====================================================================================================
@@ -39,10 +40,6 @@ class ExecutedCall(dict):
 # ====================================================================================================
 # MARK: HELPERS
 # ====================================================================================================
-def _resolve_workspace_root() -> Path:
-    return Path(__file__).resolve().parent.parent
-
-
 def _normalize_module_path(module_path: str) -> str:
     # Strip leading ./ prefixes and the .py extension so paths can be compared uniformly.
     normalized = str(module_path).strip().replace("\\", "/")
@@ -55,7 +52,7 @@ def _normalize_module_path(module_path: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 def _load_callable_from_module_path(module_path: str, function_name: str):
-    workspace_root        = _resolve_workspace_root()
+    workspace_root        = get_workspace_root()
 
     candidate_module_path = str(module_path).strip()
     if not candidate_module_path.endswith(".py"):
