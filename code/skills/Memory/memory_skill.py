@@ -66,6 +66,37 @@ GENERAL_KNOWLEDGE_HINTS = {
     "explain",
 }
 
+# Regex that matches a sentence beginning with an interrogative word — these are questions
+# even when they lack a trailing '?' and must not be stored as facts.
+_QUESTION_OPENER_RE = re.compile(
+    r"^\s*(?:what|which|who|whose|whom|how|when|where|why|"
+    r"is|are|was|were|does|do|did|has|have|had|"
+    r"can|could|would|should|will|shall|may|might|must)\b",
+    re.IGNORECASE,
+)
+
+# Imperative/command openers — requests for the agent to do something, not statements of fact.
+_COMMAND_OPENER_RE = re.compile(
+    r"^\s*(?:show|output|list|tell|give|write|read|append|create|report|return|"
+    r"summarize|summarise|display|print|get|fetch|find|search|check|run|execute)\b",
+    re.IGNORECASE,
+)
+
+# Patterns that identify a user-stated preference or personal/project context fact.
+# These are the primary signal for rich memory: "my X is Y", "we use X", "I prefer X", etc.
+_PREFERENCE_STATEMENT_PATTERNS = [
+    re.compile(r"\b(?:my|our)\s+\w+(?:\s+\w+)?\s+is\b", re.IGNORECASE),
+    re.compile(r"\bthe\s+preferred\b", re.IGNORECASE),
+    re.compile(r"\bthe\s+default\b", re.IGNORECASE),
+    re.compile(r"\b(?:i|we)\s+(?:prefer|use|like|am\s+using|are\s+using)\b", re.IGNORECASE),
+    re.compile(r"\bmy\s+name\s+is\b", re.IGNORECASE),
+    re.compile(r"\bthis\s+project\s+(?:is|uses|called)\b", re.IGNORECASE),
+    re.compile(r"\bwe\s+are\s+(?:building|working\s+on|using|running|called)\b", re.IGNORECASE),
+    re.compile(r"\b(?:i(?:'m| am)|we(?:'re| are))\s+(?:a\s+)?\w+", re.IGNORECASE),
+    re.compile(r"\bin\s+this\s+(?:environment|project|repo|setup)\b", re.IGNORECASE),
+    re.compile(r"\bfor\s+this\s+(?:project|repo|environment|setup)\b", re.IGNORECASE),
+]
+
 
 # ====================================================================================================
 # MARK: HELPERS
@@ -116,23 +147,54 @@ def _read_memory_rows() -> list[tuple[str, str]]:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _is_environment_specific_fact(candidate: str) -> bool:
+def _is_memorable_fact(candidate: str) -> bool:
+    """Return True when the candidate sentence is a user-stated fact or preference worth storing.
+
+    Stores:
+      - Preference and identity statements: "my name is X", "I prefer Y", "we use Z"
+      - Project/domain context: "this project is called X", "our repo path is Y"
+      - Durable environment facts: tool versions, paths, model names stated as assertions
+
+    Does NOT store:
+      - Questions (with or without '?')
+      - Imperative commands ("show me", "list", "write")
+      - General knowledge topics (capital cities, scientific facts)
+      - Ephemeral requests (current time, stats)
+    """
     normalized = candidate.strip()
-    if not normalized:
+    if not normalized or len(normalized) < 8:
         return False
 
     lowered = normalized.lower()
+
+    # Reject explicit question mark
     if "?" in lowered:
         return False
 
+    # Reject interrogative openers — questions without '?'
+    if _QUESTION_OPENER_RE.match(lowered):
+        return False
+
+    # Reject imperative/command sentences
+    if _COMMAND_OPENER_RE.match(lowered):
+        return False
+
+    # Reject general-knowledge topics (not specific to this user/project)
     if any(token in lowered for token in GENERAL_KNOWLEDGE_HINTS):
         return False
 
-    has_keyword = any(keyword in lowered for keyword in ENVIRONMENT_KEYWORDS)
-    has_pattern = any(pattern.search(normalized) for pattern in ENVIRONMENT_HINT_PATTERNS)
-    has_assertion_verb = bool(re.search(r"\b(is|are|uses|using|has|have|located|runs|running|installed|set to)\b", lowered))
+    # Accept: explicit preference, identity, or project-context statements
+    if any(pattern.search(normalized) for pattern in _PREFERENCE_STATEMENT_PATTERNS):
+        return True
 
-    return (has_keyword or has_pattern) and has_assertion_verb
+    # Accept: durable environment/tool facts accompanied by an assertion verb
+    has_env_keyword = any(keyword in lowered for keyword in ENVIRONMENT_KEYWORDS)
+    has_env_pattern = any(pattern.search(normalized) for pattern in ENVIRONMENT_HINT_PATTERNS)
+    has_assertion_verb = bool(re.search(
+        r"\b(is|are|uses|using|has|have|located|runs|running|installed|set to)\b", lowered
+    ))
+
+    return (has_env_keyword or has_env_pattern) and has_assertion_verb
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -160,7 +222,7 @@ def extract_environment_facts(user_prompt: str) -> list[str]:
     facts = []
     seen = set()
     for candidate in candidates:
-        if not _is_environment_specific_fact(candidate):
+        if not _is_memorable_fact(candidate):
             continue
 
         normalized = _normalize_fact(candidate)

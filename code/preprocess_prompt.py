@@ -64,8 +64,8 @@ def main() -> None:
 
     ensure_ollama_running()
 
-    # create_skill_execution_plan returns (plan, planner_prompt_text).
-    plan, _ = create_skill_execution_plan(
+    # create_skill_execution_plan returns (plan, planner_prompt_text, planner_llm_result).
+    plan, _, _ = create_skill_execution_plan(
         user_prompt=args.user_prompt,
         skills_summary_path=skills_summary_path,
         planner_ask=args.planner_ask,

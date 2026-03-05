@@ -19,6 +19,7 @@
 # ====================================================================================================
 import argparse
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -33,37 +34,25 @@ from pathlib import Path
 REPO_ROOT          = Path(__file__).resolve().parent.parent
 MAIN_SCRIPT        = REPO_ROOT / "code" / "main.py"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "results"
+DEFAULT_PROMPTS_FILE = Path(__file__).resolve().parent / "prompts" / "default_prompts.json"
 
-DEFAULT_PROMPTS = [
-    "output the time",
-    "what is today's date",
-    "what version of python is running",
-    "what operating system are we running on",
-    "what version of ollama is installed",
-    "show current system info",
-    "show system info including RAM and disk usage",
-    "how much RAM is available right now",
-    "how much disk space is available",
-    "report used RAM and used disk space",
-    "give me python version and current time",
-    "summarize system health in one line",
-    "return only the current date and time",
-    "in this environment, our repository root path is c:/Util/GithubRepos/MiniAgentFramework",
-    "for this project, the preferred local model is gpt-oss:20b",
-    "what repository root path is stored in memory for this environment",
-    "write memory usage to file x.txt",
-    "append the date to file ./data/content.txt",
-    "append system check passed to file ./data/content.txt",
-    "read file x.txt",
-    "read file ./data/content.txt",
-    "list data files",
-    "write test to file ../outside.txt",
-]
+DEFAULT_PROMPTS = None  # Loaded from DEFAULT_PROMPTS_FILE at runtime.
 
 # Maximum time in seconds to wait for a single framework invocation before aborting.
 SUBPROCESS_TIMEOUT_SECONDS = 300
 
 CSV_FIELDS = ["timestamp", "prompt", "final_output", "duration_seconds", "exit_code", "log_file", "stderr"]
+
+
+# ====================================================================================================
+# MARK: PROMPTS LOADING
+# ====================================================================================================
+def load_prompts_file(path: Path) -> list[str]:
+    """Load a JSON array of prompt strings from a file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise ValueError(f"Prompts file must contain a JSON array: {path}")
+    return [str(item) for item in data]
 
 
 # ====================================================================================================
@@ -263,8 +252,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prompts",
         nargs="+",
-        default=DEFAULT_PROMPTS,
-        help="One or more user prompts to test.",
+        default=None,
+        help="One or more user prompts to test (overrides --prompts-file).",
+    )
+    parser.add_argument(
+        "--prompts-file",
+        type=Path,
+        default=None,
+        help="Path to a JSON file containing an array of prompt strings.",
     )
     parser.add_argument(
         "--output-dir",
@@ -280,4 +275,12 @@ def parse_args() -> argparse.Namespace:
 # ====================================================================================================
 if __name__ == "__main__":
     args = parse_args()
-    run_tests(prompts=args.prompts, output_dir=args.output_dir)
+
+    if args.prompts:
+        prompts = args.prompts
+    elif args.prompts_file:
+        prompts = load_prompts_file(args.prompts_file)
+    else:
+        prompts = load_prompts_file(DEFAULT_PROMPTS_FILE)
+
+    run_tests(prompts=prompts, output_dir=args.output_dir)

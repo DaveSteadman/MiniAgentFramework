@@ -1,44 +1,11 @@
 ## Project Definition
+Calling an LLM from Python is easy, this project is to research calling Python from the judgement of an LLM.
 An exercise in creating an orchestration framework blending LLM and Python calls.
-Calling an LLM from Python is easy, this is to call Python from the judgement of an LLM.
+Inspired by what I've learned from OpenClaw and LLM systems, as well as prior projects creating programming languages.
 
-## Example Command Lines
-
-### Run a single prompt
-```powershell
-# Basic usage with default prompt and model
-python code/main.py
-
-# Run with a custom prompt
-python code/main.py --user-prompt "output the time"
-
-# Run with a different model
-python code/main.py --model "llama3:8b" --user-prompt "what is today's date"
-
-# Run with a custom prompt and larger context window
-python code/main.py --user-prompt "summarize system health" --num-ctx 8192
-```
-
-### Run in interactive chat mode
-```powershell
-# Start a multi-turn chat session (type 'exit' or 'quit' to end)
-python code/main.py --chat
-
-# Chat with a specific model and larger context window to accommodate longer conversations
-python code/main.py --chat --model "llama3:8b" --num-ctx 65536
-```
-
-### Run the test wrapper
-```powershell
-# Run with default test prompts
-python testcode/test_wrapper.py
-
-# Run with custom prompts
-python testcode/test_wrapper.py --prompts "output the time" "what is today's date"
-
-# Run with custom output directory
-python testcode/test_wrapper.py --output-dir testcode/results
-
-# Run with both custom prompts and output directory
-python testcode/test_wrapper.py --prompts "show system info" "output the time" --output-dir testcode/my_results
-```
+## Upcoming Progress Ideas
+- Web Research: Finding a need for additional data in a prompt, searching the internet for it and presenting the data for consideration on the final prompt.
+- Test Wrapper Expansion: Use the test wrapper, over a large number of prompts, as some kind of "agent level loss function" to locate weaknesses in skills and direct self-improvement
+- Skill Nesting: The robust capability for the planner to breakdown a chain of though and leverage a number of small focussed skills in achieving a larger task.
+- Automated Skill Creation: The capability to (through a python structured call) create new skills to cover new ground. The LLM knows python well enough and can steer the development through iterations.
+- Just Overall Robustness: Need to leave the system to run for hours, needing to know its bombproof.

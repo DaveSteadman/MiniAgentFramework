@@ -59,7 +59,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "Memory Skill",
       "relative_path": "code/skills/Memory/skill.md",
-      "purpose": "Extract environment-specific facts from user prompts, store unique facts in a local text memory file, and recall relevant memories for future prompts.",
+      "purpose": "Persist user-stated facts, preferences, and project context across sessions so the agent can recall relevant background in future conversations.",
       "module": "code/skills/Memory/memory_skill.py",
       "functions": [
         "extract_environment_facts(...)",
@@ -94,7 +94,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "SystemInfo Skill",
       "relative_path": "code/skills/SystemInfo/skill.md",
-      "purpose": "Provide runtime system information for prompt-context enrichment, including OS name, Python/Ollama versions, RAM usage, and disk usage. Select this skill for any request about the system, machine, hardware, runtime, environment, OS, Python or Ollama version, RAM, memory, disk space, storage, available space, or free space — including indirect phrasing such as 'can we fit', 'do we have enough', 'how much is available', 'is there enough', or 'health'.",
+      "purpose": "Provide runtime system information for prompt-context enrichment, including OS name, Python/Ollama versions, RAM usage, and disk usage.",
       "module": "code/skills/SystemInfo/system_info_skill.py",
       "functions": [
         "get_system_info_string()"
@@ -102,18 +102,75 @@ Single JSON payload for orchestration planning.
       "inputs": [
         "`get_system_info_string()`",
         "No arguments.",
-        "Typical trigger phrases (use this skill for any of these concepts):",
+        "Typical trigger phrases (select this skill for any of these concepts):",
         "`system information`, `system info`, `system health`",
         "`machine info`, `runtime info`, `environment information`",
-        "`RAM usage`, `RAM available`, `how much RAM`, `available memory`, `used memory`",
+        "`RAM usage`, `RAM available`, `how much RAM`, `available memory`, `used memory`, `memory usage`",
         "`disk usage`, `disk space`, `disk available`, `free disk`, `free space`, `available space`",
-        "`can we fit`, `do we have enough space`, `is there enough disk`, `enough storage`",
+        "`can we fit`, `do we have enough space`, `is there enough disk`, `enough room`, `enough storage`",
         "`python version`, `what version of python`, `ollama version`, `what version of ollama`",
-        "`what OS`, `operating system`, `what platform`, `show specs`, `system stats`"
+        "`what OS`, `operating system`, `what platform`, `what machine`",
+        "`show specs`, `show health`, `system stats`, `resource usage`"
       ],
       "outputs": [
         "`get_system_info_string()` returns a single string, for example:",
         "`System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`"
+      ]
+    },
+    {
+      "skill_name": "WebExtract Skill",
+      "relative_path": "code/skills/WebExtract/skill.md",
+      "purpose": "Fetch a web page by URL and extract its readable prose content, stripping all HTML markup, navigation, scripts, advertisements, and other non-content noise. Returns clean text ready for LLM synthesis or summarization.",
+      "module": "code/skills/WebExtract/web_extract_skill.py",
+      "functions": [
+        "fetch_page_text(\"https://example.com/article\", max_words=400)",
+        "fetch_page_text(...)",
+        "fetch_page_text(url, max_words, timeout_seconds)",
+        "fetch_page_text(url: str, max_words: int = 400, timeout_seconds: int = 15)"
+      ],
+      "inputs": [
+        "`fetch_page_text(url, max_words, timeout_seconds)`",
+        "`url`: full HTTP/HTTPS URL to fetch (required)",
+        "`max_words`: maximum words of body text to return, 50\u2013800, default 400",
+        "`timeout_seconds`: network timeout, 5\u201360, default 15"
+      ],
+      "outputs": [
+        "`fetch_page_text(...)` returns a plain string containing:",
+        "The readable prose text extracted from the page body, up to `max_words` words.",
+        "`...[truncated]` appended if the content was cut.",
+        "A descriptive error string starting with `\"Error:\"` if the fetch or extraction failed."
+      ]
+    },
+    {
+      "skill_name": "WebSearch Skill",
+      "relative_path": "code/skills/WebSearch/skill.md",
+      "purpose": "Search the web using DuckDuckGo (no API key required) and return a ranked list of results with title, URL, and snippet. Pure Python \u2014 no external service accounts needed.",
+      "module": "code/skills/WebSearch/web_search_skill.py",
+      "functions": [
+        "search_web(...)",
+        "search_web(query, max_results, timeout_seconds)",
+        "search_web(query: str, max_results: int = 5, timeout_seconds: int = 15)",
+        "search_web_text(\"Python 3.14 release notes\", max_results=3)",
+        "search_web_text(...)",
+        "search_web_text(query, max_results, timeout_seconds)",
+        "search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15)"
+      ],
+      "inputs": [
+        "`search_web(query, max_results, timeout_seconds)`",
+        "`query`: search query string (required)",
+        "`max_results`: number of results to return, 1\u201310, default 5",
+        "`timeout_seconds`: network timeout, 5\u201330, default 15",
+        "`search_web_text(query, max_results, timeout_seconds)`",
+        "Same arguments as `search_web`."
+      ],
+      "outputs": [
+        "`search_web(...)` returns a `list[dict]`, each entry containing:",
+        "`rank` (int): result position, starting at 1",
+        "`title` (str): page title",
+        "`url` (str): destination URL",
+        "`snippet` (str): short description from DuckDuckGo",
+        "On error: a single-entry list with `rank=0` and `snippet` describing the failure.",
+        "`search_web_text(...)` returns a plain-text formatted string suitable for direct LLM consumption:"
       ]
     }
   ]

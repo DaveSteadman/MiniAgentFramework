@@ -1,7 +1,19 @@
 # Memory Skill
 
 ## Purpose
-Extract environment-specific facts from user prompts, store unique facts in a local text memory file, and recall relevant memories for future prompts.
+Persist user-stated facts, preferences, and project context across sessions so the agent can recall relevant background in future conversations.
+
+### What gets stored
+The memory skill stores **durable, user-stated facts** — things the user says are true about themselves, their preferences, or the problem domain:
+- **Identity and preferences**: "my name is Dave", "I prefer concise answers", "we use gpt-oss:20b"
+- **Project / domain context**: "this project is called MiniAgentFramework", "we are building an LLM orchestration framework"
+- **Environment assertions**: "our repository root path is c:/Util/...", "we are running Python 3.14.2"
+
+### What does NOT get stored
+- Questions ("what version is running?", "how much RAM is available") — even without a `?`
+- Imperative commands ("show me...", "list files", "output the time")
+- Ephemeral data requests (current time, current stats)
+- General knowledge (capitals, scientific definitions)
 
 ## Interface
 - Module: `code/skills/Memory/memory_skill.py`

@@ -24,7 +24,8 @@ from dataclasses import asdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from ollama_client import call_ollama
+from ollama_client import call_ollama_extended
+from ollama_client import OllamaCallResult
 
 
 # ====================================================================================================
@@ -158,6 +159,16 @@ def build_planner_prompt(user_prompt: str, planner_ask: str, skills_payload: dic
         "- Keep python_calls in execution order using integer order starting at 1.\n"
         "- Arguments must be a JSON object and must be explicit.\n"
         "- final_prompt_template should describe how outputs feed the next LLM prompt.\n"
+        "\n"
+        "Argument chaining — when a later call needs a value from an earlier call's output:\n"
+        "  {{output_of_first_call}}         full result object of python_call order=1\n"
+        "  {{output_of_previous_call}}      full result object of the immediately preceding call\n"
+        "  ${output1.field}                 named field from call 1's result (e.g. ${output1.time})\n"
+        "  ${output2.field}                 named field from call 2's result\n"
+        "Example: DateTime returns {\"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM:SS\"}.\n"
+        "  To append only the time: use \"text\": \"${output1.time}\" in the FileAccess call arguments.\n"
+        "  To append the full datetime object: use \"text\": \"{{output_of_first_call}}\".\n"
+        "NEVER use invented literal placeholders like 'time_placeholder' — always use the syntax above.\n"
         "\n"
         "Skills summary context:\n"
         f"{skills_json}"
@@ -332,11 +343,12 @@ def create_skill_execution_plan(
     model_name: str,
     num_ctx: int,
     skills_payload: dict | None = None,
-) -> tuple["ExecutionPlan", str]:
+) -> tuple["ExecutionPlan", str, OllamaCallResult | None]:
     """Build a skill execution plan for the given prompt.
 
-    Returns (plan, planner_prompt_text).  The planner_prompt_text is the exact text
-    sent to the LLM so that callers can log it without rebuilding it.
+    Returns (plan, planner_prompt_text, planner_llm_result).  The planner_prompt_text is the
+    exact text sent to the LLM so callers can log it.  planner_llm_result is the full
+    OllamaCallResult (including TPS) or None when the fallback path was taken.
 
     If skills_payload is provided it is used as-is; otherwise it is loaded from
     skills_summary_path.  Callers that already hold the payload should pass it to
@@ -354,13 +366,14 @@ def create_skill_execution_plan(
     # Invoke LLM planner to propose skill calls in strict JSON shape.
     # If planner inference fails (timeout/network/server), fall back deterministically.
     try:
-        llm_text = call_ollama(model_name=model_name, prompt=planner_prompt, num_ctx=num_ctx)
+        planner_result = call_ollama_extended(model_name=model_name, prompt=planner_prompt, num_ctx=num_ctx)
+        llm_text       = planner_result.response
     except Exception:
-        return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload), planner_prompt
+        return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload), planner_prompt, None
 
     try:
         plan_dict = json.loads(extract_first_json_object(llm_text))
-        return parse_execution_plan(plan_dict), planner_prompt
+        return parse_execution_plan(plan_dict), planner_prompt, planner_result
     except Exception:
         # Fall back deterministically so orchestration can proceed even with malformed planner output.
-        return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload), planner_prompt
+        return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload), planner_prompt, planner_result

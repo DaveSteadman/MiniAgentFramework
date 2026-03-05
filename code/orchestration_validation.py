@@ -21,7 +21,17 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import re
+
 from planner_engine import ExecutionPlan
+
+
+# Matches placeholder tokens that the skill executor will actually resolve.
+_CHAIN_PLACEHOLDER_RE = re.compile(
+    r"\{\{output_of_(?:first|previous)_call\}\}"
+    r"|\$\{output\d+(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}"
+    r"|\{\d+\}(?:\.[A-Za-z_][A-Za-z0-9_]*)*"
+)
 
 
 # ====================================================================================================
@@ -45,5 +55,22 @@ def validate_orchestration_iteration(
 
     if not final_response.strip():
         return False, "Final LLM response was empty."
+
+    # For multi-skill chains, verify the planner used actual placeholder syntax to chain outputs.
+    # This catches the failure mode where the LLM writes a literal like 'time_placeholder'
+    # instead of {{output_of_previous_call}} or ${output1.time}.
+    if len(plan.python_calls) > 1:
+        min_order = min(call.order for call in plan.python_calls)
+        downstream_calls = [call for call in plan.python_calls if call.order > min_order]
+        any_uses_placeholder = any(
+            any(_CHAIN_PLACEHOLDER_RE.search(str(v)) for v in call.arguments.values())
+            for call in downstream_calls
+        )
+        if not any_uses_placeholder:
+            return False, (
+                "Multi-skill plan has chained calls but no argument placeholder references. "
+                "Use {{output_of_previous_call}}, {{output_of_first_call}}, or ${output1.key} "
+                "to pipe outputs from earlier skill calls into later call arguments."
+            )
 
     return True, "Validation passed."

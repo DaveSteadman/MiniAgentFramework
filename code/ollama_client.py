@@ -40,11 +40,20 @@ DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 # ====================================================================================================
 @dataclass
 class OllamaCallResult:
-    """Structured return from call_ollama_extended, including token usage counts."""
-    response:          str
-    prompt_tokens:     int
-    completion_tokens: int
-    total_tokens:      int
+    """Structured return from call_ollama_extended, including token usage and throughput."""
+    response:               str
+    prompt_tokens:          int
+    completion_tokens:      int
+    total_tokens:           int
+    eval_duration_ns:       int = 0   # nanoseconds the model spent generating completion tokens
+    prompt_eval_duration_ns: int = 0  # nanoseconds the model spent evaluating the prompt
+
+    @property
+    def tokens_per_second(self) -> float:
+        """Completion token generation rate (tok/s). Returns 0.0 when timing is unavailable."""
+        if self.eval_duration_ns <= 0 or self.completion_tokens <= 0:
+            return 0.0
+        return self.completion_tokens / (self.eval_duration_ns / 1_000_000_000)
 
 
 # ====================================================================================================
@@ -288,13 +297,17 @@ def call_ollama_extended(
     if "response" not in body:
         raise RuntimeError(f"Ollama response missing 'response' field: {body}")
 
-    prompt_tokens     = body.get("prompt_eval_count", 0)
-    completion_tokens = body.get("eval_count", 0)
+    prompt_tokens            = body.get("prompt_eval_count", 0)
+    completion_tokens        = body.get("eval_count", 0)
+    eval_duration_ns         = body.get("eval_duration", 0)
+    prompt_eval_duration_ns  = body.get("prompt_eval_duration", 0)
     return OllamaCallResult(
         response=body["response"],
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=prompt_tokens + completion_tokens,
+        eval_duration_ns=eval_duration_ns,
+        prompt_eval_duration_ns=prompt_eval_duration_ns,
     )
 
 

@@ -227,7 +227,7 @@ def orchestrate_prompt(
 ) -> tuple[str, int, int, bool]:
     """Run the full planner -> skill -> LLM pipeline for one prompt.
 
-    Returns (final_response, prompt_tokens, completion_tokens, run_success).
+    Returns (final_response, prompt_tokens, completion_tokens, run_success, tokens_per_second).
     When quiet=True, verbose orchestration stages are written to the log file only,
     which is the behaviour used during chat mode to keep the console clean.
     """
@@ -258,6 +258,7 @@ def orchestrate_prompt(
     prompt_tokens     = 0
     completion_tokens = 0
     final_response    = ""
+    final_tps         = 0.0
 
     for iteration in range(1, config.max_iterations + 1):
         _log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN")
@@ -266,9 +267,9 @@ def orchestrate_prompt(
         if planner_feedback:
             iteration_planner_ask = f"{PLANNER_ASK} Previous iteration feedback: {planner_feedback}"
 
-        # create_skill_execution_plan returns (plan, planner_prompt_text).
+        # create_skill_execution_plan returns (plan, planner_prompt_text, planner_llm_result).
         # Passing config.skills_payload avoids reloading the catalog from disk on every iteration.
-        plan, planner_prompt = create_skill_execution_plan(
+        plan, planner_prompt, planner_llm_result = create_skill_execution_plan(
             user_prompt=planner_user_prompt,
             skills_summary_path=SKILLS_SUMMARY_PATH,
             planner_ask=iteration_planner_ask,
@@ -279,6 +280,9 @@ def orchestrate_prompt(
         _log(planner_prompt)
         _log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON")
         _log(json.dumps(plan.to_dict(), indent=2))
+        if planner_llm_result is not None:
+            planner_tps = planner_llm_result.tokens_per_second
+            _log(f"Planner TPS: {planner_tps:.1f} tok/s  ({planner_llm_result.completion_tokens} tokens)")
 
         _log_section(f"ITERATION {iteration} - PYTHON CALL EXECUTION")
         # Execute allow-listed skill functions declared in the plan and collect outputs.
@@ -316,6 +320,7 @@ def orchestrate_prompt(
             final_response    = result.response.strip()
             prompt_tokens     = result.prompt_tokens
             completion_tokens = result.completion_tokens
+            final_tps         = result.tokens_per_second
         except Exception as error:
             final_response   = ""
             planner_feedback = f"Final LLM execution failed: {error}"
@@ -324,6 +329,7 @@ def orchestrate_prompt(
             continue
 
         _log(final_response)
+        _log(f"Final LLM TPS: {final_tps:.1f} tok/s  ({completion_tokens} tokens)")
 
         # Gate iteration success on strict validation of skill usage and prompt completeness.
         is_valid, validation_message = validate_orchestration_iteration(
@@ -344,7 +350,7 @@ def orchestrate_prompt(
         planner_feedback = validation_message
         _log("Execution did not satisfy validation checks, retrying...")
 
-    return final_response, prompt_tokens, completion_tokens, run_success
+    return final_response, prompt_tokens, completion_tokens, run_success, final_tps
 
 
 # ====================================================================================================
@@ -389,7 +395,7 @@ def run_chat_mode(
         logger.log_section_file_only(f"CHAT TURN {turn}")
         logger.log_file_only(f"User prompt: {user_prompt}")
 
-        final_response, prompt_tokens, completion_tokens, run_success = orchestrate_prompt(
+        final_response, prompt_tokens, completion_tokens, run_success, final_tps = orchestrate_prompt(
             user_prompt=user_prompt,
             config=config,
             logger=logger,
@@ -398,8 +404,9 @@ def run_chat_mode(
         )
 
         ctx_pct     = f"{prompt_tokens / config.num_ctx * 100:.1f}%" if config.num_ctx > 0 else "?"
+        tps_str     = f" | {final_tps:.1f} tok/s" if final_tps > 0 else ""
         status_line = (
-            f"[Turn {turn} | {prompt_tokens:,} / {config.num_ctx:,} ctx tokens ({ctx_pct}) | {config.resolved_model}]"
+            f"[Turn {turn} | {prompt_tokens:,} / {config.num_ctx:,} ctx tokens ({ctx_pct}){tps_str} | {config.resolved_model}]"
         )
         print(status_line)
 
@@ -461,7 +468,7 @@ def main() -> None:
     user_prompt = args.user_prompt
     logger.log(f"User prompt:     {user_prompt}")
 
-    final_response, _, _, run_success = orchestrate_prompt(
+    final_response, _, _, run_success, _ = orchestrate_prompt(
         user_prompt=user_prompt,
         config=config,
         logger=logger,
