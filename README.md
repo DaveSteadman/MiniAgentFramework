@@ -61,12 +61,23 @@ This project uses a local Ollama runtime and focuses on transparent, logged orch
 - `code/skills/Memory/`
   - Extracts and recalls durable environment facts via keyword relevance scoring.
   - Persists facts across runs in `code/skills/Memory/memory_store.txt`.
+- `code/skills/WebSearch/` — searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
+- `code/skills/WebExtract/` — fetches a URL and extracts its readable prose, stripping HTML markup, navigation, and ads, ready for LLM synthesis.
 
 ### 7) Test wrapper
 - `testcode/test_wrapper.py`
   - Invokes `code/main.py` as a subprocess for each prompt in a configurable test suite.
   - Records timing, exit code, final LLM output, and log file path to a timestamped CSV.
   - Results land in `testcode/results/`.
+  - Prompt suites are JSON files in `testcode/prompts/` and are loaded via `--prompts-file`.
+
+### 8) Test analyzer
+- `testcode/test_analyzer.py`
+  - Reads a test results CSV and parses each run's log file for structured diagnostics.
+  - Classifies every prompt as `PASS`, `FAIL`, `TIMEOUT`, or `GAP` (capability gap admission).
+  - Extracts: skills selected, planner mode (LLM vs fallback), iteration count, validation result.
+  - Produces a `<name>_analysis.csv` with per-prompt diagnostics and a `<name>_gaps.txt` gap report.
+  - Invoked via `python code/main.py --analysetest <csv>` or directly as a CLI script.
 
 ## Project Flow (High Level)
 1. Recall relevant memories and collect ambient system info.
@@ -159,12 +170,18 @@ python .\testcode\test_wrapper.py
 
 | Option | Default | Description |
 |---|---|---|
-| `--prompts TEXT [TEXT ...]` | built-in suite of ~23 prompts | One or more prompt strings to test. |
+| `--prompts TEXT [TEXT ...]` | — | One or more prompt strings (overrides `--prompts-file`). |
+| `--prompts-file PATH` | `testcode/prompts/default_prompts.json` | JSON file containing an array of prompt strings. |
 | `--output-dir PATH` | `testcode/results/` | Directory where the CSV results file is written. |
 
 Each row in the CSV captures: `timestamp`, `prompt`, `final_output`, `duration_seconds`, `exit_code`, `log_file`, `stderr`.
 
-**Example — run a custom set of prompts:**
+**Example — run a named prompts file:**
+```powershell
+python .\testcode\test_wrapper.py --prompts-file testcode/prompts/test_web_skill_prompts.json
+```
+
+**Example — run a custom set of prompts inline:**
 ```powershell
 python .\testcode\test_wrapper.py --prompts "output the time" "what is today's date" "how much RAM is available"
 ```
@@ -173,6 +190,37 @@ python .\testcode\test_wrapper.py --prompts "output the time" "what is today's d
 ```powershell
 python .\testcode\test_wrapper.py --output-dir .\data\test_runs
 ```
+
+---
+
+## Running: Test Analyzer
+
+Analyzes a test results CSV without touching Ollama — reads each row's log file and classifies outcomes.
+
+```powershell
+python .\code\main.py --analysetest testcode\results\test_results_<timestamp>.csv
+```
+
+Or run the analyzer directly:
+```powershell
+python .\testcode\test_analyzer.py testcode\results\test_results_<timestamp>.csv
+```
+
+Produces two files alongside the source CSV:
+
+| File | Contents |
+|---|---|
+| `<name>_analysis.csv` | Per-prompt row with: outcome, failure reason, skills selected, planner mode, iteration count, validation result. |
+| `<name>_gaps.txt` | Summary report: pass rate, planner mode breakdown, iteration histogram, skill usage frequency, failing prompts, capability gap signals. |
+
+Outcome labels:
+
+| Label | Meaning |
+|---|---|
+| `PASS` | Exit 0, non-empty output, no failure signals detected. |
+| `FAIL` | Non-zero exit code, empty output, or validation failure in log. |
+| `TIMEOUT` | Subprocess exceeded the 300 s timeout (exit code 124). |
+| `GAP` | Output contained a capability gap admission (e.g. "I cannot access the internet"). |
 
 ---
 

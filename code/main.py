@@ -113,6 +113,13 @@ def parse_main_args() -> argparse.Namespace:
         default=False,
         help="Start an interactive multi-turn chat session instead of a single-shot run.",
     )
+    parser.add_argument(
+        "--analysetest",
+        type=Path,
+        default=None,
+        metavar="CSV_FILE",
+        help="Analyse a test results CSV produced by test_wrapper.py and exit.",
+    )
     return parser.parse_args()
 
 
@@ -432,7 +439,16 @@ def run_chat_mode(
 # MARK: MAIN ENTRYPOINT
 # ====================================================================================================
 def main() -> None:
-    args     = parse_main_args()
+    args = parse_main_args()
+
+    # Analysis mode: parse a results CSV and exit without starting Ollama.
+    if args.analysetest is not None:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "testcode"))
+        from test_analyzer import run_analysis
+        run_analysis(args.analysetest)
+        return
+
     log_path = create_log_file_path(log_dir=LOG_DIR)
     logger   = SessionLogger(log_path)
 
