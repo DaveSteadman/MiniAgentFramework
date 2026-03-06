@@ -297,8 +297,8 @@ def orchestrate_prompt(
             plan=plan,
             user_prompt=user_prompt,
             skills_payload=config.skills_payload,
+            logger=logger,
         )
-        _log(json.dumps(python_call_outputs, indent=2))
 
         final_prompt = build_final_llm_prompt(
             user_prompt=user_prompt,
