@@ -162,6 +162,19 @@ def _resolve_argument_placeholders(call_arguments: dict, previous_results: list[
             resolved[key] = structured_value
             continue
 
+        # Substitute any placeholder tokens embedded within a larger string.
+        inline_re = re.compile(r"\$\{output\d+(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}")
+        if inline_re.search(normalized):
+            def _substitute_inline(match: re.Match) -> str:
+                substituted, ok = _resolve_structured_reference(
+                    reference=match.group(0),
+                    previous_results=previous_results,
+                )
+                return str(substituted) if ok else match.group(0)
+
+            resolved[key] = inline_re.sub(_substitute_inline, normalized)
+            continue
+
         resolved[key] = value
 
     return resolved

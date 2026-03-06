@@ -14,6 +14,7 @@ Provide safe workspace-constrained file access for write, append, read, and list
 
 ## Path Rules
 - Bare path like `x.txt` resolves to `./data/x.txt`.
+- Relative paths with a directory component like `data/x.csv` or `logs/run.txt` resolve from workspace root.
 - Path starting with `./` resolves from workspace root.
 - Absolute paths are permitted only if they resolve inside workspace root.
 - Paths escaping workspace root are rejected.
@@ -27,10 +28,12 @@ Provide safe workspace-constrained file access for write, append, read, and list
   - `write ... to file <path>`
   - `append ... to file <path>`
   - `read file <path>`
+  - `write the system information to <path>.csv`
   - `write ... in CSV format`
 
 ## Output
 - Returns status messages for write/append/list operations.
+- Writing a SystemInfo string to a `.csv` file converts it to `key,value` CSV rows automatically.
 - Returns file content for read operations.
 - Returns parse guidance when instruction intent/path cannot be resolved.
 
@@ -39,3 +42,4 @@ Provide safe workspace-constrained file access for write, append, read, and list
 - `execute_file_instruction("append done to file ./data/content.txt")`
 - `execute_file_instruction("read file ./data/content.txt")`
 - `execute_file_instruction("create file abc.csv and write header1,header2 into it")`
+- `execute_file_instruction("write the system information to ./data/<name>.csv")`

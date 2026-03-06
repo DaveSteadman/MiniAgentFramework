@@ -204,6 +204,7 @@ def build_final_llm_prompt(
         "You are answering exactly one user question.\n"
         "Prioritize the user question over all other text.\n"
         "Answer directly and concisely without generic assistant filler.\n"
+        "Never claim a tool action succeeded unless the Python skill outputs explicitly show success.\n"
         "\n"
         f"{history_section}"
         f"User question:\n{user_prompt}\n"

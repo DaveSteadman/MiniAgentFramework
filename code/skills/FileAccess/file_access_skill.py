@@ -16,6 +16,8 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import csv
+import io
 import re
 from pathlib import Path
 
@@ -27,6 +29,10 @@ from workspace_utils import get_workspace_root
 # ====================================================================================================
 WORKSPACE_ROOT   = get_workspace_root()
 DEFAULT_DATA_DIR = WORKSPACE_ROOT / "data"
+_PROMPT_PATH_RE  = re.compile(
+    r"(?<![\w./-])((?:\./)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:csv|txt|md|json|jsonl|log))(?![\w./-])",
+    re.IGNORECASE,
+)
 
 
 # ====================================================================================================
@@ -55,6 +61,8 @@ def _resolve_safe_path(file_path: str) -> Path:
         candidate_path = Path(normalized)
         if candidate_path.is_absolute():
             candidate = candidate_path.resolve()
+        elif "/" in normalized:
+            candidate = (WORKSPACE_ROOT / normalized).resolve()
         else:
             candidate = (DEFAULT_DATA_DIR / normalized).resolve()
 
@@ -66,13 +74,70 @@ def _resolve_safe_path(file_path: str) -> Path:
     return candidate
 
 
+# ----------------------------------------------------------------------------------------------------
+def _extract_path_from_prompt(prompt: str) -> str:
+    explicit_match = re.search(r"\bfile\s+([\"'][^\"']+[\"']|[^\s]+)", prompt, re.IGNORECASE)
+    if explicit_match:
+        return explicit_match.group(1).strip().strip('"').strip("'")
+
+    path_match = _PROMPT_PATH_RE.search(prompt or "")
+    if not path_match:
+        return ""
+    return path_match.group(1).strip().strip('"').strip("'")
+
+
+# ----------------------------------------------------------------------------------------------------
+def _parse_system_info_pairs(text: str) -> list[tuple[str, str]] | None:
+    stripped = str(text or "").strip()
+    if not stripped.lower().startswith("system info:"):
+        return None
+
+    payload = stripped.split(":", maxsplit=1)[1].strip()
+    if not payload:
+        return None
+
+    pairs: list[tuple[str, str]] = []
+    for segment in payload.split(";"):
+        entry = segment.strip()
+        if not entry or "=" not in entry:
+            return None
+
+        key, value = entry.split("=", maxsplit=1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            return None
+        pairs.append((key, value))
+
+    return pairs or None
+
+
+# ----------------------------------------------------------------------------------------------------
+def _coerce_text_for_target(target_path: Path, text: str) -> str:
+    text_value = str(text)
+
+    if target_path.suffix.lower() != ".csv":
+        return text_value
+
+    system_info_pairs = _parse_system_info_pairs(text_value)
+    if not system_info_pairs:
+        return text_value
+
+    csv_buffer = io.StringIO(newline="")
+    writer = csv.writer(csv_buffer, lineterminator="\n")
+    writer.writerow(["key", "value"])
+    for key, value in system_info_pairs:
+        writer.writerow([key, value])
+    return csv_buffer.getvalue()
+
+
 # ====================================================================================================
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
 def write_text_file(file_path: str, text: str) -> str:
     target_path = _resolve_safe_path(file_path)
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(str(text), encoding="utf-8")
+    target_path.write_text(_coerce_text_for_target(target_path=target_path, text=text), encoding="utf-8")
     return f"Wrote {target_path.relative_to(WORKSPACE_ROOT).as_posix()}"
 
 
@@ -111,14 +176,14 @@ def execute_file_instruction(user_prompt: str) -> str:
     prompt = str(user_prompt or "").strip()
     lowered = prompt.lower()
 
-    file_match = re.search(r"\bfile\s+([\"'][^\"']+[\"']|[^\s]+)", prompt, re.IGNORECASE)
-    if not file_match:
+    raw_path = _extract_path_from_prompt(prompt)
+    if not raw_path:
         return "No file path found in instruction. Include 'file <path>'."
-
-    raw_path = file_match.group(1).strip().strip('"').strip("'")
 
     if "append" in lowered:
         append_match = re.search(r"append\s+(.+?)\s+to\s+file\b", prompt, re.IGNORECASE)
+        if not append_match:
+            append_match = re.search(rf"append\s+(.+?)\s+to\s+(?:an?\s+)?{re.escape(raw_path)}\b", prompt, re.IGNORECASE)
         if not append_match:
             return "Unable to parse append content. Use: append <text> to file <path>."
 
@@ -126,7 +191,23 @@ def execute_file_instruction(user_prompt: str) -> str:
         return append_text_file(file_path=raw_path, text=f"{content}\n")
 
     if "write" in lowered:
+        if any(
+            phrase in lowered for phrase in (
+                "system information",
+                "system info",
+                "system stats",
+                "system health",
+                "runtime info",
+                "environment information",
+            )
+        ):
+            from skills.SystemInfo.system_info_skill import get_system_info_string
+
+            return write_text_file(file_path=raw_path, text=get_system_info_string())
+
         write_match = re.search(r"write\s+(.+?)\s+to\s+file\b", prompt, re.IGNORECASE)
+        if not write_match:
+            write_match = re.search(rf"write\s+(.+?)\s+to\s+(?:an?\s+)?{re.escape(raw_path)}\b", prompt, re.IGNORECASE)
         if not write_match:
             # Support phrasing like: "create file x and write <text> into it".
             write_match = re.search(r"write\s+(.+?)\s+into\s+it\b", prompt, re.IGNORECASE)

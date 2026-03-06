@@ -58,12 +58,16 @@ def load_prompts_file(path: Path) -> list[str]:
 # ====================================================================================================
 # MARK: INVOCATION
 # ====================================================================================================
-def invoke_framework(prompt: str) -> tuple[float, int, str, str]:
+def invoke_framework(prompt: str, model: str | None = None) -> tuple[float, int, str, str]:
     """Invoke code/main.py with the given prompt and return (duration, exit_code, stdout, stderr)."""
     start_time = time.monotonic()
 
+    cmd = [sys.executable, str(MAIN_SCRIPT), "--user-prompt", prompt]
+    if model:
+        cmd += ["--model", model]
+
     result = subprocess.run(
-        [sys.executable, str(MAIN_SCRIPT), "--user-prompt", prompt],
+        cmd,
         capture_output=True,
         text=True,
         timeout=SUBPROCESS_TIMEOUT_SECONDS,
@@ -180,10 +184,11 @@ def append_csv_row(output_path: Path, row: dict) -> None:
 # ====================================================================================================
 # MARK: TEST RUNNER
 # ====================================================================================================
-def run_tests(prompts: list[str], output_dir: Path) -> Path:
+def run_tests(prompts: list[str], output_dir: Path, model: str | None = None) -> Path:
     output_path = build_output_path(output_dir)
     initialize_csv(output_path)
-    print(f"Results file initialized: {output_path}")
+    model_label = f" (model: {model})" if model else ""
+    print(f"Results file initialized: {output_path}{model_label}")
 
     total_prompts = len(prompts)
 
@@ -199,7 +204,7 @@ def run_tests(prompts: list[str], output_dir: Path) -> Path:
         final_output = ""
 
         try:
-            duration, exit_code, stdout, stderr = invoke_framework(prompt)
+            duration, exit_code, stdout, stderr = invoke_framework(prompt, model=model)
             log_file     = extract_log_file(stdout_text=stdout)
             final_output = extract_final_output(stdout_text=stdout, stderr_text=stderr, log_file=log_file)
         except subprocess.TimeoutExpired as timeout_error:
@@ -267,6 +272,12 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_OUTPUT_DIR,
         help="Directory where the CSV results file will be written.",
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Ollama model alias to pass to main.py (overrides its default).",
+    )
     return parser.parse_args()
 
 
@@ -283,4 +294,4 @@ if __name__ == "__main__":
     else:
         prompts = load_prompts_file(DEFAULT_PROMPTS_FILE)
 
-    run_tests(prompts=prompts, output_dir=args.output_dir)
+    run_tests(prompts=prompts, output_dir=args.output_dir, model=args.model)

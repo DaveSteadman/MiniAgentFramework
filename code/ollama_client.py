@@ -232,10 +232,11 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
         return exact_suffix_matches[0]
 
     # Substring match as a last resort — only accepted when exactly one model matches.
+    # Use word-boundary-aware matching so that "20b" doesn't match "120b" and vice-versa.
     token_matches = [
         model_name
         for model_name in available_models
-        if requested_lower in model_name.lower()
+        if re.search(rf"(?<![0-9]){re.escape(requested_lower)}(?![0-9a-z])", model_name.lower())
     ]
     if len(token_matches) == 1:
         return token_matches[0]

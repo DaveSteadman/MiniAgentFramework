@@ -32,6 +32,28 @@ _CHAIN_PLACEHOLDER_RE = re.compile(
     r"|\$\{output\d+(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}"
     r"|\{\d+\}(?:\.[A-Za-z_][A-Za-z0-9_]*)*"
 )
+_RESULT_FAILURE_PREFIXES = (
+    "error:",
+    "no file path found",
+    "unable to parse",
+    "instruction not recognized",
+    "file not found:",
+    "path escapes workspace root",
+    "execution failed",
+)
+
+
+# ----------------------------------------------------------------------------------------------------
+def _python_call_failed(call_output: dict) -> tuple[bool, str]:
+    result = call_output.get("result")
+    if not isinstance(result, str):
+        return False, ""
+
+    normalized = result.strip().lower()
+    if normalized.startswith(_RESULT_FAILURE_PREFIXES):
+        return True, result.strip()
+
+    return False, ""
 
 
 # ====================================================================================================
@@ -48,6 +70,14 @@ def validate_orchestration_iteration(
 
     if not python_call_outputs:
         return False, "No python calls executed."
+
+    for call_output in python_call_outputs:
+        call_failed, failure_text = _python_call_failed(call_output)
+        if call_failed:
+            return False, (
+                f"Python call {call_output.get('order')} ({call_output.get('function')}) failed: "
+                f"{failure_text}"
+            )
 
     # Detect double-brace placeholders that were never substituted by skill outputs.
     if "{{" in final_prompt or "}}" in final_prompt:

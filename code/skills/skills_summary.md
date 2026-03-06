@@ -43,15 +43,18 @@ Single JSON payload for orchestration planning.
         "`file_path`: target file path.",
         "`text`: content to write or append.",
         "`user_prompt`: natural-language instruction for command parsing.",
+        "Bare file names resolve under `./data`, while relative paths with directories resolve from workspace root.",
         "Typical trigger phrases:",
         "`create file <name>`",
         "`write ... to file <path>`",
         "`append ... to file <path>`",
         "`read file <path>`",
+        "`write the system information to <path>.csv`",
         "`write ... in CSV format`"
       ],
       "outputs": [
         "Returns status messages for write/append/list operations.",
+        "Writing a SystemInfo string to a `.csv` file converts it to `key,value` CSV rows automatically.",
         "Returns file content for read operations.",
         "Returns parse guidance when instruction intent/path cannot be resolved."
       ]

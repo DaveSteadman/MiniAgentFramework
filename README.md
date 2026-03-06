@@ -125,6 +125,7 @@ python .\code\main.py --user-prompt "what version of ollama is in use"
 **Example — specify model and context window:**
 ```powershell
 python .\code\main.py --user-prompt "summarize system health" --model "20b" --num-ctx 16384
+python .\code\main.py --user-prompt "write the system information to a data/systemstats.csv spreadsheet" --model "gpt-oss:120b" --num-ctx 32768
 ```
 
 ---

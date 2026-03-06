@@ -20,6 +20,7 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import json
+import re
 from dataclasses import asdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -244,6 +245,10 @@ _FALLBACK_FILE_KEYWORDS = frozenset({
     "file", "write", "read", "append", "create", "save", "store",
     "csv", "txt", "open", "directory", "folder", "path",
 })
+_PROMPT_PATH_RE = re.compile(
+    r"(?<![\w./-])((?:\./)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:csv|txt|md|json|jsonl|log))(?![\w./-])",
+    re.IGNORECASE,
+)
 
 
 def _skill_by_module_fragment(skills: list[dict], fragment: str) -> dict | None:
@@ -253,14 +258,60 @@ def _skill_by_module_fragment(skills: list[dict], fragment: str) -> dict | None:
     return None
 
 
+# ----------------------------------------------------------------------------------------------------
+def _extract_path_from_prompt(user_prompt: str) -> str:
+    path_match = _PROMPT_PATH_RE.search(user_prompt or "")
+    if not path_match:
+        return ""
+    return path_match.group(1).strip().strip('"').strip("'")
+
+
 def build_fallback_plan(user_prompt: str, skills_payload: dict) -> ExecutionPlan:
     skills       = skills_payload.get("skills", [])
     prompt_lower = user_prompt.lower()
     prompt_words = set(prompt_lower.replace("?", " ").replace(",", " ").split())
+    target_path  = _extract_path_from_prompt(user_prompt)
 
     # Pick skill based on keyword presence in the user prompt.
     has_system_keyword = bool(prompt_words & _FALLBACK_SYSTEM_KEYWORDS)
     has_file_keyword   = bool(prompt_words & _FALLBACK_FILE_KEYWORDS)
+
+    if has_system_keyword and has_file_keyword and target_path:
+        system_skill = _skill_by_module_fragment(skills, "system_info_skill.py")
+        file_skill   = _skill_by_module_fragment(skills, "file_access_skill.py")
+        if system_skill is not None and file_skill is not None:
+            system_module = str(system_skill.get("module", ""))
+            file_module   = str(file_skill.get("module", ""))
+            return ExecutionPlan(
+                user_prompt=user_prompt,
+                selected_skills=[
+                    SelectedSkill(
+                        skill_name=str(system_skill.get("skill_name", "SystemInfo Skill")),
+                        relative_path=str(system_skill.get("relative_path", "")),
+                        module=system_module,
+                        reason="Fallback: system/resource keywords detected in prompt.",
+                    ),
+                    SelectedSkill(
+                        skill_name=str(file_skill.get("skill_name", "FileAccess Skill")),
+                        relative_path=str(file_skill.get("relative_path", "")),
+                        module=file_module,
+                        reason="Fallback: file output keywords detected in prompt.",
+                    ),
+                ],
+                python_calls=[
+                    PythonCall(order=1, module=system_module, function="get_system_info_string", arguments={}),
+                    PythonCall(
+                        order=2,
+                        module=file_module,
+                        function="write_text_file",
+                        arguments={
+                            "file_path": target_path,
+                            "text": "{{output_of_previous_call}}",
+                        },
+                    ),
+                ],
+                final_prompt_template="Report the file write result to the user using the FileAccess output.",
+            )
 
     if has_system_keyword and not has_file_keyword:
         skill = _skill_by_module_fragment(skills, "system_info_skill.py")
