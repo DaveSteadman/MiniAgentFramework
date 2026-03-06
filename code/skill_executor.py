@@ -22,11 +22,13 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import importlib.util
+import json
 import re
 from pathlib import Path
 
 from planner_engine import ExecutionPlan
 from planner_engine import PythonCall
+from runtime_logger import SessionLogger
 from workspace_utils import get_workspace_root
 
 
@@ -170,7 +172,7 @@ def _resolve_argument_placeholders(call_arguments: dict, previous_results: list[
 # ====================================================================================================
 # MARK: EXECUTION
 # ====================================================================================================
-def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_payload: dict) -> tuple[list[dict], str]:
+def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_payload: dict, logger: SessionLogger | None = None) -> tuple[list[dict], str]:
     allowlist     = _build_allowlist(skills_payload=skills_payload)
     call_outputs  = []
     raw_results   = []
@@ -201,5 +203,8 @@ def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_paylo
         )
         raw_results.append(result)
         latest_output = str(result)
+
+    if logger is not None:
+        logger.log(json.dumps(call_outputs, indent=2))
 
     return call_outputs, latest_output
