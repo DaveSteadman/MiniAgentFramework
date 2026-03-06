@@ -22,6 +22,7 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import importlib.util
+import logging
 import re
 from pathlib import Path
 
@@ -177,29 +178,49 @@ def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_paylo
     latest_output = user_prompt
 
     for call in sorted(plan.python_calls, key=lambda item: item.order):
-        # Enforce strict allow-list from skills_summary before any dynamic import execution.
-        _validate_call_allowed(call=call, allowlist=allowlist)
+        try:
+            # Enforce strict allow-list from skills_summary before any dynamic import execution.
+            _validate_call_allowed(call=call, allowlist=allowlist)
 
-        call_arguments = _resolve_argument_placeholders(
-            call_arguments=dict(call.arguments),
-            previous_results=raw_results,
-            user_prompt=user_prompt,
-        )
+            call_arguments = _resolve_argument_placeholders(
+                call_arguments=dict(call.arguments),
+                previous_results=raw_results,
+                user_prompt=user_prompt,
+            )
 
-        # Dynamically import the approved skill module and invoke the selected function.
-        function_ref = _load_callable_from_module_path(module_path=call.module, function_name=call.function)
-        result       = function_ref(**call_arguments)
+            # Dynamically import the approved skill module and invoke the selected function.
+            function_ref = _load_callable_from_module_path(module_path=call.module, function_name=call.function)
+            result       = function_ref(**call_arguments)
 
-        call_outputs.append(
-            {
-                "order": call.order,
-                "module": call.module,
-                "function": call.function,
-                "arguments": call_arguments,
-                "result": result,
-            }
-        )
-        raw_results.append(result)
-        latest_output = str(result)
+            call_outputs.append(
+                {
+                    "order": call.order,
+                    "module": call.module,
+                    "function": call.function,
+                    "arguments": call_arguments,
+                    "result": result,
+                }
+            )
+            raw_results.append(result)
+            latest_output = str(result)
+
+        except Exception as exc:
+            logging.exception(
+                "Skill call failed (order=%s, module=%s, function=%s); skipping and continuing.",
+                call.order,
+                call.module,
+                call.function,
+            )
+            call_outputs.append(
+                {
+                    "order":         call.order,
+                    "module":        call.module,
+                    "function":      call.function,
+                    "error":         True,
+                    "error_type":    type(exc).__name__,
+                    "error_message": str(exc),
+                }
+            )
+            raw_results.append(None)
 
     return call_outputs, latest_output
