@@ -25,6 +25,7 @@ import sys
 # MARK: CONSTANTS
 # ====================================================================================================
 SECTION_SEPARATOR = "=" * 100
+HORIZONTAL_SEPARATOR = "-" * 100
 
 
 # ====================================================================================================
@@ -55,6 +56,13 @@ class SessionLogger:
         self.log(SECTION_SEPARATOR)
         self.log(title)
         self.log(SECTION_SEPARATOR)
+        self.log("")
+
+    # ----------------------------------------------------------------------------------------------------
+    def log_separator(self) -> None:
+        self.log("")
+        self.log(HORIZONTAL_SEPARATOR)
+        self.log("")
 
     # ----------------------------------------------------------------------------------------------------
     def log_file_only(self, message: str = "") -> None:
