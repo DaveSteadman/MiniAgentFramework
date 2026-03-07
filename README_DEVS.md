@@ -1,4 +1,4 @@
-# MiniAgentFramework — Developer Notes
+# MiniAgentFramework - Developer Notes
 
 For user-facing setup and usage see [README.md](README.md).
 
@@ -33,7 +33,7 @@ For user-facing setup and usage see [README.md](README.md).
 - `code/skill_executor.py`
   - Executes allow-listed skill calls from the plan JSON.
   - Resolves `{placeholder}` arguments across sequential calls.
-  - Dynamically imports only approved skill modules/functions — unknown names are rejected before any import is attempted.
+  - Dynamically imports only approved skill modules/functions - unknown names are rejected before any import is attempted.
 
 ### 5) Validation + logging
 - `code/orchestration_validation.py`
@@ -49,24 +49,24 @@ For user-facing setup and usage see [README.md](README.md).
   - Scans `code/skills/**/skill.md`.
   - Generates `code/skills/skills_summary.md` as a single JSON payload used by the planner.
 
-- `code/skills/DateTime/` — date and time skill functions.
-- `code/skills/SystemInfo/` — runtime system info (Python version, Ollama version, RAM, disk, OS).
-- `code/skills/FileAccess/` — sandboxed file read/write/list functions.
+- `code/skills/DateTime/` - date and time skill functions.
+- `code/skills/SystemInfo/` - runtime system info (Python version, Ollama version, RAM, disk, OS).
+- `code/skills/FileAccess/` - sandboxed file read/write/list functions.
 - `code/skills/Memory/`
   - Extracts and recalls durable environment facts via keyword relevance scoring.
   - Persists facts across runs in `code/skills/Memory/memory_store.txt`.
-- `code/skills/WebSearch/` — searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
-- `code/skills/WebExtract/` — fetches a URL and extracts its readable prose, stripping HTML markup, navigation, and ads, ready for LLM synthesis.
+- `code/skills/WebSearch/` - searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
+- `code/skills/WebExtract/` - fetches a URL and extracts its readable prose, stripping HTML markup, navigation, and ads, ready for LLM synthesis.
 
 ### 7) Scheduler
 - `code/scheduler.py`
-  - `load_schedules_dir(dir)` — globs all `*.json` files in the given directory, merges their `"tasks"` lists, and skips malformed files with a stderr warning.
-  - `is_task_due(task, last_run, now)` — evaluates `"interval"` (minutes since last run) and `"daily"` (HH:MM wall clock) task types.
-  - `llm_lock` — the module-level `threading.Lock` imported by all modes that call the LLM.
+  - `load_schedules_dir(dir)` - globs all `*.json` files in the given directory, merges their `"tasks"` lists, and skips malformed files with a stderr warning.
+  - `is_task_due(task, last_run, now)` - evaluates `"interval"` (minutes since last run) and `"daily"` (HH:MM wall clock) task types.
+  - `llm_lock` - the module-level `threading.Lock` imported by all modes that call the LLM.
 
 ### 8) Terminal UI
 - `code/ui/dashboard_app.py`
-  - `DashboardApp` — 4-panel diff-based ANSI terminal UI running at 50 fps via `msvcrt.kbhit()`.
+  - `DashboardApp` - 4-panel diff-based ANSI terminal UI running at 50 fps via `msvcrt.kbhit()`.
   - Panels: Ollama status bar (top), schedule timeline (left), tabbed log/chat area (right), chat input (bottom).
   - Three daemon threads: `_ollama_poll` (model status), `_log_tail` (log file), `_scheduler_loop` (scheduled tasks).
 
@@ -74,8 +74,8 @@ For user-facing setup and usage see [README.md](README.md).
   - `ScrollLog`, `TextEdit`, `Label`, `TimelineWidget`.
   - `TimelineWidget` draws a minute-resolution timeline centred on the current time; `►` marks the current minute; task markers are derived from schedule definitions.
 
-- `code/ui/screen.py` — diff-based ANSI renderer; only changed cells are re-emitted to the terminal.
-- `code/ui/panel.py`, `code/ui/colors.py`, `code/ui/keys.py` — layout primitives, ANSI colour constants, key code definitions.
+- `code/ui/screen.py` - diff-based ANSI renderer; only changed cells are re-emitted to the terminal.
+- `code/ui/panel.py`, `code/ui/colors.py`, `code/ui/keys.py` - layout primitives, ANSI colour constants, key code definitions.
 
 ### 9) Test tooling
 - `testcode/test_wrapper.py`
@@ -93,7 +93,7 @@ For user-facing setup and usage see [README.md](README.md).
 ### 10) Workspace path management
 - `code/workspace_utils.py`
   - Single source of truth for all well-known directory paths. All modules import from here rather than constructing paths independently.
-  - All accessors use `@lru_cache(maxsize=1)` — paths are computed once per process.
+  - All accessors use `@lru_cache(maxsize=1)` - paths are computed once per process.
 
 | Accessor | Path |
 |---|---|
@@ -114,7 +114,7 @@ For user-facing setup and usage see [README.md](README.md).
 4. Build the final enriched prompt from skill outputs, recalled memories, and the planner template.
 5. Call the final LLM and validate the response.
 6. Retry up to `MAX_ITERATIONS` times if validation fails, feeding back error context.
-7. Log everything — planner prompt, plan JSON, skill outputs, final prompt, response, validation, and TPS for each LLM phase.
+7. Log everything - planner prompt, plan JSON, skill outputs, final prompt, response, validation, and TPS for each LLM phase.
 
 ---
 

@@ -34,11 +34,6 @@ This project uses a local Ollama runtime and focuses on transparent, logged orch
 - Ollama installed and available in `PATH`.
 - At least one model pulled locally (e.g. `ollama pull gemma3:20b`).
 
-### Activate the virtual environment
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
 ### Regenerate the skills catalog
 Run this whenever a `skill.md` file is added or changed:
 ```powershell
@@ -61,10 +56,11 @@ python .\code\main.py --user-prompt "what version of ollama is in use"
 | `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` are resolved to the first installed model whose tag contains that string. |
 | `--num-ctx N` | `32768` | Context window size (tokens) passed to Ollama for both the planner and final LLM calls. |
 
-**Example — specify model and context window:**
+**Example - specify model and context window:**
 ```powershell
 python .\code\main.py --user-prompt "summarize system health" --model "20b" --num-ctx 16384
 python .\code\main.py --user-prompt "write the system information to a data/systemstats.csv spreadsheet" --model "gpt-oss:120b" --num-ctx 32768
+python .\code\main.py --user-prompt "write a spreadsheet of numbers to data/sequencenumbers.csv where the first column is the index, then an incrementing prime number, then an incrementing fibonacci number" --model "gpt-oss:120b" --num-ctx 32768
 ```
 
 ---
@@ -87,13 +83,15 @@ Verbose orchestration detail (planner prompts, plan JSON, skill outputs, validat
 
 Conversation history is passed as context for each subsequent turn, capped at the last 10 turns to prevent context overflow.
 
+Slash commands (see [Slash Commands](#slash-commands) below) are available at the prompt to change model or context size without restarting.
+
 | Option | Default | Description |
 |---|---|---|
 | `--chat` | off | Activates chat mode. |
 | `--model ALIAS` | `"20b"` | Same alias resolution as single-shot mode. |
 | `--num-ctx N` | `32768` | Context window for every turn in the session. |
 
-**Example — chat with a smaller context window:**
+**Example - chat with a smaller context window:**
 ```powershell
 python .\code\main.py --chat --model "20b" --num-ctx 16384
 ```
@@ -108,7 +106,7 @@ Runs scheduled prompt tasks from `controldata/schedules/` as a background loop. 
 python .\code\main.py --scheduler
 ```
 
-Press **Ctrl+C** for a clean shutdown — in-flight LLM calls are allowed to complete before exit.
+Press **Ctrl+C** for a clean shutdown - in-flight LLM calls are allowed to complete before exit.
 
 Schedule files live in `controldata/schedules/`. Each file must contain a top-level `"tasks"` list:
 
@@ -136,6 +134,8 @@ Combines the schedule timeline, live log tail, and chat interface in a single te
 python .\code\main.py --dashboard
 ```
 
+![Dashboard screenshot](progress/2026-03-07-FirstUI.png)
+
 | Key | Action |
 |---|---|
 | **Tab** | Switch between Log and Chat tabs |
@@ -143,10 +143,30 @@ python .\code\main.py --dashboard
 | **↑ / ↓ / PgUp / PgDn** | Scroll the active panel |
 | **Ctrl+C** | Clean shutdown |
 
+Slash commands (see [Slash Commands](#slash-commands) below) are available in the Chat input bar to change model or context size at runtime.
+
 | Option | Default | Description |
 |---|---|---|
 | `--model ALIAS` | `"20b"` | Model used for chat prompts in the dashboard. |
 | `--num-ctx N` | `32768` | Context window for dashboard chat calls. |
+
+
+---
+
+## Slash Commands
+
+Slash commands are available in **Chat mode** (console) and the **Dashboard** chat input bar. They bypass the orchestration pipeline and take effect immediately.
+
+Type `/help` at any prompt to see the full list. Current commands:
+
+| Command | Description |
+|---|---|
+| `/help` | List all available slash commands |
+| `/models` | List installed Ollama models; the active model is marked with `►` |
+| `/model <name>` | Switch the active model for all subsequent runs (e.g. `/model 8b`). Accepts the same short aliases as `--model`. Clears conversation history. |
+| `/ctx <tokens>` | Set the context window size for all subsequent runs (e.g. `/ctx 16384`). Accepts integers with optional commas or underscores. |
+
+New slash commands can be added in [code/slash_commands.py](code/slash_commands.py) by adding a handler function and registering it in `_REGISTRY` and `_DESCRIPTIONS`.
 
 ---
 
@@ -160,18 +180,18 @@ python .\testcode\test_wrapper.py
 
 | Option | Default | Description |
 |---|---|---|
-| `--prompts TEXT [TEXT ...]` | — | One or more prompt strings (overrides `--prompts-file`). |
+| `--prompts TEXT [TEXT ...]` | - | One or more prompt strings (overrides `--prompts-file`). |
 | `--prompts-file PATH` | `controldata/test_prompts/default_prompts.json` | JSON file containing an array of prompt strings. |
 | `--output-dir PATH` | `controldata/test_results/` | Directory where the CSV results file is written. |
 
 Each row in the CSV captures: `timestamp`, `prompt`, `final_output`, `duration_seconds`, `exit_code`, `log_file`, `stderr`.
 
-**Example — run a named prompts file:**
+**Example - run a named prompts file:**
 ```powershell
 python .\testcode\test_wrapper.py --prompts-file controldata/test_prompts/test_web_skill_prompts.json
 ```
 
-**Example — run a custom set of prompts inline:**
+**Example - run a custom set of prompts inline:**
 ```powershell
 python .\testcode\test_wrapper.py --prompts "output the time" "what is today's date" "how much RAM is available"
 ```
@@ -180,7 +200,7 @@ python .\testcode\test_wrapper.py --prompts "output the time" "what is today's d
 
 ## Running: Test Analyzer
 
-Analyzes a test results CSV without touching Ollama — reads each row's log file and classifies outcomes.
+Analyzes a test results CSV without touching Ollama - reads each row's log file and classifies outcomes.
 
 ```powershell
 python .\code\main.py --analysetest controldata\test_results\test_results_<timestamp>.csv
@@ -243,7 +263,7 @@ python .\code\system_check.py --num-ctx 4096
 
 | Path | Contents |
 |---|---|
-| `controldata/logs/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) — one file per run. |
+| `controldata/logs/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) - one file per run. |
 | `controldata/schedules/` | Schedule definition files (`*.json`) consumed by Scheduler and Dashboard modes. |
 | `controldata/test_prompts/` | Prompt suite JSON files used by the Test Wrapper. |
 | `controldata/test_results/` | Timestamped CSV results and analysis files produced by the Test Wrapper and Analyzer. |

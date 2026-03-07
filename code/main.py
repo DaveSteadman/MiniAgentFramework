@@ -53,6 +53,8 @@ from skill_executor import execute_skill_plan_calls
 from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
 from skills.SystemInfo.system_info_skill import get_system_info_string
+from slash_commands import SlashCommandContext
+from slash_commands import handle as handle_slash
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
 
@@ -153,8 +155,12 @@ def resolve_execution_model(requested_model: str) -> str:
 
     resolved_model = resolve_model_name(requested_model, available_models)
     if resolved_model is None:
-        available_text = ", ".join(available_models)
-        raise RuntimeError(f"Model '{requested_model}' not installed. Available: {available_text}")
+        fallback = available_models[0]
+        print(
+            f"[model] '{requested_model}' not found — falling back to '{fallback}'.\n"
+            f"        Available: {', '.join(available_models)}"
+        )
+        return fallback
 
     return resolved_model
 
@@ -419,6 +425,23 @@ def run_chat_mode(
             print("Chat session ended.")
             break
 
+        # Slash commands bypass orchestration entirely.
+        def _cli_clear_history():
+            nonlocal conversation_history
+            conversation_history = []
+
+        def _cli_output(text: str, level: str = 'info') -> None:
+            prefix = "[!] " if level == 'error' else ""
+            print(f"{prefix}{text}")
+
+        cli_ctx = SlashCommandContext(
+            config        = config,
+            output        = _cli_output,
+            clear_history = _cli_clear_history,
+        )
+        if handle_slash(user_prompt, cli_ctx):
+            continue
+
         turn += 1
         logger.log_section_file_only(f"CHAT TURN {turn}")
         logger.log_file_only(f"User prompt: {user_prompt}")
@@ -483,13 +506,42 @@ def run_dashboard_mode(
 
     tasks         = load_schedules_dir(SCHEDULES_DIR)
     enabled_tasks = [t for t in tasks if t.get("enabled", True)]
-    last_run: dict[str, datetime | None] = {t["name"]: None for t in enabled_tasks}
+    _startup      = datetime.now()
+    last_run: dict[str, datetime | None] = {
+        t["name"]: (_startup if t.get("schedule", {}).get("type") == "interval" else None)
+        for t in enabled_tasks
+    }
 
     chat_history: list[dict] = []
 
     def on_chat_submit(text: str) -> None:
         app.add_chat_line(f"You  \u25b6 {text}", ui_colors.INPUT)
         app.set_active_tab(DashboardApp.TAB_CHAT)
+
+        # Slash commands bypass orchestration entirely.
+        _level_colors = {
+            'info':    ui_colors.BLUE,
+            'item':    ui_colors.NORMAL,
+            'error':   ui_colors.RED,
+            'success': ui_colors.MAGENTA,
+            'dim':     ui_colors.DIM,
+        }
+
+        def _dash_output(text: str, level: str = 'info') -> None:
+            prefix = "Agent\u25b6 " if level in ('info', 'error', 'success') else "      "
+            app.add_chat_line(f"{prefix}{text}", _level_colors.get(level, ui_colors.NORMAL))
+
+        def _dash_clear_history() -> None:
+            nonlocal chat_history
+            chat_history = []
+
+        dash_ctx = SlashCommandContext(
+            config        = config,
+            output        = _dash_output,
+            clear_history = _dash_clear_history,
+        )
+        if handle_slash(text, dash_ctx):
+            return
 
         def _run() -> None:
             nonlocal chat_history
@@ -500,14 +552,23 @@ def run_dashboard_mode(
                 )
                 return
             try:
+                run_log_path = create_log_file_path(log_dir=LOG_DIR)
+                run_logger   = SessionLogger(run_log_path)
+                run_logger.log_section_file_only("DASHBOARD CHAT")
+                run_logger.log_file_only(f"User: {text}")
+
                 hist = list(chat_history) if chat_history else None
                 response, p_tokens, c_tokens, success, tps = orchestrate_prompt(
                     user_prompt=text,
                     config=config,
-                    logger=logger,
+                    logger=run_logger,
                     conversation_history=hist,
                     quiet=True,
                 )
+
+                tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
+                run_logger.log_file_only(f"Agent: {response}")
+                run_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
             finally:
                 llm_lock.release()
 
@@ -516,7 +577,6 @@ def run_dashboard_mode(
             if len(chat_history) > MAX_CHAT_HISTORY_TURNS * 2:
                 chat_history = chat_history[-(MAX_CHAT_HISTORY_TURNS * 2):]
 
-            tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
             app.add_chat_line(f"Agent\u25b6 {response}", ui_colors.NORMAL)
             app.add_chat_line(f"      [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
 
@@ -527,6 +587,7 @@ def run_dashboard_mode(
         last_run=last_run,
         on_submit=on_chat_submit,
         shutdown_event=shutdown,
+        llm_lock=llm_lock,
     )
 
     # ---- Background: ollama ps ----
@@ -585,7 +646,39 @@ def run_dashboard_mode(
 
     # ---- Background: scheduler ----
     def _scheduler_loop() -> None:
+        nonlocal enabled_tasks
         while not shutdown.is_set():
+            # -- Reload schedule files and apply changes --
+            try:
+                fresh_tasks    = load_schedules_dir(SCHEDULES_DIR)
+                fresh_enabled  = [t for t in fresh_tasks if t.get("enabled", True)]
+                fresh_by_name  = {t["name"]: t for t in fresh_enabled}
+                current_by_name = {t["name"]: t for t in enabled_tasks}
+
+                added   = [n for n in fresh_by_name if n not in current_by_name]
+                removed = [n for n in current_by_name if n not in fresh_by_name]
+                changed = [
+                    n for n in fresh_by_name
+                    if n in current_by_name and fresh_by_name[n] != current_by_name[n]
+                ]
+
+                if added or removed or changed:
+                    _reload_now = datetime.now()
+                    for n in added:
+                        stype = fresh_by_name[n].get("schedule", {}).get("type")
+                        last_run[n] = _reload_now if stype == "interval" else None
+                        app.add_log_line(f"[SCHED] New task loaded: {n}", ui_colors.MAGENTA)
+                    for n in removed:
+                        last_run.pop(n, None)
+                        app.add_log_line(f"[SCHED] Task removed: {n}", ui_colors.DIM)
+                    for n in changed:
+                        last_run[n] = last_run.get(n)  # preserve last_run across edits
+                        app.add_log_line(f"[SCHED] Task updated: {n}", ui_colors.DIM)
+                    enabled_tasks = fresh_enabled
+                    app.tasks = enabled_tasks
+            except Exception as exc:
+                app.add_log_line(f"[SCHED] Schedule reload error: {exc}", ui_colors.RED)
+
             now = datetime.now()
             for task in enabled_tasks:
                 if shutdown.is_set():
@@ -603,7 +696,10 @@ def run_dashboard_mode(
                 last_run[name] = now
                 app.add_log_line(f"[SCHED] Starting: {name}", ui_colors.MAGENTA)
                 app.add_chat_line(f"Sched\u25b6 Task started: {name}", ui_colors.MAGENTA)
-                logger.log_section(f"SCHEDULER TASK (dashboard): {name}")
+
+                task_log_path = create_log_file_path(log_dir=LOG_DIR)
+                task_logger   = SessionLogger(task_log_path)
+                task_logger.log_section_file_only(f"SCHEDULER TASK (dashboard): {name}")
 
                 with llm_lock:
                     conversation_history: list[dict] = []
@@ -611,12 +707,12 @@ def run_dashboard_mode(
                         if shutdown.is_set():
                             break
                         app.add_log_line(f"  [Step {step_index}] {prompt_text[:70]}", ui_colors.DIM)
-                        logger.log_file_only(f"[Step {step_index}] {prompt_text}")
+                        task_logger.log_file_only(f"[Step {step_index}] {prompt_text}")
 
                         response, p_tokens, c_tokens, success, tps = orchestrate_prompt(
                             user_prompt=prompt_text,
                             config=config,
-                            logger=logger,
+                            logger=task_logger,
                             conversation_history=conversation_history if conversation_history else None,
                             quiet=True,
                         )
@@ -624,14 +720,16 @@ def run_dashboard_mode(
                         conversation_history.append({"role": "assistant", "content": response})
 
                         tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
+                        task_logger.log_file_only(f"[Step {step_index}] Agent: {response}")
+                        task_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
                         app.add_log_line(f"  \u2713 [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
                         app.add_chat_line(
                             f"Sched\u25b6 [{name} step {step_index}] {response[:100]}",
                             ui_colors.BLUE,
                         )
 
+                task_logger.log_file_only(f"[DASHBOARD] Task '{name}' completed.")
                 app.add_log_line(f"[SCHED] Done: {name}", ui_colors.MAGENTA)
-                logger.log(f"[DASHBOARD] Task '{name}' completed.")
 
             for _ in range(SCHEDULER_POLL_SECS * 2):   # respects shutdown
                 if shutdown.is_set():
@@ -696,7 +794,11 @@ def run_scheduler_mode(
 
     tasks         = load_schedules_dir(SCHEDULES_DIR)
     enabled_tasks = [t for t in tasks if t.get("enabled", True)]
-    last_run: dict[str, datetime | None] = {t["name"]: None for t in enabled_tasks}
+    _startup      = datetime.now()
+    last_run: dict[str, datetime | None] = {
+        t["name"]: (_startup if t.get("schedule", {}).get("type") == "interval" else None)
+        for t in enabled_tasks
+    }
 
     print(f"\nScheduler mode active — {len(enabled_tasks)} enabled task(s) | model: {config.resolved_model}")
     print(f"Log file: {log_path.as_posix()}")
@@ -704,6 +806,35 @@ def run_scheduler_mode(
 
     try:
         while not shutdown.is_set():
+            # -- Reload schedule files and apply changes --
+            try:
+                fresh_tasks    = load_schedules_dir(SCHEDULES_DIR)
+                fresh_enabled  = [t for t in fresh_tasks if t.get("enabled", True)]
+                fresh_by_name  = {t["name"]: t for t in fresh_enabled}
+                current_by_name = {t["name"]: t for t in enabled_tasks}
+
+                added   = [n for n in fresh_by_name if n not in current_by_name]
+                removed = [n for n in current_by_name if n not in fresh_by_name]
+                changed = [
+                    n for n in fresh_by_name
+                    if n in current_by_name and fresh_by_name[n] != current_by_name[n]
+                ]
+
+                if added or removed or changed:
+                    for n in added:
+                        last_run[n] = None
+                        print(f"[SCHEDULER] New task loaded: {n}")
+                    for n in removed:
+                        last_run.pop(n, None)
+                        print(f"[SCHEDULER] Task removed: {n}")
+                    for n in changed:
+                        last_run[n] = last_run.get(n)
+                        print(f"[SCHEDULER] Task updated: {n}")
+                    enabled_tasks = fresh_enabled
+                    print(f"[SCHEDULER] Schedule refreshed — {len(enabled_tasks)} enabled task(s)")
+            except Exception as exc:
+                print(f"[SCHEDULER] Schedule reload error: {exc}")
+
             now = datetime.now()
 
             for task in enabled_tasks:

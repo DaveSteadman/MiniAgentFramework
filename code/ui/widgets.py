@@ -71,6 +71,8 @@ class TextEdit:
         self._cursor = 0
         self._prompt = prompt
         self._max    = max_len
+        self.locked   = False   # when True input is suppressed
+        self.lock_msg = ''     # message shown in the bar while locked
 
     # ----------------------------------------------------------------------------------------------------
 
@@ -88,6 +90,9 @@ class TextEdit:
     # ----------------------------------------------------------------------------------------------------
 
     def handle_key(self, key):
+        if self.locked:
+            return False
+
         from . import keys
 
         if key == keys.ENTER:                   return True
@@ -118,6 +123,11 @@ class TextEdit:
     # ----------------------------------------------------------------------------------------------------
 
     def draw(self, screen, y, x, h, w):
+        if self.locked:
+            msg = self.lock_msg or '  [chat locked]'
+            screen.put_str(y, x, msg[:w].ljust(w), colors.DIM, clip_w=w)
+            return
+
         prompt = self._prompt
         text   = self.value
         px     = len(prompt)
@@ -172,11 +182,15 @@ class Label:
 
 class TimelineWidget:
 
-    def draw(self, screen, y, x, h, w, tasks, last_run, now):
+    _PREFIX_W = 7   # ►/space (1) + HH:MM (5) + space (1)
+
+    def draw(self, screen, y, x, h, w, tasks, last_run, now, running=False):
         from datetime import timedelta
 
         now_min = now.replace(second=0, microsecond=0)
         now_row = h // 2
+
+        task_shown = False
 
         for row_offset in range(h):
             minute_offset = row_offset - now_row
@@ -185,16 +199,69 @@ class TimelineWidget:
 
             hhmm      = slot_dt.strftime("%H:%M")
             task_name = self._task_at(tasks, last_run, slot_dt, now_min)
+            abbrev    = task_name[:max(0, w - self._PREFIX_W)] if task_name else ""
+
+            if task_name:
+                task_shown = True
 
             if minute_offset == 0:
-                text = ("\u25ba" + hhmm + (f" {task_name}" if task_name else ""))[:w]
+                text = ("\u25ba" + hhmm + (f" {abbrev}" if abbrev else ""))[:w]
                 screen.put_str(draw_row, x, text.ljust(w)[:w], colors.TIMELINE_NOW,  clip_w=w)
             else:
-                text = (" "     + hhmm + (f" {task_name}" if task_name else ""))[:w]
+                text = (" "     + hhmm + (f" {abbrev}" if abbrev else ""))[:w]
                 attr = colors.TIMELINE_TASK if task_name else colors.TIMELINE_TICK
                 screen.put_str(draw_row, x, text.ljust(w)[:w], attr, clip_w=w)
 
+        # Overwrite the bottom row with status when no task is visible in the window.
+        if not task_shown and h > 0:
+            if running:
+                label = " \u25b6 running"
+                screen.put_str(y + h - 1, x, label.ljust(w)[:w], colors.TIMELINE_NOW, clip_w=w)
+            else:
+                mins = self._minutes_to_next(tasks, last_run, now_min)
+                if mins is not None:
+                    label = f" next:{mins}m" if mins > 0 else " next:now"
+                    screen.put_str(y + h - 1, x, label.ljust(w)[:w], colors.TIMELINE_TASK, clip_w=w)
+
     # ----------------------------------------------------------------------------------------------------
+
+    @staticmethod
+    def _minutes_to_next(tasks, last_run, now_min):
+        """Return whole minutes from now_min to the nearest upcoming task firing, or None."""
+        from datetime import timedelta
+        min_diff = None
+        for task in tasks:
+            sched = task.get("schedule", {})
+            stype = sched.get("type", "")
+            name  = task.get("name", "")
+
+            if stype == "daily":
+                raw = sched.get("time", "00:00")
+                try:
+                    hh, mm = map(int, raw.split(":"))
+                except ValueError:
+                    continue
+                candidate = now_min.replace(hour=hh, minute=mm)
+                if candidate <= now_min:
+                    candidate += timedelta(days=1)
+                diff = int((candidate - now_min).total_seconds() / 60)
+
+            elif stype == "interval":
+                interval_m = sched.get("minutes", 60)
+                lr = last_run.get(name)
+                if lr is None:
+                    diff = 0
+                else:
+                    next_fire = lr.replace(second=0, microsecond=0) + timedelta(minutes=interval_m)
+                    diff = max(0, int((next_fire - now_min).total_seconds() / 60))
+
+            else:
+                continue
+
+            if min_diff is None or diff < min_diff:
+                min_diff = diff
+
+        return min_diff
 
     @staticmethod
     def _task_at(tasks, last_run, slot_dt, now_min):

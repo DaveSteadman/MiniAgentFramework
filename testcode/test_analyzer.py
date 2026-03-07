@@ -432,7 +432,7 @@ def print_summary(analysis_rows: list[dict], analysis_path: Path, gap_path: Path
 # MARK: ENTRYPOINT
 # ====================================================================================================
 def run_analysis(csv_path: Path) -> None:
-    """Public entry point — called from main.py or directly from CLI."""
+    """Public entry point - called from main.py or directly from CLI."""
     if not csv_path.exists():
         print(f"ERROR: CSV file not found: {csv_path}", file=sys.stderr)
         sys.exit(1)

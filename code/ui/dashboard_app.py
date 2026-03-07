@@ -67,7 +67,7 @@ class DashboardApp:
     TAB_CHAT = 'Chat'
 
     # ----------------------------------------------------------------------------------------------------
-    def __init__(self, tasks=None, last_run=None, on_submit=None, shutdown_event=None):
+    def __init__(self, tasks=None, last_run=None, on_submit=None, shutdown_event=None, llm_lock=None):
         """
         tasks          list of enabled task dicts from task_schedule.json
         last_run       mutable dict {task_name: datetime|None} shared with the scheduler thread
@@ -78,6 +78,7 @@ class DashboardApp:
         self.last_run       = last_run or {}
         self.on_submit      = on_submit
         self.shutdown_event = shutdown_event
+        self._llm_lock      = llm_lock
 
         self.ollama_log = ScrollLog(max_lines=50)
         self.chat_log   = ScrollLog(max_lines=2000)
@@ -188,6 +189,16 @@ class DashboardApp:
 
             while self._running:
                 now     = datetime.now()
+                now_min = now.replace(second=0, microsecond=0)
+                task_running = bool(self._llm_lock and self._llm_lock.locked())
+                mins_next    = TimelineWidget._minutes_to_next(self.tasks, self.last_run, now_min)
+                due_soon     = (mins_next is not None and mins_next <= 1)
+                self.input_edit.locked = task_running or due_soon
+                if task_running:
+                    self.input_edit.lock_msg = '  [LLM busy with a scheduled task \u2014 please wait]'
+                elif due_soon:
+                    self.input_edit.lock_msg = '  [chat locked \u2014 scheduled task due soon]'
+
                 resized = self._screen.begin_frame()
                 if resized:
                     self._build_layout(self._screen.h, self._screen.w)
@@ -203,7 +214,7 @@ class DashboardApp:
                 # Vertical timeline
                 iy, ix, ih, iw = self._panels['timeline'].inner_rect()
                 self._timeline.draw(self._screen, iy, ix, ih, iw,
-                                    self.tasks, self.last_run, now)
+                                    self.tasks, self.last_run, now, running=task_running)
 
                 # Main area (active tab)
                 iy, ix, ih, iw = self._panels['main'].inner_rect()

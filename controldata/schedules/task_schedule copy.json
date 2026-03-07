@@ -1,0 +1,12 @@
+{
+  "tasks": [
+    {
+      "name": "Ping Check",
+      "enabled": true,
+      "schedule": { "type": "interval", "minutes": 11 },
+      "prompts": [
+        "Append a newline character and the time to a ping.txt file."
+      ]
+    }
+  ]
+}
