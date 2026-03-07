@@ -158,19 +158,57 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output(f"Context size changed: {old:,} \u2192 {value:,}", "success")
 
 
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
+    from ollama_client import get_ollama_ps_rows, list_ollama_models, resolve_model_name, stop_model
+
+    # Determine which model to stop: explicit arg, or fall back to the active model.
+    target_name = arg.strip() if arg.strip() else ctx.config.resolved_model
+
+    # Resolve against currently running models so we get the exact full tag.
+    try:
+        running_rows = get_ollama_ps_rows()
+    except Exception as exc:
+        ctx.output(f"Error reading running models: {exc}", "error")
+        return
+
+    running_names = [row.get("name", "") for row in running_rows if row.get("name")]
+
+    if not running_names:
+        ctx.output("No models are currently loaded in Ollama.", "dim")
+        return
+
+    resolved = resolve_model_name(target_name, running_names)
+    if resolved is None:
+        ctx.output(
+            f"Model '{target_name}' is not currently loaded.  Running: {', '.join(running_names)}",
+            "error",
+        )
+        return
+
+    try:
+        stop_model(resolved)
+        ctx.output(f"Model unloaded: {resolved}", "success")
+    except Exception as exc:
+        ctx.output(f"Error stopping model: {exc}", "error")
+
+
 # ====================================================================================================
 # MARK: REGISTRY
 # ====================================================================================================
 _REGISTRY: dict[str, Callable] = {
-    "/help":   _cmd_help,
-    "/models": _cmd_models,
-    "/model":  _cmd_model,
-    "/ctx":    _cmd_ctx,
+    "/help":      _cmd_help,
+    "/models":    _cmd_models,
+    "/model":     _cmd_model,
+    "/ctx":       _cmd_ctx,
+    "/stopmodel": _cmd_stopmodel,
 }
 
 _DESCRIPTIONS: dict[str, str] = {
-    "/help":   "List available slash commands",
-    "/models": "List installed Ollama models",
-    "/model":  "<name>  Switch active model for all subsequent runs",
-    "/ctx":    "<tokens>  Set context window size (e.g. /ctx 32768)",
+    "/help":      "List available slash commands",
+    "/models":    "List installed Ollama models",
+    "/model":     "<name>  Switch active model for all subsequent runs",
+    "/ctx":       "<tokens>  Set context window size (e.g. /ctx 32768)",
+    "/stopmodel": "[name]  Unload a running model from VRAM (defaults to active model)",
 }

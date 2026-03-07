@@ -1,0 +1,16 @@
+# MiniAgentFramework - Python dependencies
+#
+# Install into a virtual environment:
+#   python -m venv .venv
+#   .venv\Scripts\Activate.ps1          # PowerShell
+#   pip install -r requirements.txt
+#
+# All other imports (urllib, json, re, threading, etc.) are Python stdlib.
+
+# HTML extraction for WebExtract and WebResearch skills.
+# Both skills fall back to stdlib html.parser if this is absent,
+# but bs4 gives significantly cleaner text from real-world web pages.
+beautifulsoup4>=4.12
+
+# System metrics (RAM, disk, CPU) used by system_check.py.
+psutil>=5.9

@@ -30,9 +30,22 @@ This project uses a local Ollama runtime and focuses on transparent, logged orch
 ## Quick Start
 
 ### Prerequisites
-- Python environment (project uses `.venv`).
-- Ollama installed and available in `PATH`.
+- Python 3.11+ with a virtual environment (project uses `.venv`).
+- Ollama installed and available in `PATH` — [https://ollama.com](https://ollama.com).
 - At least one model pulled locally (e.g. `ollama pull gemma3:20b`).
+
+### First-time setup
+```powershell
+# Create and activate the virtual environment
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Regenerate the skills catalog
+python .\code\skills_catalog_builder.py
+```
 
 ### Regenerate the skills catalog
 Run this whenever a `skill.md` file is added or changed:

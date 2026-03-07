@@ -8,3 +8,4 @@ code/skills/Memory/memory_store.txt
 *.pyc
 /controldata/logs
 /testcode/results
+/webresearch

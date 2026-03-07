@@ -53,7 +53,7 @@ from . import colors
 # MARK: LAYOUT CONSTANTS
 # ====================================================================================================
 W_TIMELINE = 20    # left timeline column total width, including its border
-H_TOP      = 5     # ollama ps bar total height, including border (3 inner content rows)
+H_TOP      = 4     # ollama ps bar total height, including border (2 inner content rows)
 H_BOTTOM   = 3     # chat input bar total height, including border
 FRAME_S    = 0.02  # target frame interval (~50 fps)
 

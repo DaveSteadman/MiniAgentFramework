@@ -51,3 +51,4 @@ Search the web using DuckDuckGo (no API key required) and return a ranked list o
 - Uses stdlib `urllib` only — no `requests` dependency.
 - Results reflect DuckDuckGo's current index; quality may vary by query.
 - Pair with the WebExtract skill to fetch and read full page content from any result URL.
+- **If the user wants to SAVE or STORE results into a research area or domain, use the WebResearch skill instead (`mine_search`). This skill only returns results to the LLM — it does not persist anything.**

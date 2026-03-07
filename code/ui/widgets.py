@@ -21,8 +21,11 @@ class ScrollLog:
     def add_line(self, text, attr=None):
         if attr is None:
             attr = colors.CHAT
-        self._lines.append((str(text), attr))
-        if len(self._lines) > self._max:
+        # Split on newlines so embedded \n renders as separate rows rather than
+        # overwriting from column 0 on the physical terminal.
+        for segment in str(text).splitlines() or ['']:
+            self._lines.append((segment, attr))
+        while len(self._lines) > self._max:
             self._lines.pop(0)
 
     def clear(self):

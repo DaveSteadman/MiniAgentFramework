@@ -169,6 +169,35 @@ Single JSON payload for orchestration planning.
       ]
     },
     {
+      "skill_name": "WebResearch Skill",
+      "relative_path": "code/skills/WebResearch/skill.md",
+      "purpose": "Mine web content into a structured three-stage research workspace. Handles both direct URL",
+      "module": "code/skills/WebResearch/web_research_skill.py",
+      "functions": [
+        "mine_search(\"electric vehicle battery 2026\", \"CarIndustry\", max_results=5)",
+        "mine_search(query, domain, max_results)",
+        "mine_search(query: str, domain: str, max_results: int = 5)",
+        "mine_url(\"https://example.com/article\", \"GeneralNews\")",
+        "mine_url(url, domain, slug, max_words)",
+        "mine_url(url: str, domain: str, slug: str = None, max_words: int = 600)"
+      ],
+      "inputs": [
+        "`mine_url(url, domain, slug, max_words)`",
+        "`url`: full HTTP/HTTPS URL to fetch and save (required)",
+        "`domain`: research domain label for filing, e.g. \"GeneralNews\" or \"CarIndustry\" (required)",
+        "`slug`: optional item folder name; defaults to the page title if omitted",
+        "`max_words`: maximum words of extracted body text, 50\u20131200, default 600",
+        "`mine_search(query, domain, max_results)`",
+        "`query`: search query string (required)",
+        "`domain`: research domain label (required)",
+        "`max_results`: number of search results to record, 1\u201310, default 5"
+      ],
+      "outputs": [
+        "Both functions return a confirmation string: `Saved: <absolute path to .md file>`",
+        "On failure: a descriptive error string beginning with `Error:`"
+      ]
+    },
+    {
       "skill_name": "WebSearch Skill",
       "relative_path": "code/skills/WebSearch/skill.md",
       "purpose": "Search the web using DuckDuckGo (no API key required) and return a ranked list of results with title, URL, and snippet. Pure Python \u2014 no external service accounts needed.",

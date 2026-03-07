@@ -1,7 +1,7 @@
 {
   "tasks": [
     {
-      "name": "system_health_check",
+      "name": "SystemHealth",
       "enabled": true,
       "schedule": { "type": "interval", "minutes": 60 },
       "prompts": [

@@ -245,6 +245,36 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
 
 
 # ----------------------------------------------------------------------------------------------------
+def stop_model(
+    model_name: str,
+    host: str = DEFAULT_OLLAMA_HOST,
+) -> None:
+    """Unload a model from VRAM immediately by sending keep_alive=0 to the generate endpoint.
+
+    Ollama interprets a generate request with keep_alive=0 as an instruction to evict the
+    model from memory as soon as the (empty) call completes.  Raises RuntimeError on failure.
+    """
+    payload = {
+        "model":      model_name,
+        "prompt":     "",
+        "keep_alive": 0,
+        "stream":     False,
+    }
+    try:
+        _request_json(
+            url=f"{host.rstrip('/')}/api/generate",
+            method="POST",
+            payload=payload,
+            timeout=30.0,
+        )
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Ollama HTTP error {error.code} stopping model: {error_body}") from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"Unable to reach Ollama at {host}: {error.reason}") from error
+
+
+# ----------------------------------------------------------------------------------------------------
 def call_ollama_extended(
     model_name: str,
     prompt: str,

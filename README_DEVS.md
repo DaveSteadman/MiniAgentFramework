@@ -104,6 +104,49 @@ For user-facing setup and usage see [README.md](README.md).
 | `get_test_prompts_dir()` | `<repo_root>/controldata/test_prompts/` |
 | `get_test_results_dir()` | `<repo_root>/controldata/test_results/` |
 
+- `code/webresearch_utils.py`
+  - Three-stage web research workspace under `webresearch/`.
+  - Manages `01-Mine`, `02-Analysis`, and `03-Presentation` stage directories, each partitioned by domain and `yyyy/mm/dd/NNN-slug` dated folders.
+
+| Accessor | Path |
+|---|---|
+| `get_webresearch_root()` | `<repo_root>/webresearch/` |
+| `get_stage_dir(stage)` | `<repo_root>/webresearch/<stage>/` |
+| `get_domain_dir(stage, domain)` | `<repo_root>/webresearch/<stage>/<domain>/` |
+| `get_date_dir(stage, domain)` | `<repo_root>/webresearch/<stage>/<domain>/yyyy/mm/dd/` |
+| `create_item_dir(stage, domain, slug)` | Creates and returns `NNN-slug/` inside the date dir |
+
+---
+
+## Dependencies
+
+All runtime dependencies are listed in [`requirements.txt`](requirements.txt).
+
+| Package | Version | Required by | Notes |
+|---|---|---|---|
+| `beautifulsoup4` | ≥ 4.12 | WebExtract, WebResearch skills | Optional but strongly recommended — both skills fall back to stdlib `html.parser` if absent, but bs4 gives much cleaner extraction from real-world pages. |
+| `psutil` | ≥ 5.9 | `system_check.py` | Provides RAM, disk, and CPU metrics. |
+
+All other imports (`urllib`, `json`, `re`, `threading`, `pathlib`, …) are Python stdlib.
+
+### Setup (new user)
+
+```powershell
+# 1. Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# 2. Install Python dependencies
+pip install -r requirements.txt
+
+# 3. Install Ollama and pull a model (external, one-time)
+#    https://ollama.com — download the installer, then:
+ollama pull gemma3:20b
+
+# 4. Regenerate the skills catalog
+python .\code\skills_catalog_builder.py
+```
+
 ---
 
 ## Project Flow (Single-Shot / Chat Turn)
@@ -150,4 +193,9 @@ controldata/
   test_results/              CSV results and analysis files from test runs.
 testcode/                    External test scripts (test_wrapper, test_analyzer, regressions).
 data/                        Miscellaneous data files (e.g. systemstats.csv).
+webresearch/
+  01-Mine/                   Raw fetched content (URLs and search results as .md files).
+  02-Analysis/               Processed and summarised research artefacts.
+  03-Presentation/           Final polished outputs for sharing or reporting.
+  (each stage uses <domain>/yyyy/mm/dd/NNN-slug/ sub-directories)
 ```

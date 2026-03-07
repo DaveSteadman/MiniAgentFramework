@@ -38,3 +38,4 @@ Typical chained usage — planner selects both WebSearch and WebExtract:
 - Only supports `http` and `https` URLs — local paths and ftp are rejected.
 - Returns an error string (never raises) so orchestration can continue if a page fails to load.
 - Best paired with the WebSearch skill which provides the candidate URLs.
+- **If the user wants to SAVE or MINE a URL into a research area or domain, use the WebResearch skill instead (`mine_url`). This skill only returns text to the LLM — it does not persist anything.**

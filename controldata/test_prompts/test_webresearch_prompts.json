@@ -1,0 +1,17 @@
+[
+    "mine the URL https://en.wikipedia.org/wiki/Artificial_intelligence and save it to the GeneralNews research area",
+    "mine the URL https://en.wikipedia.org/wiki/Large_language_model and save it to the GeneralNews research area",
+    "search for latest AI news in 2026 and save the results to the GeneralNews research area",
+    "search for Python programming language news and save the results to the TechNews research area",
+    "mine the URL https://en.wikipedia.org/wiki/Python_(programming_language) and save it to the TechNews research area",
+    "search for electric vehicle battery technology breakthroughs and save the results to the CarIndustry research area",
+    "mine the URL https://en.wikipedia.org/wiki/Electric_vehicle and save it to the CarIndustry research area",
+    "search for open source LLM models 2026 and save the results to the AIResearch research area",
+    "mine the URL https://en.wikipedia.org/wiki/Ollama_(software) and save it to the AIResearch research area",
+    "search for DuckDuckGo search engine history and save the results to the GeneralNews research area",
+    "mine the URL https://en.wikipedia.org/wiki/Renewable_energy and save it to the CleanEnergy research area",
+    "search for solar panel efficiency records 2026 and save the results to the CleanEnergy research area",
+    "mine the URL https://docs.python.org/3/ and save it to the TechNews research area with at most 400 words",
+    "search for Microsoft Copilot AI assistant news and save the results to the AIResearch research area",
+    "mine the URL https://en.wikipedia.org/wiki/Space_exploration and save it to the SpaceNews research area"
+]
