@@ -1,34 +1,38 @@
 import os
 import sys
 import io
-import ctypes
-import ctypes.wintypes
 
 # ====================================================================================================
-# MARK: WINDOWS CONSOLE SETUP
+# MARK: PLATFORM CONSOLE SETUP
 # ====================================================================================================
 
-# Flags for SetConsoleMode
-_ENABLE_PROCESSED_OUTPUT            = 0x0001
-_ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
-_ENABLE_PROCESSED_INPUT             = 0x0001
-_ENABLE_ECHO_INPUT                  = 0x0004
-_ENABLE_LINE_INPUT                  = 0x0002
+if sys.platform == 'win32':
+    import ctypes
+    import ctypes.wintypes
 
-_k32 = ctypes.windll.kernel32
+    # Flags for SetConsoleMode
+    _ENABLE_PROCESSED_OUTPUT            = 0x0001
+    _ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+    _ENABLE_PROCESSED_INPUT             = 0x0001
+    _ENABLE_ECHO_INPUT                  = 0x0004
+    _ENABLE_LINE_INPUT                  = 0x0002
 
-# ----------------------------------------------------------------------------------------------------
+    _k32 = ctypes.windll.kernel32
 
-def _get_handle(std_id):
-    return _k32.GetStdHandle(ctypes.wintypes.DWORD(std_id))
+    def _get_handle(std_id):
+        return _k32.GetStdHandle(ctypes.wintypes.DWORD(std_id))
 
-def _get_mode(handle):
-    mode = ctypes.wintypes.DWORD(0)
-    _k32.GetConsoleMode(handle, ctypes.byref(mode))
-    return mode.value
+    def _get_mode(handle):
+        mode = ctypes.wintypes.DWORD(0)
+        _k32.GetConsoleMode(handle, ctypes.byref(mode))
+        return mode.value
 
-def _set_mode(handle, mode):
-    _k32.SetConsoleMode(handle, ctypes.wintypes.DWORD(mode))
+    def _set_mode(handle, mode):
+        _k32.SetConsoleMode(handle, ctypes.wintypes.DWORD(mode))
+
+else:
+    import tty
+    import termios
 
 # ====================================================================================================
 # MARK: ANSI HELPERS
@@ -97,21 +101,23 @@ class Screen:
     # ----------------------------------------------------------------------------------------------------
 
     def enable(self):
-        STD_OUTPUT_HANDLE = ctypes.wintypes.DWORD(-11)
-        STD_INPUT_HANDLE  = ctypes.wintypes.DWORD(-10)
+        if sys.platform == 'win32':
+            self._stdout_handle = _get_handle(-11)
+            self._stdin_handle  = _get_handle(-10)
+            self._orig_out_mode = _get_mode(self._stdout_handle)
+            self._orig_in_mode  = _get_mode(self._stdin_handle)
 
-        self._stdout_handle = _get_handle(-11)
-        self._stdin_handle  = _get_handle(-10)
-        self._orig_out_mode = _get_mode(self._stdout_handle)
-        self._orig_in_mode  = _get_mode(self._stdin_handle)
+            # Enable VT escape code processing on stdout
+            out_mode = self._orig_out_mode | _ENABLE_PROCESSED_OUTPUT | _ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            _set_mode(self._stdout_handle, out_mode)
 
-        # Enable VT escape code processing on stdout
-        out_mode = self._orig_out_mode | _ENABLE_PROCESSED_OUTPUT | _ENABLE_VIRTUAL_TERMINAL_PROCESSING
-        _set_mode(self._stdout_handle, out_mode)
-
-        # Disable line-buffering + echo on stdin so we get chars immediately
-        in_mode = self._orig_in_mode & ~(_ENABLE_ECHO_INPUT | _ENABLE_LINE_INPUT)
-        _set_mode(self._stdin_handle, in_mode)
+            # Disable line-buffering + echo on stdin so we get chars immediately
+            in_mode = self._orig_in_mode & ~(_ENABLE_ECHO_INPUT | _ENABLE_LINE_INPUT)
+            _set_mode(self._stdin_handle, in_mode)
+        else:
+            # Linux/macOS: VT processing is on by default; switch stdin to raw mode.
+            self._orig_termios = termios.tcgetattr(sys.stdin.fileno())
+            tty.setraw(sys.stdin.fileno())
 
         sys.stdout.write(_hide_cursor() + _clear_screen())
         sys.stdout.flush()
@@ -121,10 +127,14 @@ class Screen:
     # ----------------------------------------------------------------------------------------------------
 
     def disable(self):
-        if self._stdout_handle:
-            _set_mode(self._stdout_handle, self._orig_out_mode)
-        if self._stdin_handle:
-            _set_mode(self._stdin_handle, self._orig_in_mode)
+        if sys.platform == 'win32':
+            if self._stdout_handle:
+                _set_mode(self._stdout_handle, self._orig_out_mode)
+            if self._stdin_handle:
+                _set_mode(self._stdin_handle, self._orig_in_mode)
+        else:
+            if hasattr(self, '_orig_termios') and self._orig_termios is not None:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self._orig_termios)
         sys.stdout.write(_show_cursor() + _reset() + '\n')
         sys.stdout.flush()
 

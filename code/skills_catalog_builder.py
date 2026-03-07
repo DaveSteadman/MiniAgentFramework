@@ -20,7 +20,6 @@
 # Related modules:
 #   - ollama_client.py    -- used for optional LLM-assisted summarisation
 #   - planner_engine.py   -- consumes the skills_summary.md produced here
-#   - MiniAgentFramework.py -- top-level entrypoint that calls main() in this module
 # ====================================================================================================
 
 

@@ -39,14 +39,13 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
-import msvcrt
 import time
 from datetime import datetime
 
 from .screen  import Screen
 from .panel   import Panel
 from .widgets import ScrollLog, TextEdit, TimelineWidget
-from .keys    import TAB, CTRL_C, K_UP, K_DOWN, K_PGUP, K_PGDN, read_key
+from .keys    import TAB, CTRL_C, K_UP, K_DOWN, K_PGUP, K_PGDN, kbhit, read_key
 from . import colors
 
 
@@ -218,7 +217,7 @@ class DashboardApp:
                 self._screen.render()
                 # ---- end draw ----
 
-                if msvcrt.kbhit():
+                if kbhit():
                     self._handle_key(read_key())
                 else:
                     time.sleep(FRAME_S)
