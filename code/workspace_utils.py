@@ -1,18 +1,28 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# Shared workspace-root resolution for the MiniAgentFramework.
+# Shared workspace-root resolution and well-known directory accessors for the MiniAgentFramework.
 #
 # All modules that need to construct paths relative to the repository root should import
-# get_workspace_root() from here rather than rolling their own __file__-based computation.
+# the relevant accessor from here rather than rolling their own __file__-based computation.
 # This ensures a single definition that is resilient to internal directory reorganisation
 # and eliminates the three divergent implementations that previously existed in:
 #   - skill_executor.py          (parent.parent)
 #   - file_access_skill.py       (parents[3])
 #
+# Well-known directory accessors (all cached):
+#   get_workspace_root()    ->  <repo_root>/
+#   get_controldata_dir()   ->  <repo_root>/controldata/
+#   get_logs_dir()          ->  <repo_root>/controldata/logs/
+#   get_schedules_dir()     ->  <repo_root>/controldata/schedules/
+#   get_test_prompts_dir()  ->  <repo_root>/controldata/test_prompts/
+#   get_test_results_dir()  ->  <repo_root>/controldata/test_results/
+#
 # Related modules:
 #   - file_access_skill.py  -- uses get_workspace_root() for path-safety checks
 #   - skill_executor.py     -- uses get_workspace_root() to resolve skill module paths
+#   - main.py               -- uses get_logs_dir(), get_schedules_dir()
+#   - testcode/test_wrapper.py -- uses get_test_results_dir(), get_test_prompts_dir()
 # ====================================================================================================
 
 
@@ -35,3 +45,36 @@ def get_workspace_root() -> Path:
     """
     # This file lives at <repo_root>/code/workspace_utils.py
     return Path(__file__).resolve().parent.parent
+
+
+# ====================================================================================================
+# MARK: CONTROLDATA DIRECTORY ACCESSORS
+# ====================================================================================================
+@lru_cache(maxsize=1)
+def get_controldata_dir() -> Path:
+    """Return the absolute path to the controldata/ directory."""
+    return get_workspace_root() / "controldata"
+
+
+@lru_cache(maxsize=1)
+def get_logs_dir() -> Path:
+    """Return the absolute path to the controldata/logs/ directory."""
+    return get_controldata_dir() / "logs"
+
+
+@lru_cache(maxsize=1)
+def get_schedules_dir() -> Path:
+    """Return the absolute path to the controldata/schedules/ directory."""
+    return get_controldata_dir() / "schedules"
+
+
+@lru_cache(maxsize=1)
+def get_test_prompts_dir() -> Path:
+    """Return the absolute path to the controldata/test_prompts/ directory."""
+    return get_controldata_dir() / "test_prompts"
+
+
+@lru_cache(maxsize=1)
+def get_test_results_dir() -> Path:
+    """Return the absolute path to the controldata/test_results/ directory."""
+    return get_controldata_dir() / "test_results"

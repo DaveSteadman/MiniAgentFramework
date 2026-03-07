@@ -1,0 +1,30 @@
+{
+  "tasks": [
+    {
+      "name": "system_health_check",
+      "enabled": true,
+      "schedule": { "type": "interval", "minutes": 60 },
+      "prompts": [
+        "Check current system health: CPU usage, available memory, and disk space. Report any values that look concerning.",
+        "Based on the system health results just reported, summarise the overall status in one sentence and flag any action needed."
+      ]
+    },
+    {
+      "name": "file_backup_check",
+      "enabled": false,
+      "schedule": { "type": "daily", "time": "03:00" },
+      "prompts": [
+        "List files in the workspace directory that have been modified in the last 24 hours and report their names and sizes."
+      ]
+    },
+    {
+      "name": "morning_web_scan",
+      "enabled": false,
+      "schedule": { "type": "daily", "time": "05:00" },
+      "prompts": [
+        "Search the web for recent news about local LLM frameworks, open source AI agent tools, and Ollama updates from the last 48 hours.",
+        "From the web search results just retrieved, write a brief 3-bullet summary of the most interesting developments."
+      ]
+    }
+  ]
+}

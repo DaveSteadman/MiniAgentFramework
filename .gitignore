@@ -3,6 +3,7 @@
 code/skills/Memory/memory_store.txt
 /data
 /logs
-/testcode/results
+/controldata/test_results
 
 *.pyc
+/controldata/logs

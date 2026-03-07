@@ -9,7 +9,7 @@
 #
 # Usage:
 #   python testcode/test_wrapper.py
-#   python testcode/test_wrapper.py --output-dir testcode/results
+#   python testcode/test_wrapper.py --output-dir controldata/test_results
 #   python testcode/test_wrapper.py --prompts "output the time" "what is today's date"
 # ====================================================================================================
 
@@ -31,10 +31,13 @@ from pathlib import Path
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-REPO_ROOT          = Path(__file__).resolve().parent.parent
-MAIN_SCRIPT        = REPO_ROOT / "code" / "main.py"
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "results"
-DEFAULT_PROMPTS_FILE = Path(__file__).resolve().parent / "prompts" / "default_prompts.json"
+REPO_ROOT            = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "code"))
+from workspace_utils import get_test_prompts_dir, get_test_results_dir  # noqa: E402
+
+MAIN_SCRIPT          = REPO_ROOT / "code" / "main.py"
+DEFAULT_OUTPUT_DIR   = get_test_results_dir()
+DEFAULT_PROMPTS_FILE = get_test_prompts_dir() / "default_prompts.json"
 
 DEFAULT_PROMPTS = None  # Loaded from DEFAULT_PROMPTS_FILE at runtime.
 

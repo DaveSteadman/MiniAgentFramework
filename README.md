@@ -10,83 +10,22 @@ The core idea is:
 
 This project uses a local Ollama runtime and focuses on transparent, logged orchestration flows.
 
-## Major Elements
+> For module architecture, internal design, and project flow details see [README_DEVS.md](README_DEVS.md).
 
-### 1) Orchestration runtime
-- `code/main.py`
-  - Main orchestration entrypoint.
-  - Supports single-shot and interactive chat modes.
-  - Runs iterative planning/execution/validation loop (up to `MAX_ITERATIONS` retries).
-  - Produces timestamped execution logs in `logs/`.
+---
 
-### 2) LLM + Ollama client layer
-- `code/ollama_client.py`
-  - Ollama health checks and auto-startup (`ensure_ollama_running`).
-  - Model discovery and alias resolution (`list_ollama_models`, `resolve_model_name`).
-  - LLM call with full token metrics and TPS (`call_ollama_extended`).
-  - `OllamaCallResult` carries `prompt_tokens`, `completion_tokens`, `eval_duration_ns`, and a computed `tokens_per_second` property.
+## Modes of Operation
 
-### 3) Planning layer
-- `code/planner_engine.py`
-  - Builds planner prompts with the skills catalog as context.
-  - Parses and validates planner JSON into typed execution plans.
-  - Provides a deterministic DateTime fallback plan when the LLM response cannot be parsed.
+| Mode | Purpose | Typical command |
+|---|---|---|
+| **Single-shot** | Run one prompt through the full pipeline and exit | `python .\code\main.py --user-prompt "what time is it"` |
+| **Chat** | Interactive multi-turn REPL | `python .\code\main.py --chat` |
+| **Scheduler** | Run scheduled prompt tasks from `controldata/schedules/` unattended | `python .\code\main.py --scheduler` |
+| **Dashboard** | Full terminal UI: schedule timeline, live log tail, and chat combined | `python .\code\main.py --dashboard` |
+| **Test Wrapper** | Run a prompt suite as subprocesses and capture results to a CSV | `python .\testcode\test_wrapper.py` |
+| **Test Analyzer** | Classify outcomes and produce diagnostics from a test results CSV | `python .\code\main.py --analysetest <csv>` |
 
-- `code/preprocess_prompt.py`
-  - Standalone CLI for generating and inspecting a skill execution plan without running the full pipeline.
-
-### 4) Skill execution layer
-- `code/skill_executor.py`
-  - Executes allow-listed skill calls from the plan JSON.
-  - Resolves `{placeholder}` arguments across sequential calls.
-  - Dynamically imports only approved skill modules/functions.
-
-### 5) Validation + logging
-- `code/orchestration_validation.py`
-  - Validates each iteration's skill usage, prompt completeness, and response quality.
-
-- `code/runtime_logger.py`
-  - Sectioned logger with large horizontal separators.
-  - Writes evidence logs to `logs/run_YYYYMMDD_HHMMSS.txt`.
-  - In chat mode, verbose orchestration detail goes to the log file only; the console shows one status line per turn.
-
-### 6) Skills catalog + concrete skills
-- `code/skills_catalog_builder.py`
-  - Scans `code/skills/**/skill.md`.
-  - Generates `code/skills/skills_summary.md` as a single JSON payload.
-
-- `code/skills/DateTime/` — date and time skill functions.
-- `code/skills/SystemInfo/` — runtime system info (Python version, Ollama version, RAM, disk, OS).
-- `code/skills/FileAccess/` — sandboxed file read/write/list functions.
-- `code/skills/Memory/`
-  - Extracts and recalls durable environment facts via keyword relevance scoring.
-  - Persists facts across runs in `code/skills/Memory/memory_store.txt`.
-- `code/skills/WebSearch/` — searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
-- `code/skills/WebExtract/` — fetches a URL and extracts its readable prose, stripping HTML markup, navigation, and ads, ready for LLM synthesis.
-
-### 7) Test wrapper
-- `testcode/test_wrapper.py`
-  - Invokes `code/main.py` as a subprocess for each prompt in a configurable test suite.
-  - Records timing, exit code, final LLM output, and log file path to a timestamped CSV.
-  - Results land in `testcode/results/`.
-  - Prompt suites are JSON files in `testcode/prompts/` and are loaded via `--prompts-file`.
-
-### 8) Test analyzer
-- `testcode/test_analyzer.py`
-  - Reads a test results CSV and parses each run's log file for structured diagnostics.
-  - Classifies every prompt as `PASS`, `FAIL`, `TIMEOUT`, or `GAP` (capability gap admission).
-  - Extracts: skills selected, planner mode (LLM vs fallback), iteration count, validation result.
-  - Produces a `<name>_analysis.csv` with per-prompt diagnostics and a `<name>_gaps.txt` gap report.
-  - Invoked via `python code/main.py --analysetest <csv>` or directly as a CLI script.
-
-## Project Flow (High Level)
-1. Recall relevant memories and collect ambient system info.
-2. Load `code/skills/skills_summary.md` and ask the planner LLM which skills to call.
-3. Execute the approved Python skill calls in order and collect outputs.
-4. Build the final enriched prompt from skill outputs, recalled memories, and the planner template.
-5. Call the final LLM and validate the response.
-6. Retry up to `MAX_ITERATIONS` times if validation fails, feeding back error context.
-7. Log everything — planner prompt, plan JSON, skill outputs, final prompt, response, validation, and TPS for each LLM phase.
+---
 
 ## Quick Start
 
@@ -161,6 +100,56 @@ python .\code\main.py --chat --model "20b" --num-ctx 16384
 
 ---
 
+## Running: Scheduler Mode
+
+Runs scheduled prompt tasks from `controldata/schedules/` as a background loop. Each `*.json` file in that directory can define one or more tasks with either a daily time (`HH:MM`) or a repeating interval (minutes). Tasks fire unattended and are serialised through the same LLM lock used by all other modes.
+
+```powershell
+python .\code\main.py --scheduler
+```
+
+Press **Ctrl+C** for a clean shutdown — in-flight LLM calls are allowed to complete before exit.
+
+Schedule files live in `controldata/schedules/`. Each file must contain a top-level `"tasks"` list:
+
+```json
+{
+  "tasks": [
+    { "name": "system_health_check", "enabled": true, "type": "interval", "interval_minutes": 60, "prompt": "summarize system health" },
+    { "name": "morning_web_scan",     "enabled": true, "type": "daily",    "time": "05:00",          "prompt": "summarise tech news" }
+  ]
+}
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--model ALIAS` | `"20b"` | Ollama model used for all scheduled task calls. |
+| `--num-ctx N` | `32768` | Context window for scheduled task calls. |
+
+---
+
+## Running: Dashboard Mode
+
+Combines the schedule timeline, live log tail, and chat interface in a single terminal UI. Three panels are always visible: the Ollama status bar at the top, a scrolling schedule timeline on the left, and a tabbed main area (Log / Chat) on the right.
+
+```powershell
+python .\code\main.py --dashboard
+```
+
+| Key | Action |
+|---|---|
+| **Tab** | Switch between Log and Chat tabs |
+| **Enter** | Submit chat prompt (Chat tab) |
+| **↑ / ↓ / PgUp / PgDn** | Scroll the active panel |
+| **Ctrl+C** | Clean shutdown |
+
+| Option | Default | Description |
+|---|---|---|
+| `--model ALIAS` | `"20b"` | Model used for chat prompts in the dashboard. |
+| `--num-ctx N` | `32768` | Context window for dashboard chat calls. |
+
+---
+
 ## Running: Test Wrapper
 
 Runs a suite of prompts through `code/main.py` as a subprocess and records results to a timestamped CSV.
@@ -172,24 +161,19 @@ python .\testcode\test_wrapper.py
 | Option | Default | Description |
 |---|---|---|
 | `--prompts TEXT [TEXT ...]` | — | One or more prompt strings (overrides `--prompts-file`). |
-| `--prompts-file PATH` | `testcode/prompts/default_prompts.json` | JSON file containing an array of prompt strings. |
-| `--output-dir PATH` | `testcode/results/` | Directory where the CSV results file is written. |
+| `--prompts-file PATH` | `controldata/test_prompts/default_prompts.json` | JSON file containing an array of prompt strings. |
+| `--output-dir PATH` | `controldata/test_results/` | Directory where the CSV results file is written. |
 
 Each row in the CSV captures: `timestamp`, `prompt`, `final_output`, `duration_seconds`, `exit_code`, `log_file`, `stderr`.
 
 **Example — run a named prompts file:**
 ```powershell
-python .\testcode\test_wrapper.py --prompts-file testcode/prompts/test_web_skill_prompts.json
+python .\testcode\test_wrapper.py --prompts-file controldata/test_prompts/test_web_skill_prompts.json
 ```
 
 **Example — run a custom set of prompts inline:**
 ```powershell
 python .\testcode\test_wrapper.py --prompts "output the time" "what is today's date" "how much RAM is available"
-```
-
-**Example — write results to a different directory:**
-```powershell
-python .\testcode\test_wrapper.py --output-dir .\data\test_runs
 ```
 
 ---
@@ -199,12 +183,12 @@ python .\testcode\test_wrapper.py --output-dir .\data\test_runs
 Analyzes a test results CSV without touching Ollama — reads each row's log file and classifies outcomes.
 
 ```powershell
-python .\code\main.py --analysetest testcode\results\test_results_<timestamp>.csv
+python .\code\main.py --analysetest controldata\test_results\test_results_<timestamp>.csv
 ```
 
 Or run the analyzer directly:
 ```powershell
-python .\testcode\test_analyzer.py testcode\results\test_results_<timestamp>.csv
+python .\testcode\test_analyzer.py controldata\test_results\test_results_<timestamp>.csv
 ```
 
 Produces two files alongside the source CSV:
@@ -255,22 +239,13 @@ python .\code\system_check.py --num-ctx 4096
 
 ---
 
-## Logging and Evidence
-- Runtime evidence logs are written to `logs/run_YYYYMMDD_HHMMSS.txt`.
-- Each log includes sectioned output for:
-  - system status and resolved model,
-  - memory store and recall,
-  - ambient system info,
-  - planner prompt and plan JSON (with planner TPS),
-  - Python skill call outputs,
-  - final prompt context,
-  - final LLM response (with response TPS),
-  - validation result per iteration.
+## Logs and Output
 
-## Performance Metrics
-Each LLM call (planner and final) reports completion token throughput in the log:
-```
-Planner TPS: 42.3 tok/s  (87 tokens)
-Final LLM TPS: 38.1 tok/s  (142 tokens)
-```
-In chat mode TPS also appears in the per-turn console status line. These values come directly from Ollama's `eval_duration` field and reflect model generation speed only (prompt evaluation time is recorded separately).
+| Path | Contents |
+|---|---|
+| `controldata/logs/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) — one file per run. |
+| `controldata/schedules/` | Schedule definition files (`*.json`) consumed by Scheduler and Dashboard modes. |
+| `controldata/test_prompts/` | Prompt suite JSON files used by the Test Wrapper. |
+| `controldata/test_results/` | Timestamped CSV results and analysis files produced by the Test Wrapper and Analyzer. |
+
+Each log file contains full evidence for its run: resolved model, memory recall, skill outputs, planner JSON, final prompt, LLM response, and per-call token throughput.

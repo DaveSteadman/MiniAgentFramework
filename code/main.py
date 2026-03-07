@@ -32,7 +32,11 @@
 # ====================================================================================================
 import argparse
 import json
+import signal
+import threading
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from ollama_client import call_ollama_extended
@@ -49,6 +53,8 @@ from skill_executor import execute_skill_plan_calls
 from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
 from skills.SystemInfo.system_info_skill import get_system_info_string
+from workspace_utils import get_logs_dir
+from workspace_utils import get_schedules_dir
 
 
 # ====================================================================================================
@@ -60,11 +66,13 @@ DEFAULT_NUM_CTX          = 32768
 MAX_ITERATIONS           = 3
 MAX_CHAT_HISTORY_TURNS   = 10     # keep the last N user/assistant pairs; older turns are trimmed
 SKILLS_SUMMARY_PATH      = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
+SCHEDULES_DIR            = get_schedules_dir()
+SCHEDULER_POLL_SECS      = 30
 PLANNER_ASK              = (
     "Given the user prompt, select needed skills and return python_calls JSON. "
     "Choose the minimum required skills and provide explicit arguments for each python call."
 )
-LOG_DIR                  = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR                  = get_logs_dir()
 
 
 # ====================================================================================================
@@ -119,6 +127,18 @@ def parse_main_args() -> argparse.Namespace:
         default=None,
         metavar="CSV_FILE",
         help="Analyse a test results CSV produced by test_wrapper.py and exit.",
+    )
+    parser.add_argument(
+        "--scheduler",
+        action="store_true",
+        default=False,
+        help="Start the scheduled-task runner using task_schedule.json.",
+    )
+    parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        default=False,
+        help="Start the interactive dashboard (timeline + log + chat).",
     )
     return parser.parse_args()
 
@@ -232,7 +252,7 @@ def orchestrate_prompt(
     logger: SessionLogger,
     conversation_history: list[dict] | None = None,
     quiet: bool = False,
-) -> tuple[str, int, int, bool]:
+) -> tuple[str, int, int, bool, float]:
     """Run the full planner -> skill -> LLM pipeline for one prompt.
 
     Returns (final_response, prompt_tokens, completion_tokens, run_success, tokens_per_second).
@@ -437,6 +457,321 @@ def run_chat_mode(
 
 
 # ====================================================================================================
+# MARK: DASHBOARD MODE
+# ====================================================================================================
+def run_dashboard_mode(
+    config: OrchestratorConfig,
+    logger: SessionLogger,
+    log_path: Path,
+) -> None:
+    """Interactive dashboard: scheduler timeline + live log tail + chat, all in one terminal UI.
+
+    Three background threads run concurrently:
+      ollama-poll   refreshes the top bar with 'ollama ps' output every 10 s.
+      log-tail      streams new lines from the latest run_*.txt log file every 2 s.
+      scheduler     fires tasks from controldata/schedules/, one at a time, respecting llm_lock.
+
+    Chat input dispatches orchestrate_prompt on a short-lived thread.  If the LLM is
+    already busy with a scheduled task, the user gets an immediate 'LLM busy' message.
+    """
+    from scheduler import is_task_due, llm_lock, load_schedules_dir
+    from ui.dashboard_app import DashboardApp
+    from ui import colors as ui_colors
+    from ollama_client import get_ollama_ps_rows
+
+    shutdown = threading.Event()
+
+    tasks         = load_schedules_dir(SCHEDULES_DIR)
+    enabled_tasks = [t for t in tasks if t.get("enabled", True)]
+    last_run: dict[str, datetime | None] = {t["name"]: None for t in enabled_tasks}
+
+    chat_history: list[dict] = []
+
+    def on_chat_submit(text: str) -> None:
+        app.add_chat_line(f"You  \u25b6 {text}", ui_colors.INPUT)
+        app.set_active_tab(DashboardApp.TAB_CHAT)
+
+        def _run() -> None:
+            nonlocal chat_history
+            if not llm_lock.acquire(blocking=False):
+                app.add_chat_line(
+                    "Agent\u25b6 [LLM busy with a scheduled task \u2014 please wait]",
+                    ui_colors.RED,
+                )
+                return
+            try:
+                hist = list(chat_history) if chat_history else None
+                response, p_tokens, c_tokens, success, tps = orchestrate_prompt(
+                    user_prompt=text,
+                    config=config,
+                    logger=logger,
+                    conversation_history=hist,
+                    quiet=True,
+                )
+            finally:
+                llm_lock.release()
+
+            chat_history.append({"role": "user",      "content": text})
+            chat_history.append({"role": "assistant", "content": response})
+            if len(chat_history) > MAX_CHAT_HISTORY_TURNS * 2:
+                chat_history = chat_history[-(MAX_CHAT_HISTORY_TURNS * 2):]
+
+            tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
+            app.add_chat_line(f"Agent\u25b6 {response}", ui_colors.NORMAL)
+            app.add_chat_line(f"      [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
+
+        threading.Thread(target=_run, daemon=True, name="chat-dispatch").start()
+
+    app = DashboardApp(
+        tasks=enabled_tasks,
+        last_run=last_run,
+        on_submit=on_chat_submit,
+        shutdown_event=shutdown,
+    )
+
+    # ---- Background: ollama ps ----
+    def _ollama_poll() -> None:
+        _COLS = ['name', 'size', 'processor', 'until']
+        while not shutdown.is_set():
+            try:
+                rows = get_ollama_ps_rows()
+                if rows:
+                    w_name = max((len(r.get('name', '')) for r in rows), default=10)
+                    header = f"{'NAME':<{w_name}}  SIZE        PROCESSOR   UNTIL"
+                    lines  = [header]
+                    for row in rows:
+                        n = (row.get('name')      or '').ljust(w_name)
+                        s = (row.get('size')      or '').ljust(10)
+                        p = (row.get('processor') or '').ljust(10)
+                        u =  row.get('until')     or ''
+                        lines.append(f"{n}  {s}  {p}  {u}")
+                    app.set_ollama_lines(lines)
+                else:
+                    app.set_ollama_lines(["  (no models currently loaded)"])
+            except Exception as exc:
+                app.set_ollama_lines([f"  ollama ps: {exc}"])
+            for _ in range(20):    # 10 s in 0.5 s steps
+                if shutdown.is_set():
+                    break
+                time.sleep(0.5)
+
+    # ---- Background: log tail ----
+    def _log_tail() -> None:
+        watched: Path | None = None
+        pos = 0
+        while not shutdown.is_set():
+            try:
+                log_files = sorted(LOG_DIR.glob("run_*.txt"))
+                if log_files:
+                    latest = log_files[-1]
+                    if latest != watched:
+                        watched = latest
+                        pos     = 0
+                        app.add_log_line(f"\u2500\u2500\u2500 {latest.name} \u2500\u2500\u2500", ui_colors.BLUE)
+                    size = latest.stat().st_size
+                    if size > pos:
+                        with latest.open(encoding="utf-8", errors="replace") as fh:
+                            fh.seek(pos)
+                            new_text = fh.read()
+                        pos = size
+                        for line in new_text.splitlines():
+                            app.add_log_line(line, ui_colors.DIM)
+            except Exception:
+                pass
+            for _ in range(4):     # 2 s in 0.5 s steps
+                if shutdown.is_set():
+                    break
+                time.sleep(0.5)
+
+    # ---- Background: scheduler ----
+    def _scheduler_loop() -> None:
+        while not shutdown.is_set():
+            now = datetime.now()
+            for task in enabled_tasks:
+                if shutdown.is_set():
+                    break
+                name    = task["name"]
+                prompts = task.get("prompts", [])
+                if not prompts:
+                    continue
+                if not is_task_due(task, last_run[name], now):
+                    continue
+                if llm_lock.locked():
+                    app.add_log_line(f"[SCHED] '{name}' due but LLM busy \u2014 skipped", ui_colors.RED)
+                    continue
+
+                last_run[name] = now
+                app.add_log_line(f"[SCHED] Starting: {name}", ui_colors.MAGENTA)
+                app.add_chat_line(f"Sched\u25b6 Task started: {name}", ui_colors.MAGENTA)
+                logger.log_section(f"SCHEDULER TASK (dashboard): {name}")
+
+                with llm_lock:
+                    conversation_history: list[dict] = []
+                    for step_index, prompt_text in enumerate(prompts, start=1):
+                        if shutdown.is_set():
+                            break
+                        app.add_log_line(f"  [Step {step_index}] {prompt_text[:70]}", ui_colors.DIM)
+                        logger.log_file_only(f"[Step {step_index}] {prompt_text}")
+
+                        response, p_tokens, c_tokens, success, tps = orchestrate_prompt(
+                            user_prompt=prompt_text,
+                            config=config,
+                            logger=logger,
+                            conversation_history=conversation_history if conversation_history else None,
+                            quiet=True,
+                        )
+                        conversation_history.append({"role": "user",      "content": prompt_text})
+                        conversation_history.append({"role": "assistant", "content": response})
+
+                        tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
+                        app.add_log_line(f"  \u2713 [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
+                        app.add_chat_line(
+                            f"Sched\u25b6 [{name} step {step_index}] {response[:100]}",
+                            ui_colors.BLUE,
+                        )
+
+                app.add_log_line(f"[SCHED] Done: {name}", ui_colors.MAGENTA)
+                logger.log(f"[DASHBOARD] Task '{name}' completed.")
+
+            for _ in range(SCHEDULER_POLL_SECS * 2):   # respects shutdown
+                if shutdown.is_set():
+                    break
+                time.sleep(0.5)
+
+    # Register a SIGINT fallback in case the OS delivers it before kbhit sees it
+    original_sigint = signal.getsignal(signal.SIGINT)
+
+    def _sigint_handler(signum, frame):  # noqa: ARG001
+        shutdown.set()
+
+    signal.signal(signal.SIGINT, _sigint_handler)
+
+    threading.Thread(target=_ollama_poll,    daemon=True, name="dash-ollama").start()
+    threading.Thread(target=_log_tail,       daemon=True, name="dash-log-tail").start()
+    threading.Thread(target=_scheduler_loop, daemon=True, name="dash-scheduler").start()
+
+    app.add_chat_line("  MiniAgentFramework Dashboard", ui_colors.TITLE)
+    app.add_chat_line(f"  Model: {config.resolved_model}  |  Tab = Log\u2194Chat  |  Ctrl+C to stop",
+                      ui_colors.DIM)
+    app.add_log_line("  Log tail started \u2014 waiting for entries...", ui_colors.DIM)
+
+    try:
+        app.run()   # blocks; exits when Ctrl+C sets shutdown or _running=False
+    finally:
+        signal.signal(signal.SIGINT, original_sigint)
+        shutdown.set()
+        logger.log("[DASHBOARD] Stopped cleanly.")
+
+
+# ====================================================================================================
+# MARK: SCHEDULER MODE
+# ====================================================================================================
+def run_scheduler_mode(
+    config: OrchestratorConfig,
+    logger: SessionLogger,
+    log_path: Path,
+) -> None:
+    """Scheduled-task loop: fires prompt sequences according to task_schedule.json.
+
+    Only one task runs at a time (single-LLM constraint enforced by llm_lock).
+    If a task becomes due while another is in progress it is skipped for that poll cycle.
+
+    Each task's prompt sequence shares a growing conversation_history so later prompts
+    can reference the results of earlier ones within the same task run.
+
+    Graceful shutdown: Ctrl+C (SIGINT) sets a shutdown flag and prints a notice.  The
+    currently-running LLM call is allowed to finish; remaining steps in the active task
+    are then skipped; the loop exits cleanly and restores the original signal handler.
+    """
+    from scheduler import is_task_due, llm_lock, load_schedules_dir
+
+    shutdown        = threading.Event()
+    original_sigint = signal.getsignal(signal.SIGINT)
+
+    def _request_shutdown(signum, frame):  # noqa: ARG001
+        print("\n[SCHEDULER] Shutdown requested — current LLM call will finish, then stopping.")
+        shutdown.set()
+
+    signal.signal(signal.SIGINT, _request_shutdown)
+
+    tasks         = load_schedules_dir(SCHEDULES_DIR)
+    enabled_tasks = [t for t in tasks if t.get("enabled", True)]
+    last_run: dict[str, datetime | None] = {t["name"]: None for t in enabled_tasks}
+
+    print(f"\nScheduler mode active — {len(enabled_tasks)} enabled task(s) | model: {config.resolved_model}")
+    print(f"Log file: {log_path.as_posix()}")
+    print(f"Poll interval: {SCHEDULER_POLL_SECS}s | Press Ctrl+C to stop after current task.\n")
+
+    try:
+        while not shutdown.is_set():
+            now = datetime.now()
+
+            for task in enabled_tasks:
+                if shutdown.is_set():
+                    break
+
+                name    = task["name"]
+                prompts = task.get("prompts", [])
+                if not prompts:
+                    continue
+
+                if not is_task_due(task, last_run[name], now):
+                    continue
+
+                if llm_lock.locked():
+                    logger.log(f"[SCHEDULER] Task '{name}' is due but LLM is busy — skipped this cycle")
+                    continue
+
+                last_run[name] = now
+                logger.log_section(f"SCHEDULER TASK: {name}")
+                print(f"[SCHEDULER] Starting task: {name} ({len(prompts)} prompt(s)) at {now.strftime('%H:%M:%S')}")
+
+                with llm_lock:
+                    conversation_history: list[dict] = []
+
+                    for step_index, prompt_text in enumerate(prompts, start=1):
+                        if shutdown.is_set():
+                            print(f"  [SCHEDULER] Shutdown — skipping remaining steps for '{name}'.")
+                            logger.log_file_only(f"[SCHEDULER] Task '{name}' step {step_index} skipped (shutdown).")
+                            break
+
+                        short = prompt_text[:70] + ("..." if len(prompt_text) > 70 else "")
+                        print(f"  Step {step_index}/{len(prompts)}: {short}")
+                        logger.log_file_only(f"[Step {step_index}] {prompt_text}")
+
+                        response, p_tokens, c_tokens, success, tps = orchestrate_prompt(
+                            user_prompt=prompt_text,
+                            config=config,
+                            logger=logger,
+                            conversation_history=conversation_history if conversation_history else None,
+                            quiet=True,
+                        )
+
+                        tps_str  = f" | {tps:.1f} tok/s" if tps > 0 else ""
+                        preview  = response[:120] + ("..." if len(response) > 120 else "")
+                        print(f"  [{p_tokens:,} ctx tokens{tps_str}] {preview}")
+                        print()
+
+                        # Thread this step's Q&A into history for the next prompt in the sequence.
+                        conversation_history.append({"role": "user",      "content": prompt_text})
+                        conversation_history.append({"role": "assistant", "content": response})
+
+                print(f"[SCHEDULER] Task '{name}' completed.\n")
+                logger.log(f"[SCHEDULER] Task '{name}' completed.")
+
+            # Sleep in short increments so a shutdown request is noticed promptly.
+            for _ in range(SCHEDULER_POLL_SECS * 2):  # 0.5s steps
+                if shutdown.is_set():
+                    break
+                time.sleep(0.5)
+
+    finally:
+        signal.signal(signal.SIGINT, original_sigint)
+        print("\nScheduler stopped.")
+        logger.log("[SCHEDULER] Stopped cleanly.")
+
+
+# ====================================================================================================
 # MARK: MAIN ENTRYPOINT
 # ====================================================================================================
 def main() -> None:
@@ -471,7 +806,8 @@ def main() -> None:
     logger.log_section("SYSTEM STATUS")
     logger.log(f"Requested model: {args.model}")
     logger.log(f"Resolved model:  {resolved_model}")
-    logger.log(f"Mode:            {'chat' if args.chat else 'single-shot'}")
+    mode_label = "chat" if args.chat else "scheduler" if args.scheduler else "dashboard" if args.dashboard else "single-shot"
+    logger.log(f"Mode:            {mode_label}")
     logger.log(f"num_ctx:         {args.num_ctx}")
     logger.log(f"Max iterations:  {MAX_ITERATIONS}")
     logger.log(format_running_model_report(resolved_model))
@@ -479,6 +815,14 @@ def main() -> None:
 
     if args.chat:
         run_chat_mode(config=config, logger=logger, log_path=log_path)
+        return
+
+    if args.scheduler:
+        run_scheduler_mode(config=config, logger=logger, log_path=log_path)
+        return
+
+    if args.dashboard:
+        run_dashboard_mode(config=config, logger=logger, log_path=log_path)
         return
 
     # Single-shot mode: orchestrate one prompt and validate.

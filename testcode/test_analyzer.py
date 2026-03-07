@@ -22,10 +22,10 @@
 #   <source>_gaps.txt       -- summary of inferred missing or weak skill coverage
 #
 # Usage (via main.py):
-#   python code/main.py --analysetest testcode/results/test_results_<timestamp>.csv
+#   python code/main.py --analysetest controldata/test_results/test_results_<timestamp>.csv
 #
 # Or directly:
-#   python testcode/test_analyzer.py testcode/results/test_results_<timestamp>.csv
+#   python testcode/test_analyzer.py controldata/test_results/test_results_<timestamp>.csv
 # ====================================================================================================
 
 
