@@ -271,7 +271,7 @@ def call_ollama_extended(
             url=f"{host.rstrip('/')}/api/generate",
             method="POST",
             payload=payload,
-            timeout=120,
+            timeout=300,
         )
     except urllib.error.HTTPError as error:
         error_body = error.read().decode("utf-8", errors="replace")

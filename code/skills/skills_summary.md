@@ -7,6 +7,30 @@ Single JSON payload for orchestration planning.
   "skills_root": "code/skills",
   "skills": [
     {
+      "skill_name": "CodeExecute Skill",
+      "relative_path": "code/skills/CodeExecute/skill.md",
+      "purpose": "Execute a Python code snippet in a sandboxed environment and return the captured stdout as a string \u2014 use when the user requests computed or generated data (sequences, tables, calculations) that no other skill can produce.",
+      "module": "code/skills/CodeExecute/code_execute_skill.py",
+      "functions": [
+        "run_python_snippet(code: str)",
+        "run_python_snippet(code=\"import math\\nfor i in range(1, 6):\\n    print(i, math.factorial(i))\")",
+        "run_python_snippet(code=\"print('index,prime,fib')\\n# ... full snippet ...\")",
+        "run_python_snippet(code=<snippet>)"
+      ],
+      "inputs": [
+        "`run_python_snippet(code: str)`",
+        "`code`: a complete, self-contained Python snippet.",
+        "The snippet must use print() to emit all output \u2014 the return value of the last",
+        "Imports are restricted to a safe whitelist: math, itertools, collections, csv, io,",
+        "os, sys, subprocess, open, eval, exec, and file I/O are blocked.",
+        "Execution timeout: 15 seconds."
+      ],
+      "outputs": [
+        "Captured stdout as a plain string.",
+        "If the snippet raises an exception or produces no output, returns an error string starting"
+      ]
+    },
+    {
       "skill_name": "DateTime Skill",
       "relative_path": "code/skills/DateTime/skill.md",
       "purpose": "Return current date and current time as separate values.",
@@ -34,6 +58,7 @@ Single JSON payload for orchestration planning.
         "execute_file_instruction(\"create file abc.csv and write header1,header2 into it\")",
         "execute_file_instruction(\"read file ./data/content.txt\")",
         "execute_file_instruction(\"write hello world to file x.txt\")",
+        "execute_file_instruction(\"write the system information to ./data/<name>.csv\")",
         "execute_file_instruction(user_prompt: str)",
         "list_data_files()",
         "read_text_file(file_path: str, max_chars: int = 8000)",
@@ -43,7 +68,6 @@ Single JSON payload for orchestration planning.
         "`file_path`: target file path.",
         "`text`: content to write or append.",
         "`user_prompt`: natural-language instruction for command parsing.",
-        "Bare file names resolve under `./data`, while relative paths with directories resolve from workspace root.",
         "Typical trigger phrases:",
         "`create file <name>`",
         "`write ... to file <path>`",

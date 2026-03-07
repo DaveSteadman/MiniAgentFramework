@@ -79,6 +79,42 @@ DEFAULT_PLANNER_ASK = (
 # ====================================================================================================
 # MARK: JSON EXTRACTION + LOADING
 # ====================================================================================================
+def _repair_json_string_literals(text: str) -> str:
+    """Escape unescaped control characters inside JSON string literals.
+
+    LLMs sometimes emit multi-line code values with literal newlines rather than \\n
+    escape sequences, producing invalid JSON.  This pass fixes those cases so that
+    json.loads can succeed on an otherwise well-formed response.
+    """
+    result:      list[str] = []
+    in_string:   bool      = False
+    escape_next: bool      = False
+
+    for char in text:
+        if escape_next:
+            result.append(char)
+            escape_next = False
+        elif in_string and char == "\\":
+            result.append(char)
+            escape_next = True
+        elif char == '"':
+            result.append(char)
+            in_string = not in_string
+        elif in_string:
+            if char == "\n":
+                result.append("\\n")
+            elif char == "\r":
+                result.append("\\r")
+            elif char == "\t":
+                result.append("\\t")
+            else:
+                result.append(char)
+        else:
+            result.append(char)
+
+    return "".join(result)
+
+
 def extract_first_json_object(text: str) -> str:
     start_index = text.find("{")
     if start_index < 0:
@@ -419,12 +455,21 @@ def create_skill_execution_plan(
     try:
         planner_result = call_ollama_extended(model_name=model_name, prompt=planner_prompt, num_ctx=num_ctx)
         llm_text       = planner_result.response
-    except Exception:
+    except Exception as exc:
+        planner_prompt += f"\n[Planner LLM call failed: {exc}]"
         return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload), planner_prompt, None
 
     try:
-        plan_dict = json.loads(extract_first_json_object(llm_text))
-        return parse_execution_plan(plan_dict), planner_prompt, planner_result
+        raw_json = extract_first_json_object(llm_text)
     except Exception:
-        # Fall back deterministically so orchestration can proceed even with malformed planner output.
         return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload), planner_prompt, planner_result
+
+    # First attempt: parse as-is.  Second attempt: repair literal control chars in strings
+    # (LLMs sometimes embed multi-line code with real newlines inside JSON string values).
+    for json_candidate in (raw_json, _repair_json_string_literals(raw_json)):
+        try:
+            return parse_execution_plan(json.loads(json_candidate)), planner_prompt, planner_result
+        except Exception:
+            continue
+
+    return build_fallback_plan(user_prompt=user_prompt, skills_payload=skills_payload), planner_prompt, planner_result
