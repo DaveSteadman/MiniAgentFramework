@@ -35,7 +35,7 @@ from planner_engine import create_skill_execution_plan
 # MARK: CONSTANTS
 # ====================================================================================================
 DEFAULT_MODEL          = "gpt-oss:20b"
-DEFAULT_NUM_CTX        = 32768
+DEFAULT_NUM_CTX        = 131072
 DEFAULT_SKILLS_SUMMARY = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
 DEFAULT_OUTPUT_PLAN    = Path(__file__).resolve().parent / "skills" / "skills_plan.json"
 

@@ -60,7 +60,7 @@ def parse_catalog_args() -> argparse.Namespace:
     parser.add_argument(
         "--num-ctx",
         type=int,
-        default=32768,
+        default=131072,
         help="Context window for summary LLM calls (ignored with --no-llm).",
     )
     return parser.parse_args()

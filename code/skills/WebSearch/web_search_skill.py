@@ -13,6 +13,7 @@
 #   - main.py                          -- orchestration entry point
 #   - skills/WebExtract/               -- companion skill to fetch + extract page content
 #   - skills_catalog_builder.py        -- reads skill.md to build the catalog
+#   - webpage_utils.py                 -- HTTP fetch utility (shared)
 # ====================================================================================================
 
 
@@ -21,22 +22,15 @@
 # ====================================================================================================
 import html as _html
 import re
-import urllib.error
 import urllib.parse
-import urllib.request
+
+from webpage_utils import fetch_html as _fetch_html
 
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
 _DDG_URL = "https://duckduckgo.com/html/?q={q}"
-
-_HEADERS = {
-    "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Connection":      "close",
-}
 
 # DDG wraps outbound links in an internal redirect; decode to extract the real destination URL.
 _REDIRECT_RE = re.compile(r"/l/\?uddg=([^&\"'>]+)")
@@ -81,21 +75,18 @@ def _decode_ddg_url(href: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _fetch_html(url: str, timeout: float) -> str:
-    request = urllib.request.Request(url=url, headers=_HEADERS, method="GET")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        charset = "utf-8"
-        content_type = response.headers.get("Content-Type", "")
-        for part in content_type.split(";"):
-            part = part.strip()
-            if part.startswith("charset="):
-                charset = part[8:].strip() or "utf-8"
-                break
-        raw = response.read()
+def _is_ddg_ad(url: str) -> bool:
+    """Return True if a decoded URL is still a DuckDuckGo tracking/ad URL.
+
+    DuckDuckGo ads use a /y.js?ad_domain=... href instead of the /l/?uddg= organic
+    redirect.  The decoder does not recognise this format so the raw tracking URL
+    passes through unchanged — these should be excluded from results.
+    """
     try:
-        return raw.decode(charset, errors="replace")
-    except LookupError:
-        return raw.decode("utf-8", errors="replace")
+        host = urllib.parse.urlparse(url).netloc.lower()
+        return host == "duckduckgo.com" or host.endswith(".duckduckgo.com")
+    except Exception:
+        return False
 
 
 # ====================================================================================================
@@ -114,7 +105,7 @@ def _extract_ddg_results(html_text: str, max_results: int) -> list[dict]:
             title = _strip_html(anchor.group(2))
             url   = _decode_ddg_url(href)
 
-            if not title or not url or url.startswith("/"):
+            if not title or not url or url.startswith("/") or _is_ddg_ad(url):
                 continue
 
             snippet = _strip_html(snippets[index].group(1)) if index < len(snippets) else ""
@@ -154,7 +145,7 @@ def search_web(
     search_url = _DDG_URL.format(q=encoded)
 
     try:
-        html_text = _fetch_html(search_url, timeout=float(timeout_seconds))
+        html_text, _ = _fetch_html(search_url, timeout=float(timeout_seconds))
     except Exception as exc:
         return [{"rank": 0, "title": "Search failed", "url": "", "snippet": str(exc)}]
 

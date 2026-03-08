@@ -48,6 +48,7 @@ class SlashCommandContext:
     config:        object                        # OrchestratorConfig; .resolved_model is writable
     output:        Callable[[str, str], None]    # (text, level) -> None
     clear_history: Callable[[], None]            # resets conversation history
+    request_exit:  Callable[[], None] | None = None  # optional: signals the host to shut down
 
 
 # ====================================================================================================
@@ -86,6 +87,16 @@ def _cmd_help(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output("Available slash commands:", "info")
     for name, description in sorted(_DESCRIPTIONS.items()):
         ctx.output(f"  {name:<16} {description}", "item")
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_exit(arg: str, ctx: SlashCommandContext) -> None:
+    if ctx.request_exit is None:
+        ctx.output("/exit is not available in this mode.", "error")
+        return
+    ctx.output("Exiting...", "dim")
+    ctx.request_exit()
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -160,6 +171,29 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
+    from ollama_client import get_llm_timeout, set_llm_timeout
+    if not arg:
+        ctx.output(
+            f"Usage: /timeout <seconds>  |  current: {get_llm_timeout()}s",
+            "dim",
+        )
+        return
+    try:
+        value = int(arg.strip().replace(",", "").replace("_", ""))
+    except ValueError:
+        ctx.output(f"Invalid value '{arg}' — must be an integer number of seconds (e.g. /timeout 1800).", "error")
+        return
+    if value < 10:
+        ctx.output("Timeout must be at least 10 seconds.", "error")
+        return
+    old = get_llm_timeout()
+    set_llm_timeout(value)
+    ctx.output(f"LLM timeout changed: {old}s \u2192 {value}s", "success")
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
     from ollama_client import get_ollama_ps_rows, list_ollama_models, resolve_model_name, stop_model
 
@@ -199,16 +233,20 @@ def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
 # ====================================================================================================
 _REGISTRY: dict[str, Callable] = {
     "/help":      _cmd_help,
+    "/exit":      _cmd_exit,
     "/models":    _cmd_models,
     "/model":     _cmd_model,
     "/ctx":       _cmd_ctx,
+    "/timeout":   _cmd_timeout,
     "/stopmodel": _cmd_stopmodel,
 }
 
 _DESCRIPTIONS: dict[str, str] = {
     "/help":      "List available slash commands",
+    "/exit":      "Exit dashboard mode",
     "/models":    "List installed Ollama models",
     "/model":     "<name>  Switch active model for all subsequent runs",
     "/ctx":       "<tokens>  Set context window size (e.g. /ctx 32768)",
+    "/timeout":   "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
     "/stopmodel": "[name]  Unload a running model from VRAM (defaults to active model)",
 }

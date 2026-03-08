@@ -8,6 +8,14 @@
         "Append a newline character to ping.txt.",
         "Append the time to a ping.txt"
       ]
+    },
+    {
+      "name": "GN-UK",
+      "enabled": false,
+      "schedule": { "type": "daily", "time": "03:00" },
+      "prompts": [
+        "search for 'UK News Headlines' and save the results to the GeneralNews research area."
+      ]
     }
   ]
 }

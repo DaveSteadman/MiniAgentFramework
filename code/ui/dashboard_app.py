@@ -195,9 +195,9 @@ class DashboardApp:
                 due_soon     = (mins_next is not None and mins_next <= 1)
                 self.input_edit.locked = task_running or due_soon
                 if task_running:
-                    self.input_edit.lock_msg = '  [LLM busy with a scheduled task \u2014 please wait]'
+                    self.input_edit.lock_msg = ' [LLM busy please wait]'
                 elif due_soon:
-                    self.input_edit.lock_msg = '  [chat locked \u2014 scheduled task due soon]'
+                    self.input_edit.lock_msg = ' [chat locked \u2014 scheduled task due soon]'
 
                 resized = self._screen.begin_frame()
                 if resized:

@@ -1,0 +1,16 @@
+{
+  "smtp_host": "smtp.gmail.com",
+  "smtp_port": 587,
+  "smtp_user": "your_sending_address@gmail.com",
+  "smtp_password_env": "MINIAGENT_SMTP_PASSWORD",
+  "from_address": "MiniAgent Reports <your_sending_address@gmail.com>",
+  "mailing_lists": {
+    "default": [
+      "recipient@example.com"
+    ],
+    "AINews": [
+      "alice@example.com",
+      "bob@example.com"
+    ]
+  }
+}

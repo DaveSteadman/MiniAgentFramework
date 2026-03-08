@@ -147,7 +147,7 @@ Combines the schedule timeline, live log tail, and chat interface in a single te
 python .\code\main.py --dashboard
 ```
 
-![Dashboard screenshot](progress/2026-03-07-FirstUI.png)
+![Dashboard screenshot](progress/2026-03-07-UI.png)
 
 | Key | Action |
 |---|---|

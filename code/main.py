@@ -34,6 +34,7 @@ from pathlib import Path
 from modes.dashboard import run_dashboard_mode
 from ollama_client import ensure_ollama_running
 from ollama_client import format_running_model_report
+from ollama_client import get_llm_timeout
 from orchestration import ConversationHistory
 from orchestration import OrchestratorConfig
 from orchestration import orchestrate_prompt
@@ -55,7 +56,7 @@ from workspace_utils import get_schedules_dir
 # ====================================================================================================
 USER_PROMPT              = "output the time"
 REQUESTED_MODEL          = "20b"
-DEFAULT_NUM_CTX          = 32768
+DEFAULT_NUM_CTX          = 131072
 MAX_ITERATIONS           = 3
 MAX_CHAT_HISTORY_TURNS   = 10     # keep the last N user/assistant pairs; older turns are trimmed
 SKILLS_SUMMARY_PATH      = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
@@ -288,7 +289,7 @@ def run_scheduler_mode(
                     continue
 
                 if llm_lock.locked():
-                    logger.log(f"[SCHEDULER] Task '{name}' is due but LLM is busy — skipped this cycle")
+                    logger.log(f"[SCHEDULER] Task '{name}' is due but LLM is busy — will retry next cycle")
                     continue
 
                 last_run[name] = now
@@ -296,7 +297,12 @@ def run_scheduler_mode(
                 print(f"[SCHEDULER] Starting task: {name} ({len(prompts)} prompt(s)) at {now.strftime('%H:%M:%S')}")
 
                 with llm_lock:
-                    task_hist = ConversationHistory()
+                    task_hist  = ConversationHistory()
+                    sched_ctx  = SlashCommandContext(
+                        config        = config,
+                        output        = lambda text, level='info': logger.log_file_only(f"[slash/{level}] {text}"),
+                        clear_history = task_hist.clear,
+                    )
 
                     for step_index, prompt_text in enumerate(prompts, start=1):
                         if shutdown.is_set():
@@ -307,6 +313,10 @@ def run_scheduler_mode(
                         short = prompt_text[:70] + ("..." if len(prompt_text) > 70 else "")
                         print(f"  Step {step_index}/{len(prompts)}: {short}")
                         logger.log_file_only(f"[Step {step_index}] {prompt_text}")
+
+                        if handle_slash(prompt_text, sched_ctx):
+                            print(f"  [slash command handled]")
+                            continue
 
                         response, p_tokens, _c, success, tps = orchestrate_prompt(
                             user_prompt=prompt_text,
@@ -376,6 +386,7 @@ def main() -> None:
     mode_label = "chat" if args.chat else "scheduler" if args.scheduler else "dashboard" if args.dashboard else "single-shot"
     logger.log(f"Mode:            {mode_label}")
     logger.log(f"num_ctx:         {args.num_ctx}")
+    logger.log(f"LLM timeout:     {get_llm_timeout()}s")
     logger.log(f"Max iterations:  {MAX_ITERATIONS}")
     logger.log(format_running_model_report(resolved_model))
     logger.log(f"Log file:        {log_path.as_posix()}")

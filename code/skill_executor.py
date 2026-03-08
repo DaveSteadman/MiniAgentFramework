@@ -27,7 +27,9 @@ from pathlib import Path
 
 from planner_engine import ExecutionPlan
 from planner_engine import PythonCall
+from prompt_tokens import resolve_tokens
 from workspace_utils import get_workspace_root
+from workspace_utils import normalize_module_path
 
 
 # ====================================================================================================
@@ -40,16 +42,6 @@ class ExecutedCall(dict):
 # ====================================================================================================
 # MARK: HELPERS
 # ====================================================================================================
-def _normalize_module_path(module_path: str) -> str:
-    # Strip leading ./ prefixes and the .py extension so paths can be compared uniformly.
-    normalized = str(module_path).strip().replace("\\", "/")
-    while normalized.startswith("./"):
-        normalized = normalized[2:]
-    if normalized.endswith(".py"):
-        normalized = normalized[:-3]
-    return normalized
-
-
 # ----------------------------------------------------------------------------------------------------
 def _load_callable_from_module_path(module_path: str, function_name: str):
     workspace_root        = get_workspace_root()
@@ -82,7 +74,7 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
 def _build_allowlist(skills_payload: dict) -> set[tuple[str, str]]:
     allowlist = set()
     for skill in skills_payload.get("skills", []):
-        module = _normalize_module_path(skill.get("module", ""))
+        module = normalize_module_path(skill.get("module", ""))
         for function_name in skill.get("functions", []):
             normalized = str(function_name).split("(")[0].strip()
             if module and normalized:
@@ -92,7 +84,7 @@ def _build_allowlist(skills_payload: dict) -> set[tuple[str, str]]:
 
 # ----------------------------------------------------------------------------------------------------
 def _validate_call_allowed(call: PythonCall, allowlist: set[tuple[str, str]]) -> None:
-    key = (_normalize_module_path(call.module), call.function)
+    key = (normalize_module_path(call.module), call.function)
     if key not in allowlist:
         raise RuntimeError(f"Planned call is not allow-listed by skills summary: {call.module}.{call.function}")
 
@@ -175,7 +167,7 @@ def _resolve_argument_placeholders(call_arguments: dict, previous_results: list[
             resolved[key] = inline_re.sub(_substitute_inline, normalized)
             continue
 
-        resolved[key] = value
+        resolved[key] = resolve_tokens(value)
 
     return resolved
 

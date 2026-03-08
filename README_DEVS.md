@@ -57,6 +57,8 @@ For user-facing setup and usage see [README.md](README.md).
   - Persists facts across runs in `code/skills/Memory/memory_store.txt`.
 - `code/skills/WebSearch/` - searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
 - `code/skills/WebExtract/` - fetches a URL and extracts its readable prose, stripping HTML markup, navigation, and ads, ready for LLM synthesis.
+- `code/skills/WebResearch/` - mines URLs or DuckDuckGo searches into persisted Markdown files in the `webresearch/01-Mine/` workspace. Supports inline article content embedding via `fetch_content=True`.
+- `code/skills/PageAssess/` - fetches a URL, classifies it as `article`, `index`, or `mixed` using text-density heuristics, and returns article-candidate links filtered by topic. No files written.
 
 ### 7) Scheduler
 - `code/scheduler.py`
@@ -115,6 +117,23 @@ For user-facing setup and usage see [README.md](README.md).
 | `get_domain_dir(stage, domain)` | `<repo_root>/webresearch/<stage>/<domain>/` |
 | `get_date_dir(stage, domain)` | `<repo_root>/webresearch/<stage>/<domain>/yyyy/mm/dd/` |
 | `create_item_dir(stage, domain, slug)` | Creates and returns `NNN-slug/` inside the date dir |
+
+- `code/webpage_utils.py`
+  - Shared HTTP fetching, HTML extraction, and text utilities used by all four web skill modules (WebExtract, WebResearch, PageAssess, WebSearch).
+  - Centralises ~200 lines of previously duplicated code; skills import `fetch_html`, `extract_content`, and `truncate_to_words` from here rather than defining their own copies.
+  - Uses BeautifulSoup when available and falls back to a pure-stdlib `html.parser` extractor automatically.
+
+| Public symbol | Description |
+|---|---|
+| `HTTP_HEADERS` | Standard browser-impersonation request headers |
+| `BS4_AVAILABLE` | `True` if `beautifulsoup4` is installed |
+| `SKIP_TAGS`, `BLOCK_TAGS` | Frozensets controlling HTML element handling during extraction |
+| `NOISE_HINTS` | Attribute substrings used to prune layout-noise containers |
+| `MIN_PARA_WORDS` | Minimum words per extracted paragraph (below = boilerplate) |
+| `fetch_html(url, timeout)` | Fetch a URL → `(html_text, final_url)` |
+| `dedup_paragraphs(paragraphs)` | Remove near-duplicate paragraphs by first-80-char key |
+| `extract_content(html_text)` | Extract `(page_title, body_text)` from raw HTML |
+| `truncate_to_words(text, max_words)` | Trim body text to a word limit |
 
 ---
 
@@ -199,3 +218,154 @@ webresearch/
   03-Presentation/           Final polished outputs for sharing or reporting.
   (each stage uses <domain>/yyyy/mm/dd/NNN-slug/ sub-directories)
 ```
+
+---
+
+## Web Skills: WebSearch vs WebExtract vs WebResearch vs PageAssess
+
+There are four web-facing skills. They are deliberately narrow in scope so the planner can
+compose them correctly. Each serves a different stage in the "find → assess → read → keep" pipeline.
+
+### Overview
+
+| | WebSearch | WebExtract | WebResearch | PageAssess |
+|---|---|---|---|---|
+| **What it does** | Returns a ranked list of URLs + snippets from DuckDuckGo | Fetches one URL and returns its readable prose | Mines a URL or search into a persisted Markdown file | Classifies a URL as article/index/mixed; returns filtered links |
+| **Input** | A query string | A URL | A URL or query string, plus a domain label | A URL, optional topic, optional link cap |
+| **Output** | Structured result list (in-memory / LLM context) | Plain text (in-memory / LLM context) | A saved `.md` file on disk; returns the file path | A structured dict (in-memory / LLM context) |
+| **Persists anything?** | No | No | Yes — writes to `webresearch/01-Mine/` | No |
+| **Needs a domain label?** | No | No | Yes (e.g. `"CarIndustry"`, `"GeneralNews"`) | No |
+| **Typical use** | Discovery — find candidate URLs | Deep-read — get the content of one known URL | Research archiving — save raw material for later analysis | Pre-qualification — decide whether a URL is worth mining |
+
+---
+
+### WebSearch
+
+**Purpose:** Discover what is on the web. Returns title, URL, and snippet for the top N DuckDuckGo results. Nothing is saved.
+
+**Key behaviours:**
+- Output lives only in the LLM context for the current turn.
+- Commonly used as the first step in a two-step chain: search → then WebExtract one or more of the resulting URLs.
+- Does *not* save results to disk; if persistence is required, use WebResearch (`mine_search`) instead.
+
+**Trigger prompts:**
+- `search the web for <topic>`
+- `find information about <topic>`
+- `look up the latest news on <topic>`
+- `what does the web say about <topic>`
+- `find me some links about <topic>`
+- `do a web search for <query>`
+- `search for recent articles on <topic>`
+- `what is the current status of <topic>`
+
+---
+
+### WebExtract
+
+**Purpose:** Read the content of a single, already-known URL. Strips HTML noise and returns clean prose, ready for the LLM to summarise or answer from.
+
+**Key behaviours:**
+- Requires a full URL as input — it cannot discover URLs from a query.
+- Most often chained after WebSearch: the planner calls WebSearch first to find a URL, then WebExtract to read it.
+- Can be called directly when the user supplies a URL in their prompt.
+- Does *not* save content to disk; if persistence is required, use WebResearch (`mine_url`) instead.
+- `max_words` (default 400) governs how much text is returned; increase it for lengthy articles.
+
+**Trigger prompts:**
+- `fetch the page at <url>`
+- `read the content of <url>`
+- `extract the text from <url>`
+- `get the article at <url>`
+- `summarise the page at <url>`
+- `what does this page say: <url>`
+- `read this link and tell me about it: <url>`
+- (also triggered implicitly by the planner when a prior WebSearch result needs to be read)
+
+---
+
+### WebResearch
+
+**Purpose:** Mine and archive web content into the structured `webresearch/` workspace for later analysis or presentation. This is the only skill that writes to disk.
+
+**Key behaviours:**
+- Two entry points:
+  - `mine_url` — fetches one URL and saves it as `source.md` under the named domain.
+  - `mine_search` — runs a DuckDuckGo search and saves the ranked results list as `results.md`.
+- Both require a `domain` label (e.g. `"CarIndustry"`, `"AIModels"`, `"GeneralNews"`). The domain determines the directory branch and acts as a thematic filing key.
+- Files are automatically placed in a dated, numbered folder: `webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<slug>/`.
+- Stage 1 (`01-Mine`) is raw capture. Stages 2 and 3 (`02-Analysis`, `03-Presentation`) share the same folder structure and are intended for downstream processing skills.
+- Return value is the absolute path to the saved file — this is what gets surfaced in the LLM's final answer.
+- `mine_url` works best on article-level URLs. For homepages or section index pages, run PageAssess first to classify the page and discover individual article links to mine.
+- `mine_search(fetch_content=True)` fetches each result URL and embeds extracted prose inline,
+  making the saved `results.md` self-contained with article text rather than just snippets.
+  Results with fewer than 120 extracted words are flagged as index pages. Use `content_words`
+  to control how much prose to embed per result (default 200 words, max 600).
+
+**Trigger prompts — mine a specific URL:**
+- `mine this URL into the <domain> research area: <url>`
+- `save <url> to the <domain> research area`
+- `fetch and save <url> to <domain>`
+- `archive the page at <url> in the <domain> domain`
+- `store this article in <domain>: <url>`
+
+**Trigger prompts — mine a search query:**
+- `search for <topic> and save the results to the <domain> research area`
+- `mine the web for <topic> and file it under <domain>`
+- `research <topic> and save it to <domain>`
+- `search for <query> and store the results in the <domain> research area`
+- `mine the web for information about <topic> in the <domain> domain`
+
+**Trigger prompts — mine a search with inline article content:**
+- `search for <query> and save results with article content to <domain>`
+- `search for <query> and save full article text to <domain>`
+- `mine a search for <query> with content into <domain>`
+
+---
+
+### PageAssess
+
+**Purpose:** Fetch a URL and classify it before deciding whether to mine it. Returns a structured dict with page type classification, word count, a prose preview, and a list of article-candidate links filtered by topic.
+
+**Key behaviours:**
+- Single entry point: `assess_page(url, topic="", max_links=10)`.
+- Classification is deterministic (no LLM): `word_count` and link-to-text ratio determine whether the page is `"article"`, `"index"`, or `"mixed"`.
+- Links are extracted from the main content area only — `<nav>`, `<header>`, `<footer>`, and heuristically identified noise containers are pruned first.
+- If `topic` is provided, returned links are ranked by token overlap with the topic string.
+- Does *not* write any files to disk.
+- Canonical use: run before `mine_url` when you don't know what kind of page a URL leads to.
+
+**Trigger prompts:**
+- `assess the page at <url>`
+- `assess <url> for topic <topic>`
+- `is <url> an article or a listing page`
+- `what kind of page is <url>`
+- `find article links on <url> about <topic>`
+- `get links from <url> related to <topic>`
+
+**Planner decision guide:**
+
+| `page_type` returned | Recommended next step |
+|---|---|
+| `"article"` | Call `mine_url` directly |
+| `"index"` | Use `article_links` from the result to discover individual article URLs; call `mine_url` on those |
+| `"mixed"` | Try `mine_url`; if `word_count < 200` also follow `article_links` |
+
+---
+
+### Planner guidance: which skill to use when
+
+The planner should apply this decision logic:
+
+1. **User provides a URL and wants to read it now, no saving needed → WebExtract**
+2. **User wants to search and get an answer now, no saving needed → WebSearch (+ optionally WebExtract)**
+3. **User wants to save / archive / mine / file content for later → WebResearch**
+4. **User says "mine", "save to the X research area", "file under X domain", "store in X" → always WebResearch**, never WebSearch or WebExtract
+5. **User gives a URL and explicitly wants it saved → WebResearch (`mine_url`)**
+6. **User gives a query and explicitly wants results saved → WebResearch (`mine_search`)**
+7. **User gives a URL that might be a homepage, section page, or landing page → PageAssess first**, then route based on `page_type`
+8. **User wants saved results to include article prose, not just snippets → WebResearch `mine_search(fetch_content=True)`**
+
+The critical distinctions:
+- **WebSearch, WebExtract, and PageAssess are ephemeral** — their output exists only in the LLM's current context window.
+- **WebResearch is persistent** — it always writes a file to `webresearch/01-Mine/`.
+- **PageAssess is a router** — it never mines content itself but tells the planner what kind of page a URL is so the right skill can be called next.

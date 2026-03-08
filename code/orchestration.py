@@ -36,6 +36,7 @@ from ollama_client import list_ollama_models
 from ollama_client import resolve_model_name
 from orchestration_validation import validate_orchestration_iteration
 from planner_engine import create_skill_execution_plan
+from prompt_tokens import resolve_tokens
 from runtime_logger import SessionLogger
 from skill_executor import execute_skill_plan_calls
 from skills.Memory.memory_skill import recall_relevant_memories
@@ -155,6 +156,102 @@ def build_prompt_context(
     }
 
 
+# ====================================================================================================
+# MARK: LOG FORMATTING HELPERS
+# ====================================================================================================
+def _format_plan_summary(plan, model_name: str) -> str:
+    """Return a compact one-screen summary of the planner's decided execution plan."""
+    lines: list[str] = []
+    lines.append(f"Model : {model_name}")
+
+    if plan.selected_skills:
+        skill_names = [s.skill_name for s in plan.selected_skills]
+        lines.append(f"Skills: {', '.join(skill_names)}")
+    else:
+        lines.append("Skills: (none selected)")
+
+    if plan.python_calls:
+        lines.append("")
+        for call in sorted(plan.python_calls, key=lambda c: c.order):
+            module_short = Path(call.module).stem
+            lines.append(f"  [{call.order}] {module_short}.{call.function}()")
+            for arg_name, arg_val in (call.arguments or {}).items():
+                val_str = repr(arg_val)
+                if len(val_str) > 120:
+                    val_str = val_str[:117] + "..."
+                lines.append(f"       {arg_name} = {val_str}")
+    else:
+        lines.append("(no Python calls planned — LLM will answer directly)")
+
+    if plan.final_prompt_template:
+        tmpl = plan.final_prompt_template.strip()
+        if len(tmpl) > 140:
+            tmpl = tmpl[:137] + "..."
+        lines.append(f"\nTemplate: {tmpl}")
+
+    return "\n".join(lines)
+
+
+def _format_skill_flow(python_call_outputs: list[dict]) -> str:
+    """Return a compact structural summary of executed skill calls and their results."""
+    if not python_call_outputs:
+        return "(no skill calls were executed)"
+
+    lines: list[str] = []
+    for output in python_call_outputs:
+        order    = output.get("order", "?")
+        module   = Path(output.get("module", "")).stem
+        function = output.get("function", "?")
+        args     = output.get("arguments", {}) or {}
+        result   = output.get("result")
+
+        lines.append(f"[{order}] {module}.{function}()")
+
+        for arg_name, arg_val in args.items():
+            val_str = repr(arg_val)
+            if len(val_str) > 120:
+                val_str = val_str[:117] + "..."
+            lines.append(f"     {arg_name} = {val_str}")
+
+        if result is None:
+            lines.append("     → None")
+        elif isinstance(result, dict):
+            keys = list(result.keys())
+            lines.append(f"     → dict  [{', '.join(str(k) for k in keys)}]")
+            for k, v in result.items():
+                v_str = str(v).replace("\n", " ")
+                if len(v_str) > 110:
+                    v_str = v_str[:107] + "..."
+                lines.append(f"          {k}: {v_str!r}")
+        elif isinstance(result, list):
+            lines.append(f"     → list  len={len(result)}")
+            if result:
+                first_str = str(result[0]).replace("\n", " ")
+                if len(first_str) > 110:
+                    first_str = first_str[:107] + "..."
+                lines.append(f"          [0]: {first_str!r}")
+        elif isinstance(result, str):
+            result_stripped = result.strip()
+            preview_lines   = result_stripped.splitlines()[:4]
+            total_lines     = result_stripped.count("\n") + 1
+            lines.append(f"     → str  {len(result)} chars / {total_lines} lines")
+            for pl in preview_lines:
+                if len(pl) > 110:
+                    pl = pl[:107] + "..."
+                lines.append(f"     {pl}")
+            if total_lines > 4:
+                lines.append(f"     ... ({total_lines - 4} more lines)")
+        else:
+            val_str = str(result)
+            if len(val_str) > 110:
+                val_str = val_str[:107] + "..."
+            lines.append(f"     → {type(result).__name__}: {val_str}")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def build_final_llm_prompt(
     user_prompt: str,
     plan,
@@ -237,6 +334,15 @@ def orchestrate_prompt(
     def _log_section(title: str) -> None:
         logger.log_section_file_only(title) if quiet else logger.log_section(title)
 
+    # Always write to file only — used for verbose/bulk content that clutters stdout/console.
+    def _log_file_only(msg: str = "") -> None:
+        logger.log_file_only(msg)
+
+    def _log_section_file_only(title: str) -> None:
+        logger.log_section_file_only(title)
+
+    user_prompt = resolve_tokens(user_prompt)
+
     memory_store_result = store_prompt_memories(user_prompt=user_prompt)
     recalled_memories   = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
     planner_user_prompt = user_prompt
@@ -259,7 +365,7 @@ def orchestrate_prompt(
     final_tps         = 0.0
 
     for iteration in range(1, config.max_iterations + 1):
-        _log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN")
+        _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN")
 
         planner_ask = _PLANNER_ASK
         if planner_feedback:
@@ -273,20 +379,31 @@ def orchestrate_prompt(
             num_ctx=config.num_ctx,
             skills_payload=config.skills_payload,
         )
-        _log(planner_prompt)
-        _log_section(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON")
-        _log(json.dumps(plan.to_dict(), indent=2))
+
+        _log_section(f"ITERATION {iteration} - SKILL PLAN")
+        _log(_format_plan_summary(plan, config.resolved_model))
+
+        # Full planner prompt (contains entire skills catalog) — file only to avoid log bloat.
+        _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN (verbose)")
+        _log_file_only(planner_prompt)
+        _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON (verbose)")
+        _log_file_only(json.dumps(plan.to_dict(), indent=2))
+
         if planner_llm_result is not None:
             _log(f"Planner TPS: {planner_llm_result.tokens_per_second:.1f} tok/s"
                  f"  ({planner_llm_result.completion_tokens} tokens)")
 
-        _log_section(f"ITERATION {iteration} - PYTHON CALL EXECUTION")
+        _log_section(f"ITERATION {iteration} - SKILL EXECUTION FLOW")
         python_call_outputs, last_call_output = execute_skill_plan_calls(
             plan=plan,
             user_prompt=user_prompt,
             skills_payload=config.skills_payload,
         )
-        _log(json.dumps(python_call_outputs, indent=2))
+        _log(_format_skill_flow(python_call_outputs))
+
+        # Full outputs JSON (may contain large text/HTML payloads) — file only.
+        _log_section_file_only(f"ITERATION {iteration} - PYTHON CALL OUTPUTS (verbose)")
+        _log_file_only(json.dumps(python_call_outputs, indent=2))
 
         final_prompt = build_final_llm_prompt(
             user_prompt=user_prompt,
@@ -306,8 +423,8 @@ def orchestrate_prompt(
             recalled_memories=recalled_memories,
         )
 
-        _log_section(f"ITERATION {iteration} - PROMPT CONTEXT JSON")
-        _log(json.dumps(prompt_context, indent=2))
+        _log_section_file_only(f"ITERATION {iteration} - PROMPT CONTEXT JSON (verbose)")
+        _log_file_only(json.dumps(prompt_context, indent=2))
 
         _log_section(f"ITERATION {iteration} - FINAL LLM EXECUTION")
         try:

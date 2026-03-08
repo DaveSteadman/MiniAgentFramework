@@ -32,7 +32,19 @@ from dataclasses import dataclass
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+DEFAULT_OLLAMA_HOST   = "http://localhost:11434"
+_DEFAULT_LLM_TIMEOUT: int = 300   # seconds; updated at runtime by /timeout slash command
+
+
+def get_llm_timeout() -> int:
+    """Return the current default LLM generation timeout in seconds."""
+    return _DEFAULT_LLM_TIMEOUT
+
+
+def set_llm_timeout(seconds: int) -> None:
+    """Update the default LLM generation timeout used by all call_ollama_extended calls."""
+    global _DEFAULT_LLM_TIMEOUT
+    _DEFAULT_LLM_TIMEOUT = seconds
 
 
 # ====================================================================================================
@@ -280,8 +292,12 @@ def call_ollama_extended(
     prompt: str,
     host: str = DEFAULT_OLLAMA_HOST,
     num_ctx: int | None = None,
+    timeout: int | None = None,
 ) -> OllamaCallResult:
-    """Call the Ollama generate endpoint and return the response with token usage counts."""
+    """Call the Ollama generate endpoint and return the response with token usage counts.
+
+    timeout defaults to the module-level _DEFAULT_LLM_TIMEOUT (set via set_llm_timeout()).
+    """
     ensure_ollama_running(host=host, start_if_needed=True)
 
     options = {}
@@ -296,12 +312,13 @@ def call_ollama_extended(
     if options:
         payload["options"] = options
 
+    effective_timeout = timeout if timeout is not None else _DEFAULT_LLM_TIMEOUT
     try:
         body = _request_json(
             url=f"{host.rstrip('/')}/api/generate",
             method="POST",
             payload=payload,
-            timeout=300,
+            timeout=effective_timeout,
         )
     except urllib.error.HTTPError as error:
         error_body = error.read().decode("utf-8", errors="replace")

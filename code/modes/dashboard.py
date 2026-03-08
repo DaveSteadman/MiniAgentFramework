@@ -115,6 +115,7 @@ def run_dashboard_mode(
             config        = config,
             output        = _dash_output,
             clear_history = _dash_clear_history,
+            request_exit  = shutdown.set,
         )
         if handle_slash(text, dash_ctx):
             return
@@ -122,7 +123,7 @@ def run_dashboard_mode(
         def _run() -> None:
             if not llm_lock.acquire(blocking=False):
                 app.add_chat_line(
-                    "Agent\u25b6 [LLM busy with a scheduled task \u2014 please wait]",
+                    "Agent\u25b6 [LLM busy please wait]",
                     ui_colors.RED,
                 )
                 return
@@ -262,7 +263,7 @@ def run_dashboard_mode(
                 if not is_task_due(task, last_run[name], now):
                     continue
                 if llm_lock.locked():
-                    app.add_log_line(f"[SCHED] '{name}' due but LLM busy \u2014 skipped", ui_colors.RED)
+                    app.add_log_line(f"[SCHED] '{name}' due but LLM busy \u2014 will retry next cycle", ui_colors.DIM)
                     continue
 
                 last_run[name] = now
@@ -274,12 +275,21 @@ def run_dashboard_mode(
                 task_logger.log_section_file_only(f"SCHEDULER TASK (dashboard): {name}")
 
                 with llm_lock:
-                    task_hist = ConversationHistory()
+                    task_hist  = ConversationHistory()
+                    sched_ctx  = SlashCommandContext(
+                        config        = config,
+                        output        = lambda text, level='info': task_logger.log_file_only(f"[slash/{level}] {text}"),
+                        clear_history = task_hist.clear,
+                    )
                     for step_index, prompt_text in enumerate(prompts, start=1):
                         if shutdown.is_set():
                             break
                         app.add_log_line(f"  [Step {step_index}] {prompt_text[:70]}", ui_colors.DIM)
                         task_logger.log_file_only(f"[Step {step_index}] {prompt_text}")
+
+                        if handle_slash(prompt_text, sched_ctx):
+                            app.add_log_line(f"  [slash command handled]", ui_colors.DIM)
+                            continue
 
                         hist = task_hist.as_list() or None
                         response, p_tokens, _c, _ok, tps = orchestrate_prompt(

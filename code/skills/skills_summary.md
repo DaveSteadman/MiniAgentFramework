@@ -119,6 +119,32 @@ Single JSON payload for orchestration planning.
       ]
     },
     {
+      "skill_name": "PageAssess Skill",
+      "relative_path": "code/skills/PageAssess/skill.md",
+      "purpose": "Fetch a URL, classify whether it is an article page or an index/listing page, and return a",
+      "module": "code/skills/PageAssess/page_assess_skill.py",
+      "functions": [
+        "assess_page(...)",
+        "assess_page(url, topic, max_links)",
+        "assess_page(url: str, topic: str = \"\", max_links: int = 10)"
+      ],
+      "inputs": [
+        "`assess_page(url, topic, max_links)`",
+        "`url`: full HTTP/HTTPS URL to assess (required)",
+        "`topic`: optional topic string to filter and rank returned links by word-overlap relevance",
+        "`max_links`: maximum article-candidate links to return, 1\u201320, default 10"
+      ],
+      "outputs": [
+        "`page_type` is one of:",
+        "`\"article\"` \u2014 substantial prose content (\u2265 300 words, \u2264 4 links per 100 words)",
+        "`\"index\"` \u2014 listing/aggregation page (< 150 words, or \u2265 7 links per 100 words)",
+        "`\"mixed\"` \u2014 some content plus significant navigation (common on news section pages)",
+        "`word_count`: prose words extracted after noise removal and deduplication",
+        "`article_links`: sorted by `topic` match score when `topic` provided; otherwise page order",
+        "On failure: `{\"error\": \"description of what went wrong\"}` \u2014 never raises"
+      ]
+    },
+    {
       "skill_name": "SystemInfo Skill",
       "relative_path": "code/skills/SystemInfo/skill.md",
       "purpose": "Provide runtime system information for prompt-context enrichment, including OS name, Python/Ollama versions, RAM usage, and disk usage.",
@@ -175,27 +201,87 @@ Single JSON payload for orchestration planning.
       "module": "code/skills/WebResearch/web_research_skill.py",
       "functions": [
         "mine_search(\"electric vehicle battery 2026\", \"CarIndustry\", max_results=5)",
-        "mine_search(query, domain, max_results)",
-        "mine_search(query: str, domain: str, max_results: int = 5)",
+        "mine_search(query, domain, max_results, fetch_content, content_words)",
+        "mine_search(query: str, domain: str, max_results: int = 5, fetch_content: bool = True, content_words: int = 600)",
+        "mine_search_deep(\"UK politics March 2026\", \"GeneralNews\", target_articles=8)",
+        "mine_search_deep(query, domain, max_results, max_articles_per_result, min_words, content_words, target_articles)",
+        "mine_search_deep(query: str, domain: str, max_results: int = 10, max_articles_per_result: int = 2, min_words: int = 250, content_words: int = 1500, target_articles: int = 5)",
         "mine_url(\"https://example.com/article\", \"GeneralNews\")",
         "mine_url(url, domain, slug, max_words)",
-        "mine_url(url: str, domain: str, slug: str = None, max_words: int = 600)"
+        "mine_url(url: str, domain: str, slug: str = None, max_words: int = 1200)"
       ],
       "inputs": [
         "`mine_url(url, domain, slug, max_words)`",
         "`url`: full HTTP/HTTPS URL to fetch and save (required)",
         "`domain`: research domain label for filing, e.g. \"GeneralNews\" or \"CarIndustry\" (required)",
         "`slug`: optional item folder name; defaults to the page title if omitted",
-        "`max_words`: maximum words of extracted body text, 50\u20131200, default 600",
-        "`mine_search(query, domain, max_results)`",
+        "`max_words`: maximum words of extracted body text, 50\u20134000, default 1200",
+        "`mine_search(query, domain, max_results, fetch_content, content_words)`",
         "`query`: search query string (required)",
         "`domain`: research domain label (required)",
-        "`max_results`: number of search results to record, 1\u201310, default 5"
+        "`max_results`: number of search results to record, 1\u201310, default 5",
+        "`fetch_content`: if `True`, fetch each result URL and embed extracted prose inline;",
+        "`content_words`: maximum prose words to embed per result when `fetch_content=True`, 50\u20134000, default 600",
+        "`mine_search_deep(query, domain, max_results, max_articles_per_result, min_words, content_words, target_articles)`",
+        "`query`: search query string (required)",
+        "`domain`: research domain label (required)",
+        "`max_results`: number of DDG results to process, 1\u201320, default 10",
+        "`max_articles_per_result`: for each index/section result, how many child article links to",
+        "`min_words`: minimum prose word count for a page to qualify as a mineable article, 100\u2013800, default 250",
+        "`content_words`: maximum words to save per article file, 200\u20134000, default 1500",
+        "`target_articles`: stop saving once this many articles have been collected, 1\u201320, default 5"
       ],
       "outputs": [
-        "Both functions return a confirmation string: `Saved: <absolute path to .md file>`",
-        "On failure: a descriptive error string beginning with `Error:`"
+        "`mine_url` and `mine_search` return a confirmation string: `Saved: <absolute path to .md file>`",
+        "`mine_search_deep` returns a multi-line summary: `Mined N article(s) for: '<query>'` followed",
+        "On failure: a descriptive error string beginning with `Error:`",
+        "When `mine_search` is called with `fetch_content=True` (the default), the saved `results.md` includes"
       ]
+    },
+    {
+      "skill_name": "WebResearchAnalysis Skill",
+      "relative_path": "code/skills/WebResearchAnalysis/skill.md",
+      "purpose": "Read mined content from the 01-Mine research stage and produce structured daily intelligence",
+      "module": "code/skills/WebResearchAnalysis/web_research_analysis_skill.py",
+      "functions": [
+        "create_daily_summary(domain, date, topic, model, num_ctx)",
+        "create_daily_summary(domain, date=\"\", topic=\"\", model=\"120b\", num_ctx=131072)",
+        "list_analyses(domain, max_days)",
+        "list_analyses(domain, max_days=7)",
+        "list_mine_days(domain, max_days)",
+        "list_mine_days(domain, max_days=7)"
+      ],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "skill_name": "WebResearchOutput Skill",
+      "relative_path": "code/skills/WebResearchOutput/skill.md",
+      "purpose": "",
+      "module": "",
+      "functions": [
+        "get_analysis_text(domain, date)",
+        "list_analyses(domain, max_days)",
+        "list_reports(domain, max_days=7)",
+        "send_daily_summary(domain, date, list_name, subject)",
+        "send_report_email(domain, date=\"\", list_name=\"default\", subject=\"\")"
+      ],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "skill_name": "WebResearchReport Skill",
+      "relative_path": "code/skills/WebResearchReport/skill.md",
+      "purpose": "",
+      "module": "",
+      "functions": [
+        "get_analysis_text(domain, date=\"\")",
+        "get_report_html(domain, date=\"\")",
+        "list_reports(domain, max_days=7)",
+        "save_html_report(domain, date=\"\", template=\"default\")"
+      ],
+      "inputs": [],
+      "outputs": []
     },
     {
       "skill_name": "WebSearch Skill",

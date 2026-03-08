@@ -78,3 +78,20 @@ def get_test_prompts_dir() -> Path:
 def get_test_results_dir() -> Path:
     """Return the absolute path to the controldata/test_results/ directory."""
     return get_controldata_dir() / "test_results"
+
+
+# ====================================================================================================
+# MARK: PATH UTILITIES
+# ====================================================================================================
+def normalize_module_path(module_path: str) -> str:
+    """Normalise a skill module path to a canonical form for allow-list comparisons.
+
+    Strips leading ./ prefixes and any trailing .py extension so paths from different
+    sources (skills_summary catalog vs LLM planner output) compare equal.
+    """
+    normalized = str(module_path).strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    if normalized.endswith(".py"):
+        normalized = normalized[:-3]
+    return normalized
