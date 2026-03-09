@@ -118,15 +118,21 @@ def summarize_locally(skill_md_path: Path) -> dict:
     title = next((line.lstrip("# ").strip() for line in lines if line.startswith("#")), skill_md_path.parent.name)
     purpose = ""
     for index, line in enumerate(lines):
-        if line.lower().startswith("## purpose") and index + 1 < len(lines):
+        if re.match(r"^##\s+(purpose|overview)$", line, re.IGNORECASE) and index + 1 < len(lines):
             purpose = lines[index + 1]
             break
 
-    # Extract the module path from a backtick-quoted "Module:" field in the file.
+    # Extract the module path. Handles two formats:
+    #   - Bullet:  "- Module: `path`"
+    #   - Heading: "## Module\n`path`"
     module = ""
     module_match = re.search(r"-\s*Module:\s*`([^`]+)`", skill_text)
     if module_match:
         module = module_match.group(1)
+    else:
+        heading_match = re.search(r"##\s+Module\s*\n+`([^`]+)`", skill_text)
+        if heading_match:
+            module = heading_match.group(1)
 
     # Collect all backtick-quoted function signatures (e.g. `func_name(args)`).
     functions = re.findall(r"`([A-Za-z_][A-Za-z0-9_]*\([^`]*\))`", skill_text)

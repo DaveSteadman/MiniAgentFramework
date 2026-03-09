@@ -3,18 +3,25 @@
     {
       "name": "PingCheck",
       "enabled": true,
-      "schedule": { "type": "interval", "minutes": 11 },
+      "schedule": { "type": "interval", "minutes": 55 },
       "prompts": [
         "Append a newline character to ping.txt.",
         "Append the time to a ping.txt"
       ]
     },
     {
-      "name": "GN-UK",
-      "enabled": false,
-      "schedule": { "type": "daily", "time": "03:00" },
+      "name": "DailyNews",
+      "enabled": true,
+      "schedule": { "type": "daily", "time": "07:09" },
       "prompts": [
-        "search for 'UK News Headlines' and save the results to the GeneralNews research area."
+        "/model 120b",
+        "/timeout 300",
+        "deep research  UK news headlines for {today} into the GeneralNews domain",
+        "deep research  French news headlines for {today} into the GeneralNews domain",
+        "deep research  German news headlines for {today} into the GeneralNews domain",
+        "/timeout 1800",
+        "Analyse the daily research for the GeneralNews domain for {today}, to create a summary of the top 10 articles at around 500 words each",
+        "Save an HTML report for the GeneralNews domain for {today} using the dark template"
       ]
     }
   ]

@@ -194,7 +194,69 @@ def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
-def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
+def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
+    from pathlib import Path
+    from skills_catalog_builder import (
+        find_skill_files, summarize_skill, normalize_summary,
+        render_summary_document, DEFAULT_SKILLS_ROOT, DEFAULT_OUTPUT_FILE,
+    )
+    from planner_engine import load_skills_payload
+
+    skills_root = DEFAULT_SKILLS_ROOT
+    output_path = DEFAULT_OUTPUT_FILE
+
+    ctx.output("Rebuilding skills catalog (local extraction, no LLM)…", "dim")
+    try:
+        skill_files = find_skill_files(skills_root=skills_root)
+        if not skill_files:
+            ctx.output("No skill.md files found — catalog unchanged.", "error")
+            return
+
+        summaries = [
+            normalize_summary(
+                summarize_skill(f, use_llm=False, model_name="", num_ctx=0),
+                f,
+            )
+            for f in skill_files
+        ]
+        summary_text = render_summary_document(summaries=summaries, output_path=output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(summary_text, encoding="utf-8")
+
+        # Hot-reload into the live config so this session immediately picks up the changes.
+        ctx.config.skills_payload = load_skills_payload(output_path)
+        ctx.output(
+            f"Skills catalog rebuilt: {len(summaries)} skill(s) registered.",
+            "success",
+        )
+    except Exception as exc:
+        ctx.output(f"Error rebuilding skills catalog: {exc}", "error")
+
+
+# ====================================================================================================
+# MARK: REGISTRY
+# ====================================================================================================
+_REGISTRY: dict[str, Callable] = {
+    "/help":      _cmd_help,
+    "/exit":      _cmd_exit,
+    "/models":    _cmd_models,
+    "/model":     _cmd_model,
+    "/ctx":       _cmd_ctx,
+    "/timeout":   _cmd_timeout,
+    "/stopmodel": _cmd_stopmodel,
+    "/reskills":  _cmd_reskills,
+}
+
+_DESCRIPTIONS: dict[str, str] = {
+    "/help":      "List available slash commands",
+    "/exit":      "Exit dashboard mode",
+    "/models":    "List installed Ollama models",
+    "/model":     "<name>  Switch active model for all subsequent runs",
+    "/ctx":       "<tokens>  Set context window size (e.g. /ctx 32768)",
+    "/timeout":   "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
+    "/stopmodel": "[name]  Unload a running model from VRAM (defaults to active model)",
+    "/reskills":  "Rebuild the skills catalog from skill.md files and hot-reload into session",
+}
     from ollama_client import get_ollama_ps_rows, list_ollama_models, resolve_model_name, stop_model
 
     # Determine which model to stop: explicit arg, or fall back to the active model.

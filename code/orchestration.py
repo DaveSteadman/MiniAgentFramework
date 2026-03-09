@@ -383,9 +383,19 @@ def orchestrate_prompt(
         _log_section(f"ITERATION {iteration} - SKILL PLAN")
         _log(_format_plan_summary(plan, config.resolved_model))
 
-        # Full planner prompt (contains entire skills catalog) — file only to avoid log bloat.
+        # Full planner prompt — file only. Replace the static skills catalog block with a
+        # path reference so the log contains only the dynamic, actionable parts.
         _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN (verbose)")
-        _log_file_only(planner_prompt)
+        _skills_marker = "Skills summary context:\n"
+        _marker_pos = planner_prompt.find(_skills_marker)
+        if _marker_pos != -1:
+            _logged_prompt = (
+                planner_prompt[:_marker_pos + len(_skills_marker)]
+                + f"[see {_SKILLS_SUMMARY_PATH}]"
+            )
+        else:
+            _logged_prompt = planner_prompt
+        _log_file_only(_logged_prompt)
         _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON (verbose)")
         _log_file_only(json.dumps(plan.to_dict(), indent=2))
 

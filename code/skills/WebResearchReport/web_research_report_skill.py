@@ -120,6 +120,215 @@ _REPORT_HTML_TEMPLATE = """\
 </html>"""
 
 
+# ----------------------------------------------------------------------------------------------------
+_REPORT_HTML_TEMPLATE_DARK = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      background: #000;
+      color: rgba(255,255,255,0.87);
+      margin: 0;
+      padding: 0;
+    }}
+    .rpt-header {{
+      position: sticky; top: 0; z-index: 50;
+      border-bottom: 1px solid rgba(255,255,255,0.10);
+      background: rgba(0,0,0,0.90);
+      backdrop-filter: blur(12px);
+      padding: 14px 40px;
+      display: flex; align-items: center; justify-content: space-between;
+    }}
+    .rpt-logo-mark {{
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px;
+      border: 1px solid rgba(255,255,255,0.20);
+      background: #09090b;
+      margin-right: 14px; flex-shrink: 0;
+    }}
+    .rpt-logo-mark-inner {{
+      width: 18px; height: 18px;
+      border: 1px solid rgba(255,255,255,0.60);
+      transform: rotate(45deg);
+    }}
+    .rpt-brand {{ display: flex; align-items: center; }}
+    .rpt-brand-sub {{
+      font-size: 10px; letter-spacing: 0.35em;
+      text-transform: uppercase; color: rgba(255,255,255,0.45);
+    }}
+    .rpt-brand-name {{
+      font-size: 14px; font-weight: 600;
+      letter-spacing: 0.15em; text-transform: uppercase;
+    }}
+    .rpt-date-badge {{
+      font-size: 10px; letter-spacing: 0.25em;
+      text-transform: uppercase; color: rgba(255,255,255,0.55);
+      border: 1px solid rgba(255,255,255,0.15);
+      padding: 6px 14px;
+    }}
+    .rpt-hero {{
+      position: relative;
+      border-bottom: 1px solid rgba(255,255,255,0.10);
+      overflow: hidden;
+      padding: 52px 40px;
+      background-image:
+        linear-gradient(135deg, rgba(255,255,255,0.05) 1px, transparent 1px),
+        linear-gradient(315deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }}
+    .rpt-hero::before {{
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(circle at top right, rgba(255,255,255,0.08), transparent 28%),
+        radial-gradient(circle at bottom left, rgba(255,255,255,0.04), transparent 22%);
+    }}
+    .rpt-hero-inner {{ position: relative; max-width: 880px; margin: 0 auto; }}
+    .rpt-eyebrow {{
+      display: inline-flex; align-items: center; gap: 10px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.05);
+      padding: 6px 14px;
+      font-size: 10px; letter-spacing: 0.28em;
+      text-transform: uppercase; color: rgba(255,255,255,0.65);
+      margin-bottom: 20px;
+    }}
+    .rpt-eyebrow-dot {{
+      width: 7px; height: 7px;
+      background: white; transform: rotate(45deg); flex-shrink: 0;
+    }}
+    .rpt-domain {{
+      font-size: 44px; font-weight: 700;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      line-height: 0.95;
+    }}
+    .rpt-domain-sub {{
+      display: block; color: rgba(255,255,255,0.45); margin-top: 4px;
+    }}
+    .rpt-meta-row {{
+      margin-top: 16px; font-size: 12px;
+      color: rgba(255,255,255,0.40); letter-spacing: 0.06em;
+    }}
+    .content {{ max-width: 880px; margin: 0 auto; padding: 44px 40px 64px; }}
+    h1 {{
+      font-size: 20px; font-weight: 700;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      color: white;
+      border-left: 3px solid rgba(255,255,255,0.35);
+      padding-left: 14px;
+      margin-top: 52px; margin-bottom: 16px;
+    }}
+    h2 {{
+      font-size: 15px; font-weight: 600;
+      letter-spacing: 0.10em; text-transform: uppercase;
+      color: rgba(255,255,255,0.88);
+      border-left: 2px solid rgba(255,255,255,0.20);
+      padding-left: 12px;
+      margin-top: 38px; margin-bottom: 10px;
+    }}
+    h3 {{
+      font-size: 12px; font-weight: 600;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: rgba(255,255,255,0.60);
+      margin-top: 28px; margin-bottom: 8px;
+    }}
+    h4 {{
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      color: rgba(255,255,255,0.38);
+      margin-top: 20px;
+    }}
+    p {{
+      margin: 10px 0; line-height: 1.82;
+      font-size: 14px; color: rgba(255,255,255,0.72);
+    }}
+    ul, ol {{ padding-left: 0; list-style: none; margin: 12px 0; }}
+    li {{
+      padding: 8px 12px 8px 22px;
+      border-left: 1px solid rgba(255,255,255,0.10);
+      margin-bottom: 4px;
+      font-size: 14px; line-height: 1.65;
+      color: rgba(255,255,255,0.72);
+      position: relative;
+    }}
+    li::before {{
+      content: '';
+      position: absolute; left: 8px; top: 15px;
+      width: 5px; height: 5px;
+      background: rgba(255,255,255,0.35);
+      transform: rotate(45deg);
+    }}
+    strong {{ color: white; }}
+    em     {{ color: rgba(255,255,255,0.72); }}
+    a      {{ color: rgba(255,255,255,0.80); }}
+    hr     {{ border: none; border-top: 1px solid rgba(255,255,255,0.10); margin: 44px 0; }}
+    blockquote {{
+      border-left: 3px solid rgba(255,255,255,0.25);
+      padding: 10px 20px;
+      color: rgba(255,255,255,0.55);
+      margin: 20px 0;
+      background: rgba(255,255,255,0.03);
+      font-style: italic;
+    }}
+    code {{
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 2px 7px; font-size: 0.85em;
+      font-family: 'Courier New', Courier, monospace;
+    }}
+    .rpt-footer {{
+      max-width: 880px; margin: 0 auto;
+      padding: 16px 40px 32px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-size: 10px; letter-spacing: 0.22em;
+      text-transform: uppercase; color: rgba(255,255,255,0.22);
+    }}
+    @media (max-width: 640px) {{
+      .rpt-header, .rpt-hero, .content, .rpt-footer {{ padding-left: 18px; padding-right: 18px; }}
+      .rpt-domain {{ font-size: 30px; }}
+    }}
+    @media print {{
+      .rpt-header {{ position: static; }}
+      body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+    }}
+  </style>
+</head>
+<body>
+<header class="rpt-header">
+  <div class="rpt-brand">
+    <div class="rpt-logo-mark"><div class="rpt-logo-mark-inner"></div></div>
+    <div>
+      <div class="rpt-brand-sub">Research Intelligence</div>
+      <div class="rpt-brand-name">MiniAgent</div>
+    </div>
+  </div>
+  <div class="rpt-date-badge">{date_label}</div>
+</header>
+<section class="rpt-hero">
+  <div class="rpt-hero-inner">
+    <div class="rpt-eyebrow"><span class="rpt-eyebrow-dot"></span>Daily Report</div>
+    <div class="rpt-domain">{domain}<span class="rpt-domain-sub">Research Summary</span></div>
+    <div class="rpt-meta-row">Generated {generated}</div>
+  </div>
+</section>
+<div class="content">
+{body}
+</div>
+<div class="rpt-footer">Generated by MiniAgentFramework</div>
+</body>
+</html>"""
+
+_TEMPLATES = {
+    "default": _REPORT_HTML_TEMPLATE,
+    "dark":    _REPORT_HTML_TEMPLATE_DARK,
+}
+
+
 # ====================================================================================================
 # MARK: MARKDOWN TO HTML
 # ====================================================================================================
@@ -208,13 +417,14 @@ def _md_to_html_fallback(md_text: str) -> str:
 # ====================================================================================================
 # MARK: HTML BUILDER
 # ====================================================================================================
-def _build_report_html(domain: str, when: _date, body_md: str) -> str:
-    """Render analysis Markdown into the full standalone HTML report template."""
+def _build_report_html(domain: str, when: _date, body_md: str, template: str = "default") -> str:
+    """Render analysis Markdown into the styled standalone HTML report template."""
     now        = _datetime.now().strftime("%Y-%m-%d %H:%M")
     date_label = when.strftime("%A, %d %B %Y")
     title      = f"{domain} Research Report — {when.strftime('%Y-%m-%d')}"
     body_html  = _md_to_html(body_md)
-    return _REPORT_HTML_TEMPLATE.format(
+    tmpl       = _TEMPLATES.get(template, _REPORT_HTML_TEMPLATE)
+    return tmpl.format(
         title      = title,
         domain     = domain,
         date_label = date_label,
@@ -315,7 +525,7 @@ def save_html_report(domain: str, date: str = "", template: str = "default") -> 
     except Exception as exc:
         return f"Error: could not read analysis file: {exc}"
 
-    html_content = _build_report_html(domain.strip(), when, analysis_text)
+    html_content = _build_report_html(domain.strip(), when, analysis_text, template)
 
     try:
         item_dir    = create_item_dir(STAGE_PRESENTATION, domain.strip(), "daily-report", when)
