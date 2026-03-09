@@ -611,7 +611,9 @@ def mine_search_deep(
     )
 
     # Create one top-level query folder; all articles go under it as sub-folders.
-    query_dir = create_item_dir(STAGE_MINE, domain, f"deep-{query}")
+    # Strip any YYYY-MM-DD date from the slug — the date is already encoded in the path.
+    query_slug = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", "", query).strip()
+    query_dir = create_item_dir(STAGE_MINE, domain, f"deep-{query_slug}")
 
     mined_paths:  list[str] = []
     fetch_errors: int       = 0

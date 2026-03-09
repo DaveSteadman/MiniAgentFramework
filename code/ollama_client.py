@@ -110,13 +110,19 @@ def start_ollama_server() -> None:
     if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
         creation_flags |= subprocess.CREATE_NEW_PROCESS_GROUP
 
-    subprocess.Popen(
-        ["ollama", "serve"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-        creationflags=creation_flags,
-    )
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=creation_flags,
+        )
+    except FileNotFoundError:
+        raise RuntimeError(
+            "'ollama' executable not found on PATH. "
+            "Please install Ollama (https://ollama.com) and ensure it is on your PATH."
+        ) from None
 
 
 # ----------------------------------------------------------------------------------------------------

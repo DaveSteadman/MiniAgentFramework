@@ -85,12 +85,38 @@ def load_schedules_dir(schedules_dir: Path) -> list[dict]:
 # ====================================================================================================
 # MARK: SCHEDULE EVALUATION
 # ====================================================================================================
+def initial_last_run(task: dict, reference: datetime) -> "datetime | None":
+    """Return the value to store in last_run when a task is first registered (startup or hot-add).
+
+    interval  -- return reference so the first fire occurs after a full interval, not immediately.
+    daily     -- return reference if the scheduled wall-clock time has already passed today
+                 (preventing an immediate spurious fire on startup); return None if it hasn't
+                 been reached yet so the task still fires at its proper time later today.
+    """
+    schedule = task.get("schedule", {})
+    stype    = schedule.get("type", "")
+
+    if stype == "interval":
+        return reference
+
+    if stype == "daily":
+        target_str = schedule.get("time", "00:00")
+        try:
+            target_time = datetime.strptime(target_str, "%H:%M").time()
+        except ValueError:
+            return reference  # malformed — treat as already fired today
+        if reference.time() >= target_time:
+            return reference  # time has passed today — defer to tomorrow
+        return None  # time not yet reached — will fire naturally later today
+
+    return None
+
+
 def is_task_due(task: dict, last_run: datetime | None, now: datetime) -> bool:
     """Return True if the task should fire given the current time and its last-run timestamp.
 
     interval  -- fires immediately on first invocation (last_run is None), then every N minutes.
-    daily     -- fires once per calendar day at the configured wall-clock time; fires on first
-                 invocation if the current time is at or past the scheduled time.
+    daily     -- fires once per calendar day at the configured wall-clock time.
     """
     schedule      = task.get("schedule", {})
     schedule_type = schedule.get("type", "")
@@ -110,7 +136,7 @@ def is_task_due(task: dict, last_run: datetime | None, now: datetime) -> bool:
         if now.time() < target_time:
             return False
         if last_run is None:
-            return True
+            return True  # time reached and never run — fire now
         return last_run.date() < now.date()
 
     return False

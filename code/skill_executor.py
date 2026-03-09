@@ -42,6 +42,11 @@ class ExecutedCall(dict):
 # ====================================================================================================
 # MARK: HELPERS
 # ====================================================================================================
+# Cache of already-loaded callables: (absolute_path_str, function_name) -> callable.
+# Avoids re-executing module-level code on every skill invocation within a session.
+_callable_cache: dict[tuple[str, str], object] = {}
+
+
 # ----------------------------------------------------------------------------------------------------
 def _load_callable_from_module_path(module_path: str, function_name: str):
     workspace_root        = get_workspace_root()
@@ -55,6 +60,10 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
     if not absolute_module_path.exists():
         raise RuntimeError(f"Module path does not exist: {module_path}")
 
+    cache_key = (str(absolute_module_path), function_name)
+    if cache_key in _callable_cache:
+        return _callable_cache[cache_key]
+
     # Generate a unique module name to avoid collisions when the same path is loaded multiple times.
     dynamic_module_name = f"skill_module_{absolute_module_path.stem}_{abs(hash(str(absolute_module_path)))}"
     spec                = importlib.util.spec_from_file_location(dynamic_module_name, absolute_module_path)
@@ -67,7 +76,9 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
     if not hasattr(module, function_name):
         raise RuntimeError(f"Function '{function_name}' not found in module '{module_path}'")
 
-    return getattr(module, function_name)
+    fn = getattr(module, function_name)
+    _callable_cache[cache_key] = fn
+    return fn
 
 
 # ----------------------------------------------------------------------------------------------------

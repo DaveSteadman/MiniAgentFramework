@@ -45,7 +45,7 @@ from orchestration import OrchestratorConfig
 from orchestration import orchestrate_prompt
 from runtime_logger import SessionLogger
 from runtime_logger import create_log_file_path
-from scheduler import is_task_due
+from scheduler import initial_last_run, is_task_due
 from scheduler import llm_lock
 from scheduler import load_schedules_dir
 from slash_commands import SlashCommandContext
@@ -83,7 +83,7 @@ def run_dashboard_mode(
     enabled_tasks = [t for t in tasks if t.get("enabled", True)]
     _startup      = datetime.now()
     last_run: dict[str, datetime | None] = {
-        t["name"]: (_startup if t.get("schedule", {}).get("type") == "interval" else None)
+        t["name"]: initial_last_run(t, _startup)
         for t in enabled_tasks
     }
 
@@ -127,6 +127,9 @@ def run_dashboard_mode(
                     ui_colors.RED,
                 )
                 return
+            response = ""
+            p_tokens = 0
+            tps_str  = ""
             try:
                 run_log_path = create_log_file_path(log_dir=_LOG_DIR)
                 run_logger   = SessionLogger(run_log_path)
@@ -145,6 +148,9 @@ def run_dashboard_mode(
                 tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
                 run_logger.log_file_only(f"Agent: {response}")
                 run_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
+            except Exception as exc:
+                app.add_chat_line(f"Agent\u25b6 [Error: {exc}]", ui_colors.RED)
+                return
             finally:
                 llm_lock.release()
 
@@ -207,7 +213,7 @@ def run_dashboard_mode(
                         with latest.open(encoding="utf-8", errors="replace") as fh:
                             fh.seek(pos)
                             new_text = fh.read()
-                        pos = size
+                            pos = fh.tell()  # use actual read position, not stale stat size
                         for line in new_text.splitlines():
                             app.add_log_line(line, ui_colors.DIM)
             except Exception:
@@ -238,8 +244,7 @@ def run_dashboard_mode(
                 if added or removed or changed:
                     _reload_now = datetime.now()
                     for n in added:
-                        stype = fresh_by_name[n].get("schedule", {}).get("type")
-                        last_run[n] = _reload_now if stype == "interval" else None
+                        last_run[n] = initial_last_run(fresh_by_name[n], _reload_now)
                         app.add_log_line(f"[SCHED] New task loaded: {n}", ui_colors.MAGENTA)
                     for n in removed:
                         last_run.pop(n, None)
@@ -262,19 +267,21 @@ def run_dashboard_mode(
                     continue
                 if not is_task_due(task, last_run[name], now):
                     continue
-                if llm_lock.locked():
-                    app.add_log_line(f"[SCHED] '{name}' due but LLM busy \u2014 will retry next cycle", ui_colors.DIM)
+
+                if not llm_lock.acquire(blocking=False):
+                    app.add_log_line(f"[SCHED] '{name}' due but LLM busy — will retry next cycle", ui_colors.DIM)
                     continue
 
+                # Lock is now held — record start time and run the task.
                 last_run[name] = now
                 app.add_log_line(f"[SCHED] Starting: {name}", ui_colors.MAGENTA)
-                app.add_chat_line(f"Sched\u25b6 Task started: {name}", ui_colors.MAGENTA)
+                app.add_chat_line(f"Sched▶ Task started: {name}", ui_colors.MAGENTA)
 
                 task_log_path = create_log_file_path(log_dir=_LOG_DIR)
                 task_logger   = SessionLogger(task_log_path)
                 task_logger.log_section_file_only(f"SCHEDULER TASK (dashboard): {name}")
 
-                with llm_lock:
+                try:
                     task_hist  = ConversationHistory()
                     sched_ctx  = SlashCommandContext(
                         config        = config,
@@ -310,8 +317,10 @@ def run_dashboard_mode(
                             ui_colors.BLUE,
                         )
 
-                task_logger.log_file_only(f"[DASHBOARD] Task '{name}' completed.")
-                app.add_log_line(f"[SCHED] Done: {name}", ui_colors.MAGENTA)
+                    task_logger.log_file_only(f"[DASHBOARD] Task '{name}' completed.")
+                    app.add_log_line(f"[SCHED] Done: {name}", ui_colors.MAGENTA)
+                finally:
+                    llm_lock.release()
 
             for _ in range(_SCHEDULER_POLL_SECS * 2):
                 if shutdown.is_set():

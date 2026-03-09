@@ -42,7 +42,7 @@ from orchestration import resolve_execution_model
 from planner_engine import load_skills_payload
 from runtime_logger import create_log_file_path
 from runtime_logger import SessionLogger
-from scheduler import is_task_due
+from scheduler import initial_last_run, is_task_due
 from scheduler import llm_lock
 from scheduler import load_schedules_dir
 from slash_commands import SlashCommandContext
@@ -235,7 +235,7 @@ def run_scheduler_mode(
     enabled_tasks = [t for t in tasks if t.get("enabled", True)]
     _startup      = datetime.now()
     last_run: dict[str, datetime | None] = {
-        t["name"]: (_startup if t.get("schedule", {}).get("type") == "interval" else None)
+        t["name"]: initial_last_run(t, _startup)
         for t in enabled_tasks
     }
 
@@ -261,7 +261,7 @@ def run_scheduler_mode(
 
                 if added or removed or changed:
                     for n in added:
-                        last_run[n] = None
+                        last_run[n] = initial_last_run(fresh_by_name[n], datetime.now())
                         print(f"[SCHEDULER] New task loaded: {n}")
                     for n in removed:
                         last_run.pop(n, None)
@@ -288,15 +288,16 @@ def run_scheduler_mode(
                 if not is_task_due(task, last_run[name], now):
                     continue
 
-                if llm_lock.locked():
+                if not llm_lock.acquire(blocking=False):
                     logger.log(f"[SCHEDULER] Task '{name}' is due but LLM is busy — will retry next cycle")
                     continue
 
+                # Lock is now held — record start time and run the task.
                 last_run[name] = now
                 logger.log_section(f"SCHEDULER TASK: {name}")
                 print(f"[SCHEDULER] Starting task: {name} ({len(prompts)} prompt(s)) at {now.strftime('%H:%M:%S')}")
 
-                with llm_lock:
+                try:
                     task_hist  = ConversationHistory()
                     sched_ctx  = SlashCommandContext(
                         config        = config,
@@ -333,8 +334,10 @@ def run_scheduler_mode(
 
                         task_hist.add(prompt_text, response)
 
-                print(f"[SCHEDULER] Task '{name}' completed.\n")
-                logger.log(f"[SCHEDULER] Task '{name}' completed.")
+                    print(f"[SCHEDULER] Task '{name}' completed.\n")
+                    logger.log(f"[SCHEDULER] Task '{name}' completed.")
+                finally:
+                    llm_lock.release()
 
             # Sleep in short increments so a shutdown request is noticed promptly.
             for _ in range(SCHEDULER_POLL_SECS * 2):  # 0.5s steps
