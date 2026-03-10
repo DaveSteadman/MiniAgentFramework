@@ -21,7 +21,7 @@ This project uses a local Ollama runtime and focuses on transparent, logged orch
 | **Single-shot** | Run one prompt through the full pipeline and exit | `python .\code\main.py --user-prompt "what time is it"` |
 | **Chat** | Interactive multi-turn REPL | `python .\code\main.py --chat` |
 | **Scheduler** | Run scheduled prompt tasks from `controldata/schedules/` unattended | `python .\code\main.py --scheduler` |
-| **Schedule Item** | Run one named scheduled task immediately (debugging aid) | `python .\code\main.py --scheduled-item <name>` |
+| **Scheduled Item** | Run one named scheduled task immediately (debugging aid) | `python .\code\main.py --scheduled-item <name>` |
 | **Dashboard** | Full terminal UI: schedule timeline, live log tail, and chat combined | `python .\code\main.py --dashboard` |
 | **Test Wrapper** | Run a prompt suite as subprocesses and capture results to a CSV | `python .\testcode\test_wrapper.py` |
 | **Test Analyzer** | Classify outcomes and produce diagnostics from a test results CSV | `python .\code\main.py --analysetest <csv>` |
