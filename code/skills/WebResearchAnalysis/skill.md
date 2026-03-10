@@ -12,7 +12,7 @@ WebResearchOutput's `get_analysis_text` function if needed).
 ## Interface
 - Module: `code/skills/WebResearchAnalysis/web_research_analysis_skill.py`
 - Primary functions:
-  - `create_daily_summary(domain, date="", topic="", model="120b", num_ctx=131072)`
+  - `create_daily_summary(domain, date="", topic="", model="20b", num_ctx=131072)`
   - `list_mine_days(domain, max_days=7)`
   - `list_analyses(domain, max_days=7)`
 
@@ -24,7 +24,7 @@ WebResearchOutput's `get_analysis_text` function if needed).
 - `topic`: optional context hint for the analyst, e.g. `"AI hardware releases"` or
   `"machine learning papers"`; if provided, the LLM uses it to frame the briefing
 - `model`: Ollama model alias or full name; short aliases like `"120b"` or `"20b"` are
-  resolved automatically; default `"120b"`
+  resolved automatically; default `"20b"`
 - `num_ctx`: LLM context window in tokens; default `131072` (128K — suitable for 10+ articles)
 
 ### `list_mine_days(domain, max_days)`

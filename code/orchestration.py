@@ -252,6 +252,13 @@ def _format_skill_flow(python_call_outputs: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _ordinal(n: int) -> str:
+    """Return the English ordinal word for small integers (1→'first', 2→'second', …)."""
+    _WORDS = {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth",
+              6: "sixth", 7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth"}
+    return _WORDS.get(n, str(n))
+
+
 def build_final_llm_prompt(
     user_prompt: str,
     plan,
@@ -272,6 +279,13 @@ def build_final_llm_prompt(
         template_text = template_text.replace("{system_info}",             str(output_of_first_call))
         template_text = template_text.replace("{output_of_first_call}",    str(output_of_first_call))
         template_text = template_text.replace("{output_of_previous_call}", str(output_of_last_call))
+        # Substitute {{outputN}} and {{output_of_Nth_call}} shorthand that the planner often emits.
+        for idx, call_out in enumerate(python_call_outputs, start=1):
+            val = str(call_out.get("result", ""))
+            template_text = template_text.replace(f"{{{{output{idx}}}}}",              val)
+            template_text = template_text.replace(f"{{{{output_of_{idx}_call}}}}",      val)
+            template_text = template_text.replace(f"{{{{output_of_call_{idx}}}}}",      val)
+            template_text = template_text.replace(f"{{{{output_of_{_ordinal(idx)}_call}}}}", val)
 
     history_section = ""
     if conversation_history:

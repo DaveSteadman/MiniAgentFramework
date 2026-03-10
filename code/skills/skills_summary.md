@@ -245,7 +245,7 @@ Single JSON payload for orchestration planning.
       "module": "code/skills/WebResearchAnalysis/web_research_analysis_skill.py",
       "functions": [
         "create_daily_summary(domain, date, topic, model, num_ctx)",
-        "create_daily_summary(domain, date=\"\", topic=\"\", model=\"120b\", num_ctx=131072)",
+        "create_daily_summary(domain, date=\"\", topic=\"\", model=\"20b\", num_ctx=131072)",
         "list_analyses(domain, max_days)",
         "list_analyses(domain, max_days=7)",
         "list_mine_days(domain, max_days)",

@@ -113,6 +113,13 @@ def parse_main_args() -> argparse.Namespace:
         default=False,
         help="Start the interactive dashboard (timeline + log + chat).",
     )
+    parser.add_argument(
+        "--scheduled-item",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Run a single named scheduled task immediately (debugging aid; ignores enabled flag).",
+    )
     return parser.parse_args()
 
 
@@ -352,6 +359,74 @@ def run_scheduler_mode(
 
 
 # ====================================================================================================
+# MARK: SCHEDULE ITEM MODE  (debugging aid)
+# ====================================================================================================
+def run_schedule_item_mode(
+    item_name: str,
+    config: OrchestratorConfig,
+    logger: SessionLogger,
+    log_path: Path,
+) -> None:
+    """Run a single named task from the schedules directory immediately.
+
+    Loads all schedule files, finds the first task whose 'name' matches item_name
+    (case-sensitive), and runs its prompt sequence in order.  The enabled flag is
+    intentionally ignored so disabled tasks can be exercised for debugging.
+    """
+    tasks = load_schedules_dir(SCHEDULES_DIR)
+    task  = next((t for t in tasks if t.get("name") == item_name), None)
+
+    if task is None:
+        available = ", ".join(t.get("name", "?") for t in tasks) or "(none)"
+        print(f"[scheduled-item] No task named '{item_name}' found in {SCHEDULES_DIR}")
+        print(f"[scheduled-item] Available tasks: {available}")
+        return
+
+    prompts = task.get("prompts", [])
+    if not prompts:
+        print(f"[scheduled-item] Task '{item_name}' has no prompts — nothing to run.")
+        return
+
+    print(f"\nScheduled-item mode — running task: '{item_name}' ({len(prompts)} prompt(s))")
+    print(f"Log file: {log_path.as_posix()}\n")
+    logger.log_section(f"SCHEDULE ITEM: {item_name}")
+
+    task_hist = ConversationHistory()
+    sched_ctx = SlashCommandContext(
+        config        = config,
+        output        = lambda text, level='info': logger.log_file_only(f"[slash/{level}] {text}"),
+        clear_history = task_hist.clear,
+    )
+
+    for step_index, prompt_text in enumerate(prompts, start=1):
+        short = prompt_text[:70] + ("..." if len(prompt_text) > 70 else "")
+        print(f"  Step {step_index}/{len(prompts)}: {short}")
+        logger.log_file_only(f"[Step {step_index}] {prompt_text}")
+
+        if handle_slash(prompt_text, sched_ctx):
+            print(f"  [slash command handled]")
+            continue
+
+        response, p_tokens, _c, success, tps = orchestrate_prompt(
+            user_prompt=prompt_text,
+            config=config,
+            logger=logger,
+            conversation_history=task_hist.as_list() or None,
+            quiet=True,
+        )
+
+        tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
+        preview = response[:120] + ("..." if len(response) > 120 else "")
+        print(f"  [{p_tokens:,} ctx tokens{tps_str}] {preview}")
+        print()
+
+        task_hist.add(prompt_text, response)
+
+    print(f"Task '{item_name}' completed.")
+    logger.log(f"[SCHEDULE ITEM] Task '{item_name}' completed.")
+
+
+# ====================================================================================================
 # MARK: MAIN ENTRYPOINT
 # ====================================================================================================
 def main() -> None:
@@ -386,7 +461,13 @@ def main() -> None:
     logger.log_section("SYSTEM STATUS")
     logger.log(f"Requested model: {args.model}")
     logger.log(f"Resolved model:  {resolved_model}")
-    mode_label = "chat" if args.chat else "scheduler" if args.scheduler else "dashboard" if args.dashboard else "single-shot"
+    mode_label = (
+        "chat"          if args.chat          else
+        "scheduler"     if args.scheduler     else
+        "dashboard"     if args.dashboard     else
+        f"scheduled-item:{args.scheduled_item}" if args.scheduled_item else
+        "single-shot"
+    )
     logger.log(f"Mode:            {mode_label}")
     logger.log(f"num_ctx:         {args.num_ctx}")
     logger.log(f"LLM timeout:     {get_llm_timeout()}s")
@@ -404,6 +485,10 @@ def main() -> None:
 
     if args.dashboard:
         run_dashboard_mode(config=config, logger=logger, log_path=log_path)
+        return
+
+    if args.scheduled_item:
+        run_schedule_item_mode(item_name=args.scheduled_item, config=config, logger=logger, log_path=log_path)
         return
 
     # Single-shot mode: orchestrate one prompt and validate.

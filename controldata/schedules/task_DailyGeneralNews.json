@@ -14,11 +14,12 @@
       "enabled": true,
       "schedule": { "type": "daily", "time": "07:09" },
       "prompts": [
-        "/model 120b",
+        "/model 20b",
         "/timeout 300",
         "deep research  UK news headlines for {today} into the GeneralNews domain",
         "deep research  French news headlines for {today} into the GeneralNews domain",
         "deep research  German news headlines for {today} into the GeneralNews domain",
+        "/model 20b",
         "/timeout 1800",
         "Analyse the daily research for the GeneralNews domain for {today}, to create a summary of the top 10 articles at around 500 words each",
         "Save an HTML report for the GeneralNews domain for {today} using the dark template"

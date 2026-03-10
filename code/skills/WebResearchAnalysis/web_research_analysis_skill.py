@@ -14,7 +14,7 @@
 # string, not a bulk research report.  The same pattern is used by skills_catalog_builder.py.
 #
 # Primary public functions:
-#   create_daily_summary(domain, date="", topic="", model="120b", num_ctx=131072)
+#   create_daily_summary(domain, date="", topic="", model="20b", num_ctx=131072)
 #     -> Reads all mined .md files for domain/date, calls LLM to produce a structured
 #        Markdown analysis, saves it to 02-Analysis, returns "Saved: <path>"
 #
@@ -56,7 +56,7 @@ from ollama_client import call_ollama_extended, list_ollama_models, resolve_mode
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-_DEFAULT_MODEL   = "120b"
+_DEFAULT_MODEL   = "20b"
 _DEFAULT_NUM_CTX = 131072
 
 _SPACE_RE = re.compile(r"\s+")
@@ -222,7 +222,7 @@ def create_daily_summary(
     domain  : research domain label (must match what was used when mining)
     date    : YYYY-MM-DD, "today", "yesterday", or "" (defaults to today)
     topic   : optional context hint for the analyst (e.g. "AI hardware releases")
-    model   : Ollama model alias or name, default "120b"
+    model   : Ollama model alias or name, default "20b"
     num_ctx : LLM context window in tokens, default 131072
 
     Returns "Saved: <path>  (N articles, N words)" on success.

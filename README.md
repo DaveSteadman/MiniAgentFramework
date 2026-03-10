@@ -21,6 +21,7 @@ This project uses a local Ollama runtime and focuses on transparent, logged orch
 | **Single-shot** | Run one prompt through the full pipeline and exit | `python .\code\main.py --user-prompt "what time is it"` |
 | **Chat** | Interactive multi-turn REPL | `python .\code\main.py --chat` |
 | **Scheduler** | Run scheduled prompt tasks from `controldata/schedules/` unattended | `python .\code\main.py --scheduler` |
+| **Schedule Item** | Run one named scheduled task immediately (debugging aid) | `python .\code\main.py --scheduled-item <name>` |
 | **Dashboard** | Full terminal UI: schedule timeline, live log tail, and chat combined | `python .\code\main.py --dashboard` |
 | **Test Wrapper** | Run a prompt suite as subprocesses and capture results to a CSV | `python .\testcode\test_wrapper.py` |
 | **Test Analyzer** | Classify outcomes and produce diagnostics from a test results CSV | `python .\code\main.py --analysetest <csv>` |
@@ -107,6 +108,30 @@ Slash commands (see [Slash Commands](#slash-commands) below) are available at th
 **Example - chat with a smaller context window:**
 ```powershell
 python .\code\main.py --chat --model "20b" --num-ctx 16384
+```
+
+---
+
+## Running: Schedule Item Mode
+
+Runs a single named task from the schedule files immediately, bypassing its normal schedule. Useful for debugging a task definition without waiting for its configured time or interval. The `enabled` flag is ignored so disabled tasks can be exercised too.
+
+```powershell
+python .\code\main.py --scheduled-item <name>
+```
+
+Loads all `*.json` files under `controldata/schedules/`, finds the first task whose `name` matches the supplied value, and runs its full prompt sequence in order.
+
+| Option | Default | Description |
+|---|---|---|
+| `--scheduled-item NAME` | *(required)* | Name of the task to run. |
+| `--model ALIAS` | `"20b"` | Ollama model alias or tag. |
+| `--num-ctx N` | `32768` | Context window size. |
+
+**Example:**
+```powershell
+python .\code\main.py --scheduled-item SystemHealth
+python .\code\main.py --scheduled-item morning_web_scan --model "8b"
 ```
 
 ---
