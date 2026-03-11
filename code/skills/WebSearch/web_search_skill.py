@@ -80,7 +80,7 @@ def _is_ddg_ad(url: str) -> bool:
 
     DuckDuckGo ads use a /y.js?ad_domain=... href instead of the /l/?uddg= organic
     redirect.  The decoder does not recognise this format so the raw tracking URL
-    passes through unchanged — these should be excluded from results.
+    passes through unchanged - these should be excluded from results.
     """
     try:
         host = urllib.parse.urlparse(url).netloc.lower()
@@ -133,7 +133,7 @@ def search_web(
     """Search DuckDuckGo and return a structured list of results.
 
     Returns a list of dicts: [{"rank": int, "title": str, "url": str, "snippet": str}, ...]
-    Returns a single error-entry dict on network or parse failure — never raises.
+    Returns a single error-entry dict on network or parse failure - never raises.
     """
     if not query or not query.strip():
         return [{"rank": 0, "title": "Error", "url": "", "snippet": "query cannot be empty"}]

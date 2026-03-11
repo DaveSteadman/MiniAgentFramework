@@ -14,7 +14,7 @@
 #   ctx = SlashCommandContext(
 #       config        = config,            # OrchestratorConfig; resolved_model is writable
 #       output        = my_output_fn,      # (text: str, level: str = 'info') -> None
-#       clear_history = my_clear_fn,       # () -> None  — called when history must be reset
+#       clear_history = my_clear_fn,       # () -> None  - called when history must be reset
 #   )
 #   if handle_slash(user_input, ctx):
 #       continue   # consumed; skip normal orchestration
@@ -159,7 +159,7 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
     try:
         value = int(arg.strip().replace(",", "").replace("_", ""))
     except ValueError:
-        ctx.output(f"Invalid value '{arg}' — must be an integer (e.g. /ctx 32768).", "error")
+        ctx.output(f"Invalid value '{arg}' - must be an integer (e.g. /ctx 32768).", "error")
         return
     if value < 512:
         ctx.output("Context size must be at least 512 tokens.", "error")
@@ -182,7 +182,7 @@ def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
     try:
         value = int(arg.strip().replace(",", "").replace("_", ""))
     except ValueError:
-        ctx.output(f"Invalid value '{arg}' — must be an integer number of seconds (e.g. /timeout 1800).", "error")
+        ctx.output(f"Invalid value '{arg}' - must be an integer number of seconds (e.g. /timeout 1800).", "error")
         return
     if value < 10:
         ctx.output("Timeout must be at least 10 seconds.", "error")
@@ -232,7 +232,7 @@ def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
 
 def _cmd_skip_final(arg: str, ctx: SlashCommandContext) -> None:
     ctx.config.skip_final_llm = True
-    ctx.output("Final LLM synthesis disabled — skill output will be returned directly.", "success")
+    ctx.output("Final LLM synthesis disabled - skill output will be returned directly.", "success")
     ctx.output("Use /run-final to re-enable.", "dim")
 
 
@@ -260,7 +260,7 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
     try:
         skill_files = find_skill_files(skills_root=skills_root)
         if not skill_files:
-            ctx.output("No skill.md files found — catalog unchanged.", "error")
+            ctx.output("No skill.md files found - catalog unchanged.", "error")
             return
 
         summaries = [
@@ -295,7 +295,7 @@ _REGISTRY: dict[str, Callable] = {
     "/ctx":         _cmd_ctx,
     "/timeout":     _cmd_timeout,
     "/stopmodel":   _cmd_stopmodel,
-    "/reskills":    _cmd_reskills,
+    "/reskill":     _cmd_reskills,
     "/skip-final":  _cmd_skip_final,
     "/run-final":   _cmd_run_final,
 }
@@ -308,7 +308,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/ctx":         "<tokens>  Set context window size (e.g. /ctx 32768)",
     "/timeout":     "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
     "/stopmodel":   "[name]  Unload a running model from VRAM (defaults to active model)",
-    "/reskills":    "Rebuild the skills catalog from skill.md files and hot-reload into session",
+    "/reskill":     "Rebuild the skills catalog from skill.md files and hot-reload into session",
     "/skip-final":  "Skip the final LLM synthesis call; return skill output directly",
     "/run-final":   "Re-enable the final LLM synthesis call (default state)",
 }

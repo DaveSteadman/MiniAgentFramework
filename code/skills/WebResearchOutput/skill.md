@@ -2,13 +2,13 @@
 
 ## Overview
 
-Dispatches rendered HTML reports from the `03-Presentation` research stage to external destinations. This skill handles **delivery mechanics only** — HTML rendering and template styling are handled entirely by **WebResearchReport**.
+Dispatches rendered HTML reports from the `03-Presentation` research stage to external destinations. This skill handles **delivery mechanics only** - HTML rendering and template styling are handled entirely by **WebResearchReport**.
 
 Supported destinations:
-- **Email** — SMTP STARTTLS to a configured mailing list (`send_report_email`)
+- **Email** - SMTP STARTTLS to a configured mailing list (`send_report_email`)
 
 Planned future destinations:
-- **SFTP** — upload `report.html` to a remote server
+- **SFTP** - upload `report.html` to a remote server
 
 ---
 
@@ -40,7 +40,7 @@ Reads `report.html` from `03-Presentation` and delivers it as an HTML email via 
 | `domain`    | string | required     | Research domain label (e.g. `"GeneralNews"`) |
 | `date`      | string | `""` (today) | `YYYY-MM-DD`, `"today"`, `"yesterday"`, or `""` |
 | `list_name` | string | `"default"`  | Key in `email_config.json → mailing_lists` |
-| `subject`   | string | `""` (auto)  | Email subject; auto-generated as `"domain Report — YYYY-MM-DD"` if empty |
+| `subject`   | string | `""` (auto)  | Email subject; auto-generated as `"domain Report - YYYY-MM-DD"` if empty |
 
 **Returns:** `"Sent to N recipient(s): ..."` on success, or `"Error: ..."` on failure.
 
@@ -111,12 +111,12 @@ Send the GeneralNews report for today to the default mailing list
 ## Input
 
 ### `send_daily_summary(domain, date, list_name, subject)`
-- `domain`: research domain label — must match what was used during mining and analysis (required)
-- `date`: date of the analysis to send — accepts `"YYYY-MM-DD"`, `"today"`, `"yesterday"`,
+- `domain`: research domain label - must match what was used during mining and analysis (required)
+- `date`: date of the analysis to send - accepts `"YYYY-MM-DD"`, `"today"`, `"yesterday"`,
   or `""` for today
 - `list_name`: key in `email_config.json` → `mailing_lists`; default `"default"`
 - `subject`: email subject line; auto-generated as
-  `"Daily Research Summary: <domain> — <date>"` if empty
+  `"Daily Research Summary: <domain> - <date>"` if empty
 
 ### `get_analysis_text(domain, date)`
 - `domain`: research domain label (required)
@@ -130,7 +130,7 @@ Send the GeneralNews report for today to the default mailing list
 
 ### `send_daily_summary`
 On success: `"Sent to N recipient(s): alice@..., bob@...\n  Subject: ..."`
-On failure: a descriptive error string beginning with `Error:` — never raises.
+On failure: a descriptive error string beginning with `Error:` - never raises.
 
 The email is sent as `multipart/alternative` with both plain-text and HTML parts.
 HTML is generated using the `markdown` package (if installed) or a minimal inline converter.
@@ -164,7 +164,7 @@ Completed analyses for domain 'AINews':
 ```
 
 The `smtp_password_env` field holds the **name** of an environment variable,
-not the password itself — credentials are never stored in the config file.
+not the password itself - credentials are never stored in the config file.
 
 ## Examples
 ```python
@@ -179,5 +179,5 @@ send_daily_summary("AINews", date="today")
 
 # Send to a specific list with a custom subject
 send_daily_summary("AINews", date="2026-03-08", list_name="executives",
-                   subject="AI Market Digest — 8 March 2026")
+                   subject="AI Market Digest - 8 March 2026")
 ```

@@ -4,7 +4,7 @@
 # WebResearchOutput skill for MiniAgentFramework.
 #
 # Dispatches rendered reports from the 03-Presentation research stage to external
-# destinations.  This skill handles the mechanics of delivery only — HTML rendering
+# destinations.  This skill handles the mechanics of delivery only - HTML rendering
 # and template styling are handled entirely by WebResearchReport.
 #
 # Supported destinations:
@@ -17,7 +17,7 @@
 #   controldata/email_config.json
 #
 # SMTP credentials are NEVER stored in the config file.  Instead, the config specifies the
-# name of an environment variable that holds the password — e.g. "MINIAGENT_SMTP_PASSWORD".
+# name of an environment variable that holds the password - e.g. "MINIAGENT_SMTP_PASSWORD".
 # Set this env var before running (e.g. $env:MINIAGENT_SMTP_PASSWORD = "your_password").
 #
 # Primary public functions:
@@ -68,7 +68,7 @@ def _load_email_config() -> dict:
     if not _EMAIL_CONFIG_PATH.exists():
         raise FileNotFoundError(
             f"Email config not found: {_EMAIL_CONFIG_PATH}\n"
-            f"Create this file — see controldata/email_config.json for the template."
+            f"Create this file - see controldata/email_config.json for the template."
         )
     with _EMAIL_CONFIG_PATH.open(encoding="utf-8") as fh:
         config = json.load(fh)
@@ -85,12 +85,9 @@ def _load_email_config() -> dict:
 # MARK: REPORT FILE LOCATOR
 # ====================================================================================================
 def _find_report_file(domain: str, when: _date) -> Path | None:
-    """Return the most recent report.html under 03-Presentation/<domain>/yyyy/mm/dd/, or None."""
-    date_dir = get_date_dir(STAGE_PRESENTATION, domain, when)
-    if not date_dir.exists():
-        return None
-    candidates = sorted(date_dir.rglob("report.html"))
-    return candidates[-1] if candidates else None
+    """Return report.html under 03-Presentation/<domain>/yyyy/mm/dd/, or None."""
+    path = get_date_dir(STAGE_PRESENTATION, domain, when) / "report.html"
+    return path if path.exists() else None
 
 
 # ====================================================================================================
@@ -193,7 +190,7 @@ def send_report_email(
         )
 
     if not subject or not subject.strip():
-        subject = f"{domain} Report \u2014 {when.strftime('%Y-%m-%d')}"
+        subject = f"{domain} Report - {when.strftime('%Y-%m-%d')}"
 
     # Plain-text fallback: strip tags for clients that prefer text/plain.
     import re as _re
@@ -214,7 +211,7 @@ def send_report_email(
             server.login(config["smtp_user"], password)
             server.sendmail(config["from_address"], recipients, msg.as_string())
     except smtplib.SMTPAuthenticationError:
-        return "Error: SMTP authentication failed — check smtp_user and the password env var."
+        return "Error: SMTP authentication failed - check smtp_user and the password env var."
     except smtplib.SMTPException as exc:
         return f"Error: SMTP error: {exc}"
     except OSError as exc:
@@ -243,6 +240,6 @@ def list_reports(domain: str, max_days: int = 7) -> str:
 
     lines = [f"Available reports for domain '{domain}':"]
     for d, day_dir in entries:
-        count = len(list(day_dir.rglob("report.html")))
-        lines.append(f"  {d.strftime('%Y-%m-%d')}:  {count} report file(s)")
+        exists = (day_dir / "report.html").exists()
+        lines.append(f"  {d.strftime('%Y-%m-%d')}:  {'1 report file' if exists else 'no report file'}")
     return "\n".join(lines)

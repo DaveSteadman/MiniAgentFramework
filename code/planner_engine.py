@@ -71,8 +71,15 @@ class ExecutionPlan:
 # MARK: CONSTANTS
 # ====================================================================================================
 DEFAULT_PLANNER_ASK = (
-    "What skills and python calls need to be executed in support of this user prompt? "
-    "Return only structured JSON matching the requested schema."
+    "Given the user prompt, select needed skills and return python_calls JSON. "
+    "Choose the minimum required skills and provide explicit arguments for each python call. "
+    "CRITICAL RULE: one execution plan covers EXACTLY ONE pipeline stage. "
+    "Never chain mining (WebMine) with analysis (WebResearchAnalysis) or presentation "
+    "(WebResearchReport, WebResearchOutput) in the same plan unless the user prompt "
+    "explicitly requests multiple stages in a single instruction. "
+    "A prompt about researching, mining, or fetching web content means Stage 1 only. "
+    "A prompt about analysing, summarising, or creating a report means Stage 2 only. "
+    "A prompt about saving, rendering, or sending a report means Stage 3 only."
 )
 
 
@@ -197,7 +204,7 @@ def build_planner_prompt(user_prompt: str, planner_ask: str, skills_payload: dic
         "- Arguments must be a JSON object and must be explicit.\n"
         "- final_prompt_template should describe how outputs feed the next LLM prompt.\n"
         "\n"
-        "Argument chaining — when a later call needs a value from an earlier call's output:\n"
+        "Argument chaining - when a later call needs a value from an earlier call's output:\n"
         "  {{output_of_first_call}}         full result object of python_call order=1\n"
         "  {{output_of_previous_call}}      full result object of the immediately preceding call\n"
         "  ${output1.field}                 named field from call 1's result (e.g. ${output1.time})\n"
@@ -205,7 +212,7 @@ def build_planner_prompt(user_prompt: str, planner_ask: str, skills_payload: dic
         "Example: DateTime returns {\"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM:SS\"}.\n"
         "  To append only the time: use \"text\": \"${output1.time}\" in the FileAccess call arguments.\n"
         "  To append the full datetime object: use \"text\": \"{{output_of_first_call}}\".\n"
-        "NEVER use invented literal placeholders like 'time_placeholder' — always use the syntax above.\n"
+        "NEVER use invented literal placeholders like 'time_placeholder' - always use the syntax above.\n"
         "\n"
         "Skills summary context:\n"
         f"{skills_json}"

@@ -269,10 +269,10 @@ def run_dashboard_mode(
                     continue
 
                 if not llm_lock.acquire(blocking=False):
-                    app.add_log_line(f"[SCHED] '{name}' due but LLM busy — will retry next cycle", ui_colors.DIM)
+                    app.add_log_line(f"[SCHED] '{name}' due but LLM busy - will retry next cycle", ui_colors.DIM)
                     continue
 
-                # Lock is now held — record start time and run the task.
+                # Lock is now held - record start time and run the task.
                 last_run[name] = now
                 app.add_log_line(f"[SCHED] Starting: {name}", ui_colors.MAGENTA)
                 app.add_chat_line(f"Sched▶ Task started: {name}", ui_colors.MAGENTA)
@@ -344,7 +344,7 @@ def run_dashboard_mode(
         f"  Model: {config.resolved_model}  |  Tab = Log\u2194Chat  |  Ctrl+C to stop",
         ui_colors.DIM,
     )
-    app.add_log_line("  Log tail started \u2014 waiting for entries...", ui_colors.DIM)
+    app.add_log_line("  Log tail started - waiting for entries...", ui_colors.DIM)
 
     try:
         app.run()   # blocks; exits when Ctrl+C sets shutdown or _running=False

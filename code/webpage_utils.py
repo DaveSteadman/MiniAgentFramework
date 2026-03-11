@@ -97,7 +97,7 @@ def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT) -> tuple[str, str]:
     """Fetch a URL and return (html_text, final_url).
 
     Handles charset detection from the Content-Type header.
-    Raises on network error — never silently swallows exceptions.
+    Raises on network error - never silently swallows exceptions.
     """
     request = urllib.request.Request(url=url, headers=HTTP_HEADERS, method="GET")
     with urllib.request.urlopen(request, timeout=timeout) as response:

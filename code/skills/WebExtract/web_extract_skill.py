@@ -54,7 +54,7 @@ def fetch_page_text(
 
     Removes navigation, scripts, advertisements, and other non-content elements.
     Returns up to max_words words of body prose suitable for LLM consumption.
-    Returns a descriptive error string on network/parse failure — never raises.
+    Returns a descriptive error string on network/parse failure - never raises.
     """
     if not url or not url.strip():
         return "Error: url cannot be empty."
@@ -69,11 +69,11 @@ def fetch_page_text(
     try:
         html_text, _ = _fetch_html(url.strip(), timeout=float(timeout_seconds))
     except urllib.error.HTTPError as exc:
-        return f"Error fetching page: HTTP {exc.code} — {url}"
+        return f"Error fetching page: HTTP {exc.code} - {url}"
     except urllib.error.URLError as exc:
-        return f"Error fetching page: {exc.reason} — {url}"
+        return f"Error fetching page: {exc.reason} - {url}"
     except Exception as exc:
-        return f"Error fetching page: {exc} — {url}"
+        return f"Error fetching page: {exc} - {url}"
 
     _, body = _extract_content(html_text)
 

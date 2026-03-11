@@ -1,7 +1,7 @@
 # WebSearch Skill
 
 ## Purpose
-Search the web using DuckDuckGo (no API key required) and return a ranked list of results with title, URL, and snippet. Pure Python — no external service accounts needed.
+Search the web using DuckDuckGo (no API key required) and return a ranked list of results with title, URL, and snippet. Pure Python - no external service accounts needed.
 
 ## Interface
 - Module: `code/skills/WebSearch/web_search_skill.py`
@@ -47,8 +47,8 @@ Search the web using DuckDuckGo (no API key required) and return a ranked list o
   Returns a formatted block of the top 3 DuckDuckGo results for that query.
 
 ## Notes
-- Uses DuckDuckGo HTML search endpoint — no API key or account required.
-- Uses stdlib `urllib` only — no `requests` dependency.
+- Uses DuckDuckGo HTML search endpoint - no API key or account required.
+- Uses stdlib `urllib` only - no `requests` dependency.
 - Results reflect DuckDuckGo's current index; quality may vary by query.
 - Pair with the WebExtract skill to fetch and read full page content from any result URL.
-- **If the user wants to SAVE or STORE results into a research area or domain, use the WebResearch skill instead (`mine_search`). This skill only returns results to the LLM — it does not persist anything.**
+- **If the user wants to SAVE or STORE results into a research area or domain, use the WebResearch skill instead (`mine_search`). This skill only returns results to the LLM - it does not persist anything.**

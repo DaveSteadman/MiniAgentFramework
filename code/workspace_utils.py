@@ -40,7 +40,7 @@ from pathlib import Path
 def get_workspace_root() -> Path:
     """Return the absolute path to the repository root (the directory containing the code/ folder).
 
-    Cached after first call so repeated lookups cost nothing — the root cannot change within
+    Cached after first call so repeated lookups cost nothing - the root cannot change within
     a single process lifetime.
     """
     # This file lives at <repo_root>/code/workspace_utils.py

@@ -4,7 +4,7 @@
 
 Reads an analysis file produced by **WebResearchAnalysis** and renders it as a polished, self-contained HTML report saved to the `03-Presentation` research stage.
 
-All HTML template and Markdown-to-HTML conversion logic lives in this skill. **WebResearchOutput** (email/SFTP dispatch) has no knowledge of styling — it simply reads the finished HTML file this skill produces.
+All HTML template and Markdown-to-HTML conversion logic lives in this skill. **WebResearchOutput** (email/SFTP dispatch) has no knowledge of styling - it simply reads the finished HTML file this skill produces.
 
 ---
 
@@ -35,14 +35,14 @@ Renders the analysis Markdown for `domain`/`date` into a styled standalone HTML 
 |------------|--------|-------------|-------------|
 | `domain`   | string | required    | Research domain label (e.g. `"GeneralNews"`) |
 | `date`     | string | `""` (today)| `YYYY-MM-DD`, `"today"`, `"yesterday"`, or `""` |
-| `template` | string | `"default"` | Template variant (reserved; only `"default"` currently) |
+| `template` | string | `"default"` | Template variant: `"default"` (light) or `"dark"` |
 
 **Saved to:** `webresearch/03-Presentation/<domain>/yyyy/mm/dd/NNN-daily-report/report.html`
 
 **Returns:** `"Saved: <path>  (N words from analysis)"` on success, or `"Error: ..."` on failure.
 
 **HTML report features:**
-- Self-contained — no external dependencies, works offline
+- Self-contained - no external dependencies, works offline
 - Print-friendly with `@media print` styles
 - Responsive for mobile (`@media (max-width: 640px)`)
 - Dark header bar with domain name and date

@@ -47,6 +47,20 @@ def set_llm_timeout(seconds: int) -> None:
     _DEFAULT_LLM_TIMEOUT = seconds
 
 
+# ----------------------------------------------------------------------------------------------------
+_llm_call_log_fn = None   # optional (str) -> None; set via register_llm_call_logger
+
+
+def register_llm_call_logger(fn) -> None:
+    """Register a callback invoked before every call_ollama_extended call.
+
+    The callback receives a single formatted string describing the call so it can
+    be written to whatever log sink the caller controls.
+    """
+    global _llm_call_log_fn
+    _llm_call_log_fn = fn
+
+
 # ====================================================================================================
 # MARK: DATA TYPES
 # ====================================================================================================
@@ -249,7 +263,7 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
     if len(exact_suffix_matches) == 1:
         return exact_suffix_matches[0]
 
-    # Substring match as a last resort — only accepted when exactly one model matches.
+    # Substring match as a last resort - only accepted when exactly one model matches.
     # Use word-boundary-aware matching so that "20b" doesn't match "120b" and vice-versa.
     token_matches = [
         model_name
@@ -305,6 +319,14 @@ def call_ollama_extended(
     timeout defaults to the module-level _DEFAULT_LLM_TIMEOUT (set via set_llm_timeout()).
     """
     ensure_ollama_running(host=host, start_if_needed=True)
+
+    if _llm_call_log_fn is not None:
+        preview = prompt.replace("\n", " ")[:32]
+        ctx_str = f"{num_ctx:,}" if num_ctx is not None else "default"
+        try:
+            _llm_call_log_fn(f"[LLM call] {model_name} | ctx={ctx_str} | {preview!r}")
+        except Exception:
+            pass
 
     options = {}
     if num_ctx is not None:
@@ -372,5 +394,5 @@ def call_ollama(
     host: str = DEFAULT_OLLAMA_HOST,
     num_ctx: int | None = None,
 ) -> str:
-    """Convenience wrapper — returns the response text only. See call_ollama_extended for token counts."""
+    """Convenience wrapper - returns the response text only. See call_ollama_extended for token counts."""
     return call_ollama_extended(model_name=model_name, prompt=prompt, host=host, num_ctx=num_ctx).response

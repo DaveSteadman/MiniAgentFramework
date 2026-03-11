@@ -18,7 +18,7 @@ This project uses a local Ollama runtime and focuses on transparent, logged orch
 
 | Mode | Purpose | Typical command |
 |---|---|---|
-| **Single-shot** | Run one prompt through the full pipeline and exit | `python .\code\main.py --user-prompt "what time is it"` |
+| **User Prompt** | Run one prompt through the full pipeline and exit | `python .\code\main.py --user-prompt "what time is it"` |
 | **Chat** | Interactive multi-turn REPL | `python .\code\main.py --chat` |
 | **Scheduler** | Run scheduled prompt tasks from `controldata/schedules/` unattended | `python .\code\main.py --scheduler` |
 | **Scheduled Item** | Run one named scheduled task immediately (debugging aid) | `python .\code\main.py --scheduled-item <name>` |
@@ -32,7 +32,7 @@ This project uses a local Ollama runtime and focuses on transparent, logged orch
 
 ### Prerequisites
 - Python 3.11+ with a virtual environment (project uses `.venv`).
-- Ollama installed and available in `PATH` — [https://ollama.com](https://ollama.com).
+- Ollama installed and available in `PATH` - [https://ollama.com](https://ollama.com).
 - At least one model pulled locally (e.g. `ollama pull gemma3:20b`).
 
 ### First-time setup
@@ -206,7 +206,7 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/ctx <tokens>` | Set the context window size for all subsequent runs (e.g. `/ctx 16384`). Accepts integers with optional commas or underscores. |
 | `/timeout <seconds>` | Set the LLM generation timeout (e.g. `/timeout 1800` for heavy analysis tasks). |
 | `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
-| `/reskills` | Rebuild the skills catalog from `skill.md` files and hot-reload into the current session. |
+| `/reskill` | Rebuild the skills catalog from `skill.md` files and hot-reload into the current session. |
 | `/skip-final` | Skip the final LLM synthesis call for all subsequent prompts; skill output is returned directly. Useful for pure data-collection steps (e.g. web mining) where no LLM summary is needed. |
 | `/run-final` | Re-enable the final LLM synthesis call (default state). |
 

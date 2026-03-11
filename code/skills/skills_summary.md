@@ -9,7 +9,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "CodeExecute Skill",
       "relative_path": "code/skills/CodeExecute/skill.md",
-      "purpose": "Execute a Python code snippet in a sandboxed environment and return the captured stdout as a string \u2014 use when the user requests computed or generated data (sequences, tables, calculations) that no other skill can produce.",
+      "purpose": "Execute a Python code snippet in a sandboxed environment and return the captured stdout as a string - use when the user requests computed or generated data (sequences, tables, calculations) that no other skill can produce.",
       "module": "code/skills/CodeExecute/code_execute_skill.py",
       "functions": [
         "run_python_snippet(code: str)",
@@ -20,7 +20,7 @@ Single JSON payload for orchestration planning.
       "inputs": [
         "`run_python_snippet(code: str)`",
         "`code`: a complete, self-contained Python snippet.",
-        "The snippet must use print() to emit all output \u2014 the return value of the last",
+        "The snippet must use print() to emit all output - the return value of the last",
         "Imports are restricted to a safe whitelist: math, itertools, collections, csv, io,",
         "os, sys, subprocess, open, eval, exec, and file I/O are blocked.",
         "Execution timeout: 15 seconds."
@@ -136,12 +136,12 @@ Single JSON payload for orchestration planning.
       ],
       "outputs": [
         "`page_type` is one of:",
-        "`\"article\"` \u2014 substantial prose content (\u2265 300 words, \u2264 4 links per 100 words)",
-        "`\"index\"` \u2014 listing/aggregation page (< 150 words, or \u2265 7 links per 100 words)",
-        "`\"mixed\"` \u2014 some content plus significant navigation (common on news section pages)",
+        "`\"article\"` - substantial prose content (\u2265 300 words, \u2264 4 links per 100 words)",
+        "`\"index\"` - listing/aggregation page (< 150 words, or \u2265 7 links per 100 words)",
+        "`\"mixed\"` - some content plus significant navigation (common on news section pages)",
         "`word_count`: prose words extracted after noise removal and deduplication",
         "`article_links`: sorted by `topic` match score when `topic` provided; otherwise page order",
-        "On failure: `{\"error\": \"description of what went wrong\"}` \u2014 never raises"
+        "On failure: `{\"error\": \"description of what went wrong\"}` - never raises"
       ]
     },
     {
@@ -195,10 +195,10 @@ Single JSON payload for orchestration planning.
       ]
     },
     {
-      "skill_name": "WebResearch Skill",
-      "relative_path": "code/skills/WebResearch/skill.md",
-      "purpose": "Mine web content into a structured three-stage research workspace. Handles both direct URL",
-      "module": "code/skills/WebResearch/web_research_skill.py",
+      "skill_name": "WebMine Skill",
+      "relative_path": "code/skills/WebMine/skill.md",
+      "purpose": "STAGE 1 - MINING ONLY. Fetch URLs or run DuckDuckGo searches and save raw content as .md files in 01-Mine. Does not analyse, summarise, or produce reports. QUERY RULES: Use natural topic + source name (e.g. 'UK news March 2026 BBC', 'French news March 2026 Le Monde'). Use month name + year for recency - NOT ISO dates or day numbers ('UK news March 11 2026' and 'BBC News 2026-03-11' both return no results). NEVER use site: operators. When a prompt contains a date like 2026-03-11, convert it to 'March 2026' for the query string.",
+      "module": "code/skills/WebMine/web_mine_skill.py",
       "functions": [
         "mine_search(\"electric vehicle battery 2026\", \"CarIndustry\", max_results=5)",
         "mine_search(query, domain, max_results, fetch_content, content_words)",
@@ -241,7 +241,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "WebResearchAnalysis Skill",
       "relative_path": "code/skills/WebResearchAnalysis/skill.md",
-      "purpose": "Read mined content from the 01-Mine research stage and produce structured daily intelligence",
+      "purpose": "**STAGE 2 - Analysis only.**",
       "module": "code/skills/WebResearchAnalysis/web_research_analysis_skill.py",
       "functions": [
         "create_daily_summary(domain, date, topic, model, num_ctx)",
@@ -257,8 +257,8 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "WebResearchOutput Skill",
       "relative_path": "code/skills/WebResearchOutput/skill.md",
-      "purpose": "",
-      "module": "",
+      "purpose": "Dispatches rendered HTML reports from the `03-Presentation` research stage to external destinations. This skill handles **delivery mechanics only** - HTML rendering and template styling are handled entirely by **WebResearchReport**.",
+      "module": "code/skills/WebResearchOutput/web_research_output_skill.py",
       "functions": [
         "get_analysis_text(domain, date)",
         "list_analyses(domain, max_days)",
@@ -272,7 +272,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "WebResearchReport Skill",
       "relative_path": "code/skills/WebResearchReport/skill.md",
-      "purpose": "",
+      "purpose": "Reads an analysis file produced by **WebResearchAnalysis** and renders it as a polished, self-contained HTML report saved to the `03-Presentation` research stage.",
       "module": "code/skills/WebResearchReport/web_research_report_skill.py",
       "functions": [
         "get_analysis_text(domain, date=\"\")",
@@ -286,7 +286,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "WebSearch Skill",
       "relative_path": "code/skills/WebSearch/skill.md",
-      "purpose": "Search the web using DuckDuckGo (no API key required) and return a ranked list of results with title, URL, and snippet. Pure Python \u2014 no external service accounts needed.",
+      "purpose": "Search the web using DuckDuckGo (no API key required) and return a ranked list of results with title, URL, and snippet. Pure Python - no external service accounts needed.",
       "module": "code/skills/WebSearch/web_search_skill.py",
       "functions": [
         "search_web(...)",

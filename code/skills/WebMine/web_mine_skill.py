@@ -1,9 +1,9 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# WebResearch (Mine stage) skill for MiniAgentFramework.
+# WebMine (Mine stage) skill for MiniAgentFramework.
 #
-# Gen3 web mining skill — fetches single URLs or runs DuckDuckGo searches, formats the
+# Gen3 web mining skill - fetches single URLs or runs DuckDuckGo searches, formats the
 # retrieved content as structured Markdown, and writes files into the 01-Mine stage of the
 # web research workspace managed by webresearch_utils.py.
 #
@@ -12,13 +12,13 @@
 #
 # Primary public functions:
 #   mine_url(url, domain, slug=None, max_words=600)
-#     -> Fetches a URL, extracts readable text, saves source.md in 01-Mine
+#     -> Fetches a URL, extracts readable text, saves a .md file in 01-Mine
 #   mine_search(query, domain, max_results=5)
-#     -> Runs a DuckDuckGo search, saves results.md in 01-Mine
+#     -> Runs a DuckDuckGo search, saves a .md file in 01-Mine
 #
 # Both functions return:
 #   - Confirmation string "Saved: <path>"  on success.
-#   - Error string starting with "Error:"  on failure — never raises.
+#   - Error string starting with "Error:"  on failure - never raises.
 #
 # Related modules:
 #   - webresearch_utils.py -- path management for the three-stage research area
@@ -31,7 +31,9 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import html as _html
+import random
 import re
+import time
 import urllib.parse
 from datetime import date as _date, datetime as _datetime
 from pathlib import Path
@@ -41,7 +43,8 @@ from webpage_utils import extract_content as _extract_content
 from webpage_utils import truncate_to_words as _truncate_to_words
 from prompt_tokens import resolve_tokens as _resolve_query_tokens
 from webresearch_utils import STAGE_MINE
-from webresearch_utils import create_item_dir
+from webresearch_utils import ensure_date_dir
+from webresearch_utils import alloc_mine_file
 from webresearch_utils import next_item_number
 from webresearch_utils import _make_slug as _webresearch_make_slug
 
@@ -90,7 +93,7 @@ DEFAULT_TIMEOUT  = 15
 def _is_blocked_domain(url: str) -> bool:
     """Return True if the URL belongs to a blocked social/platform domain.
 
-    Blocked domains are never fetched during research crawls — they rarely contain
+    Blocked domains are never fetched during research crawls - they rarely contain
     long-form articles and frequently pollute DuckDuckGo results.
     """
     try:
@@ -132,7 +135,7 @@ def _is_topically_relevant(title: str, body: str, query: str, min_matches: int =
 def _relevance_score(title: str, snippet: str, query: str) -> int:
     """Score a DDG result (title + snippet) against the query before any page fetch.
 
-    Returns an integer match count — the number of significant query tokens
+    Returns an integer match count - the number of significant query tokens
     (length >= 4, not in stopwords) that appear in title + snippet.
     Higher is more relevant.  Used to pre-sort DDG results so the most
     relevant URLs are fetched first.
@@ -174,7 +177,7 @@ def _is_ddg_ad(url: str) -> bool:
 
     DuckDuckGo ads use a /y.js?ad_domain=... href instead of the /l/?uddg= organic
     redirect.  The decoder does not recognise this format so the raw tracking URL
-    passes through unchanged — these should be excluded from results.
+    passes through unchanged - these should be excluded from results.
     """
     try:
         host = urllib.parse.urlparse(url).netloc.lower()
@@ -188,7 +191,11 @@ def _ddg_search(query: str, max_results: int, timeout: int) -> list[dict]:
     """Run a DuckDuckGo HTML search and return a list of result dicts."""
     encoded    = urllib.parse.quote_plus(query.strip())
     search_url = _DDG_URL.format(q=encoded)
+    delay = random.uniform(2.0, 4.0)
+    print(f"[DDG] query={repr(query)}  url={search_url}  (sleeping {delay:.1f}s)")
+    time.sleep(delay)
     html_text, _ = _fetch_html(search_url, timeout=float(timeout))
+    print(f"[DDG] response size: {len(html_text)} chars")
 
     results  = []
     anchors  = list(_ANCHOR_RE.finditer(html_text))
@@ -208,6 +215,7 @@ def _ddg_search(query: str, max_results: int, timeout: int) -> list[dict]:
         except Exception:
             continue
 
+    print(f"[DDG] {len(results)} result(s) returned")
     return results
 
 
@@ -269,11 +277,11 @@ def _format_results_md(query: str, domain: str, results: list[dict]) -> str:
         elif content_type == "index":
             index_links = r.get("index_links", [])
             if index_links:
-                lines.append("- *Index/listing page — article links discovered:*\n")
+                lines.append("- *Index/listing page - article links discovered:*\n")
                 for lnk in index_links:
                     lines.append(f"  - [{lnk.get('title', lnk.get('url', ''))}]({lnk.get('url', '')})")
             else:
-                lines.append("- *Page type: index/listing — no article content extracted*")
+                lines.append("- *Page type: index/listing - no article content extracted*")
         lines.append("")
     return "\n".join(lines)
 
@@ -380,7 +388,7 @@ def _fetch_content_preview(url: str, max_words: int = 200) -> tuple[int, str, li
         words = body.split()
         word_count = len(words)
 
-        # Always extract article links — needed for index pages AND for density check.
+        # Always extract article links - needed for index pages AND for density check.
         if _BS4_AVAILABLE:
             article_links = _extract_index_links_bs4(html_text, final_url, max_links=15)
         else:
@@ -403,27 +411,50 @@ def _fetch_content_preview(url: str, max_words: int = 200) -> tuple[int, str, li
 # ====================================================================================================
 # MARK: INTERNAL: ARTICLE SAVER
 # ====================================================================================================
+def _urls_already_mined(date_dir: "Path") -> set[str]:
+    """Return the set of Source URLs already saved in date_dir.
+
+    Reads the third line of each .md file, which by convention holds
+    '**Source URL:** <url>' as written by _format_source_md.
+    """
+    urls: set[str] = set()
+    if not date_dir.exists():
+        return urls
+    for f in date_dir.glob("*.md"):
+        try:
+            lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+            for line in lines[:6]:   # URL is always within the first few lines
+                if line.startswith("**Source URL:**"):
+                    urls.add(line[len("**Source URL:**"):].strip())
+                    break
+        except Exception:
+            continue
+    return urls
+
+
+# ----------------------------------------------------------------------------------------------------
 def _save_article_in(
-    parent_dir: "Path",
+    date_dir: "Path",
     title: str,
     url: str,
     domain: str,
     body: str,
     content_words: int,
 ) -> "str | None":
-    """Save an article as a numbered sub-folder inside an existing parent directory.
+    """Save an article as a numbered .md file directly inside the date directory.
 
-    Used by mine_search_deep to group all articles under one query-level folder.
-    Does not re-fetch — caller provides already-extracted title and body.
+    Used by mine_search_deep to save each mined article to the flat date dir.
+    Does not re-fetch - caller provides already-extracted title and body.
     Returns the saved absolute path string on success, None on any failure.
     """
     try:
         truncated   = _truncate_to_words(body, content_words)
         slug        = _webresearch_make_slug(title or url.split("/")[-1] or "article")
-        seq         = next_item_number(parent_dir)
-        item_dir    = parent_dir / f"{seq:03d}-{slug}"
-        item_dir.mkdir(exist_ok=True)
-        output_path = item_dir / "source.md"
+        seq         = next_item_number(date_dir)
+        output_path = date_dir / f"{seq:03d}-{slug}.md"
+        # Skip if this URL was already saved by a previous call in the same session.
+        if url in _urls_already_mined(date_dir):
+            return None
         output_path.write_text(_format_source_md(title, url, domain, truncated), encoding="utf-8")
         return str(output_path)
     except Exception:
@@ -439,9 +470,9 @@ def mine_url(
     slug: str | None = None,
     max_words: int = 1200,
 ) -> str:
-    """Fetch a URL, extract its readable content, and save it as source.md in the Mine stage.
+    """Fetch a URL, extract its readable content, and save it as a .md file in the Mine stage.
 
-    Saves to:  webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<slug>/source.md
+    Saves to:  webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<slug>.md
 
     Returns a confirmation string "Saved: <path>" on success, or an "Error: ..." string
     on failure.  Never raises.
@@ -469,8 +500,7 @@ def mine_url(
     body = _truncate_to_words(body, max_words)
 
     item_slug   = slug or title or url.split("/")[-1] or "page"
-    item_dir    = create_item_dir(STAGE_MINE, domain, item_slug)
-    output_path = item_dir / "source.md"
+    output_path = alloc_mine_file(STAGE_MINE, domain, item_slug)
 
     try:
         output_path.write_text(_format_source_md(title, final_url, domain, body), encoding="utf-8")
@@ -488,14 +518,14 @@ def mine_search(
     fetch_content: bool = True,
     content_words: int = 600,
 ) -> str:
-    """Run a DuckDuckGo search and save the result list as results.md in the Mine stage.
+    """Run a DuckDuckGo search and save the result list as a .md file in the Mine stage.
 
     When fetch_content=True (the default) each result URL is fetched and up to content_words
     words of extracted prose are embedded inline in the saved file.  Results that yield fewer
     than 250 extracted words, or that are link-dense section/listing pages, are treated as
-    index pages — their article-candidate links are saved instead of prose.
+    index pages - their article-candidate links are saved instead of prose.
 
-    Saves to:  webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-search-<query>/results.md
+    Saves to:  webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<query>.md
 
     Returns a confirmation string "Saved: <path>" on success, or an "Error: ..." string
     on failure.  Never raises.
@@ -530,8 +560,7 @@ def mine_search(
                 r["content_type"]  = "index"
                 r["index_links"]   = index_links
 
-    item_dir    = create_item_dir(STAGE_MINE, domain, f"search-{query}")
-    output_path = item_dir / "results.md"
+    output_path = alloc_mine_file(STAGE_MINE, domain, query)
 
     try:
         output_path.write_text(_format_results_md(query.strip(), domain, results), encoding="utf-8")
@@ -551,33 +580,31 @@ def mine_search_deep(
     content_words: int = 1500,
     target_articles: int = 5,
 ) -> str:
-    """Search DDG and deeply mine each result into individual source.md files.
+    """Search DDG and deeply mine each result into individual .md files in the Mine stage.
 
-    Unlike mine_search (which saves a single results.md with embedded snippets), this
-    function saves each discovered article as its own source.md file — the same rich
+    Unlike mine_search (which saves a single .md with embedded snippets), this
+    function saves each discovered article as its own numbered .md file - the same rich
     format produced by mine_url, but driven entirely by a search query.
 
-    All articles from a single call are grouped under one top-level folder:
-      webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-deep-<query>/
-    with each article in its own numbered sub-folder:
-      NNN-deep-<query>/001-<title>/source.md
-      NNN-deep-<query>/002-<title>/source.md
+    All articles are saved directly to the date directory:
+      webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<title>.md
+      webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<title>.md
 
     For each DDG result URL:
       - Article page  (>= min_words prose, low link density):
-          mined directly → saved as source.md
+          mined directly - saved as NNN-title.md
       - Index/section page (< min_words prose, or link-dense):
           up to max_articles_per_result child links are followed, each classified;
-          article-quality children are mined and saved as source.md
+          article-quality children are mined and saved as NNN-title.md
 
     Processing stops early once target_articles articles have been saved.
 
     DDG results are pre-scored by title+snippet relevance and processed in relevance
-    order, so setting max_results higher than target_articles (e.g. double) is cheap —
+    order, so setting max_results higher than target_articles (e.g. double) is cheap -
     no extra page fetches until candidates are actually needed.
 
     Returns a summary string listing every saved path.
-    On failure returns a descriptive error string — never raises.
+    On failure returns a descriptive error string - never raises.
     """
     if not query or not query.strip():
         return "Error: query cannot be empty."
@@ -601,7 +628,7 @@ def mine_search_deep(
 
     # Pre-sort DDG results by snippet+title relevance score (descending) so the most
     # relevant URLs are fetched first.  Blocked-domain results are pushed to the back.
-    # This is free — no extra HTTP requests needed, only the already-returned snippets.
+    # This is free - no extra HTTP requests needed, only the already-returned snippets.
     results.sort(
         key=lambda r: (
             0 if _is_blocked_domain(r.get("url", "")) else 1,
@@ -610,10 +637,8 @@ def mine_search_deep(
         reverse=True,
     )
 
-    # Create one top-level query folder; all articles go under it as sub-folders.
-    # Strip any YYYY-MM-DD date from the slug — the date is already encoded in the path.
-    query_slug = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", "", query).strip()
-    query_dir = create_item_dir(STAGE_MINE, domain, f"deep-{query_slug}")
+    # Ensure the date directory exists; all articles are saved directly inside it.
+    date_dir = ensure_date_dir(STAGE_MINE, domain)
 
     mined_paths:  list[str] = []
     fetch_errors: int       = 0
@@ -633,7 +658,7 @@ def mine_search_deep(
             skipped_domain += 1
             continue
 
-        # Fetch and extract once per result URL — no double-fetching.
+        # Fetch and extract once per result URL - no double-fetching.
         try:
             html_text, final_url = _fetch_html(url, timeout=12.0)
         except Exception:
@@ -660,7 +685,7 @@ def mine_search_deep(
             if not _is_topically_relevant(title, body, query):
                 skipped_relevance += 1
                 continue
-            path = _save_article_in(query_dir, title, final_url, domain, body, content_words)
+            path = _save_article_in(date_dir, title, final_url, domain, body, content_words)
             if path:
                 mined_paths.append(path)
         else:
@@ -696,7 +721,7 @@ def mine_search_deep(
                         if not _is_topically_relevant(child_title, child_body, query):
                             skipped_relevance += 1
                             continue
-                        path = _save_article_in(query_dir, child_title, child_final_url, domain, child_body, content_words)
+                        path = _save_article_in(date_dir, child_title, child_final_url, domain, child_body, content_words)
                         if path:
                             mined_paths.append(path)
                             articles_found += 1
@@ -705,16 +730,16 @@ def mine_search_deep(
 
     if not mined_paths:
         detail = f" ({fetch_errors} fetch error(s))" if fetch_errors else ""
-        return f"No articles found for query: {query!r} — searched {len(results)} result(s){detail}"
+        return f"No articles found for query: {query!r} - searched {len(results)} result(s){detail}"
 
     lines = [f"Mined {len(mined_paths)} article(s) for: {query!r}"]
-    lines.append(f"  Folder: {query_dir}")
+    lines.append(f"  Folder: {date_dir}")
     for p in mined_paths:
         lines.append(f"  Saved: {p}")
     if fetch_errors:
         lines.append(f"  ({fetch_errors} URL(s) could not be fetched)")
     if skipped_domain:
-        lines.append(f"  ({skipped_domain} URL(s) skipped — blocked platform domain)")
+        lines.append(f"  ({skipped_domain} URL(s) skipped - blocked platform domain)")
     if skipped_relevance:
-        lines.append(f"  ({skipped_relevance} URL(s) skipped — off-topic content)")
+        lines.append(f"  ({skipped_relevance} URL(s) skipped - off-topic content)")
     return "\n".join(lines)

@@ -104,10 +104,10 @@ def initial_last_run(task: dict, reference: datetime) -> "datetime | None":
         try:
             target_time = datetime.strptime(target_str, "%H:%M").time()
         except ValueError:
-            return reference  # malformed — treat as already fired today
+            return reference  # malformed - treat as already fired today
         if reference.time() >= target_time:
-            return reference  # time has passed today — defer to tomorrow
-        return None  # time not yet reached — will fire naturally later today
+            return reference  # time has passed today - defer to tomorrow
+        return None  # time not yet reached - will fire naturally later today
 
     return None
 
@@ -132,11 +132,11 @@ def is_task_due(task: dict, last_run: datetime | None, now: datetime) -> bool:
         try:
             target_time = datetime.strptime(target_str, "%H:%M").time()
         except ValueError:
-            return False  # malformed time string — never fire
+            return False  # malformed time string - never fire
         if now.time() < target_time:
             return False
         if last_run is None:
-            return True  # time reached and never run — fire now
+            return True  # time reached and never run - fire now
         return last_run.date() < now.date()
 
     return False

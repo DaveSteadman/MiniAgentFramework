@@ -9,7 +9,7 @@
 # by the WebResearchOutput skill.
 #
 # Design note: this skill makes its own LLM call (a "thick skill") rather than delegating
-# to the agent's final LLM pass.  This is intentional — the summary must be saved to disk
+# to the agent's final LLM pass.  This is intentional - the summary must be saved to disk
 # before the agent responds, and the agent's final LLM context should contain a confirmation
 # string, not a bulk research report.  The same pattern is used by skills_catalog_builder.py.
 #
@@ -25,7 +25,7 @@
 #     -> Returns a human-readable listing of completed analyses for a domain
 #
 # Saved file location:
-#   webresearch/02-Analysis/<domain>/yyyy/mm/dd/NNN-daily-summary/analysis.md
+#   webresearch/02-Analysis/<domain>/yyyy/mm/dd/analysis.md
 #
 # Related modules:
 #   - webresearch_utils.py               -- path management for all three research stages
@@ -48,7 +48,7 @@ from webresearch_utils import (
     STAGE_ANALYSIS,
     get_domain_dir,
     get_date_dir,
-    create_item_dir,
+    ensure_date_dir,
 )
 from ollama_client import call_ollama_extended, list_ollama_models, resolve_model_name
 
@@ -66,12 +66,11 @@ _SPACE_RE = re.compile(r"\s+")
 # MARK: MINE STAGE READERS
 # ====================================================================================================
 def _find_content_files(domain: str, when: _date) -> list[Path]:
-    """Return all source.md and results.md files under 01-Mine/<domain>/yyyy/mm/dd/, sorted."""
+    """Return all .md files directly under 01-Mine/<domain>/yyyy/mm/dd/, sorted."""
     date_dir = get_date_dir(STAGE_MINE, domain, when)
     if not date_dir.exists():
         return []
-    all_md = list(date_dir.rglob("source.md")) + list(date_dir.rglob("results.md"))
-    return sorted(all_md, key=lambda p: p.parent.name)
+    return sorted(date_dir.glob("*.md"))
 
 
 def _read_articles(content_files: list[Path]) -> list[dict]:
@@ -95,9 +94,9 @@ def _read_articles(content_files: list[Path]) -> list[dict]:
                 if "**Query:**" in stripped and not title:
                     title = "Search: " + stripped.replace("**Query:**", "").strip()
             articles.append({
-                "title":  title or path.parent.name,
+                "title":  title or path.stem,
                 "url":    url,
-                "folder": path.parent.name,
+                "folder": path.stem,
                 "text":   text,
             })
         except Exception:
@@ -168,12 +167,9 @@ def _safe_resolve_model(model_alias: str) -> str:
 # MARK: ANALYSIS FILE LOCATOR
 # ====================================================================================================
 def _find_analysis_file(domain: str, when: _date) -> Path | None:
-    """Return the most recent analysis.md under 02-Analysis/<domain>/yyyy/mm/dd/, or None."""
-    date_dir = get_date_dir(STAGE_ANALYSIS, domain, when)
-    if not date_dir.exists():
-        return None
-    candidates = sorted(date_dir.rglob("analysis.md"))
-    return candidates[-1] if candidates else None
+    """Return analysis.md under 02-Analysis/<domain>/yyyy/mm/dd/, or None."""
+    path = get_date_dir(STAGE_ANALYSIS, domain, when) / "analysis.md"
+    return path if path.exists() else None
 
 
 # ====================================================================================================
@@ -226,7 +222,7 @@ def create_daily_summary(
     num_ctx : LLM context window in tokens, default 131072
 
     Returns "Saved: <path>  (N articles, N words)" on success.
-    Returns a descriptive "Error: ..." string on failure — never raises.
+    Returns a descriptive "Error: ..." string on failure - never raises.
     """
     if not domain or not domain.strip():
         return "Error: domain cannot be empty."
@@ -248,6 +244,9 @@ def create_daily_summary(
     prompt   = _build_analysis_prompt(domain.strip(), when, topic, articles)
     resolved = _safe_resolve_model(str(model))
 
+    prompt_words = len(prompt.split())
+    print(f"[Analysis] {len(articles)} document(s), ~{prompt_words:,} words in prompt (~{int(prompt_words * 1.3):,} tokens est.), ctx={int(num_ctx):,}")
+
     try:
         result         = call_ollama_extended(model_name=resolved, prompt=prompt, num_ctx=int(num_ctx))
         analysis_body  = result.response.strip()
@@ -257,10 +256,10 @@ def create_daily_summary(
     if not analysis_body:
         return "Error: LLM returned an empty response."
 
-    # Build the full saved document — structured header + LLM-generated body
+    # Build the full saved document - structured header + LLM-generated body
     now    = _datetime.now().strftime("%Y-%m-%d %H:%M")
     header = "\n".join([
-        f"# Daily Research Summary: {domain} — {when.strftime('%Y-%m-%d')}",
+        f"# Daily Research Summary: {domain} - {when.strftime('%Y-%m-%d')}",
         "",
         f"**Generated:** {now}",
         f"**Documents analysed:** {len(articles)}",
@@ -273,8 +272,8 @@ def create_daily_summary(
     full_document = header + "\n" + analysis_body
 
     try:
-        item_dir    = create_item_dir(STAGE_ANALYSIS, domain.strip(), "daily-summary", when)
-        output_path = item_dir / "analysis.md"
+        date_dir    = ensure_date_dir(STAGE_ANALYSIS, domain.strip(), when)
+        output_path = date_dir / "analysis.md"
         output_path.write_text(full_document, encoding="utf-8")
     except Exception as exc:
         return f"Error: failed to save analysis: {exc}"
@@ -308,14 +307,8 @@ def list_mine_days(domain: str, max_days: int = 7) -> str:
 
     lines = [f"Mined content available for domain '{domain}':"]
     for d, day_dir in entries:
-        source_count  = len(list(day_dir.rglob("source.md")))
-        results_count = len(list(day_dir.rglob("results.md")))
-        parts: list[str] = []
-        if source_count:
-            parts.append(f"{source_count} article file(s)")
-        if results_count:
-            parts.append(f"{results_count} search results file(s)")
-        lines.append(f"  {d.strftime('%Y-%m-%d')}:  {', '.join(parts) or 'no .md files'}")
+        file_count = len(list(day_dir.glob("*.md")))
+        lines.append(f"  {d.strftime('%Y-%m-%d')}:  {file_count} mined file(s)")
     return "\n".join(lines)
 
 
@@ -338,7 +331,6 @@ def list_analyses(domain: str, max_days: int = 7) -> str:
 
     lines = [f"Completed analyses for domain '{domain}':"]
     for d, day_dir in entries:
-        analysis_files = list(day_dir.rglob("analysis.md"))
-        count = len(analysis_files)
-        lines.append(f"  {d.strftime('%Y-%m-%d')}:  {count} analysis file(s)")
+        exists = (day_dir / "analysis.md").exists()
+        lines.append(f"  {d.strftime('%Y-%m-%d')}:  {'1 analysis file' if exists else 'no analysis file'}")
     return "\n".join(lines)

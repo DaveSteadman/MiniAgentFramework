@@ -66,7 +66,7 @@ GENERAL_KNOWLEDGE_HINTS = {
     "explain",
 }
 
-# Regex that matches a sentence beginning with an interrogative word — these are questions
+# Regex that matches a sentence beginning with an interrogative word - these are questions
 # even when they lack a trailing '?' and must not be stored as facts.
 _QUESTION_OPENER_RE = re.compile(
     r"^\s*(?:what|which|who|whose|whom|how|when|where|why|"
@@ -75,7 +75,7 @@ _QUESTION_OPENER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Imperative/command openers — requests for the agent to do something, not statements of fact.
+# Imperative/command openers - requests for the agent to do something, not statements of fact.
 _COMMAND_OPENER_RE = re.compile(
     r"^\s*(?:show|output|list|tell|give|write|read|append|create|report|return|"
     r"summarize|summarise|display|print|get|fetch|find|search|check|run|execute)\b",
@@ -171,7 +171,7 @@ def _is_memorable_fact(candidate: str) -> bool:
     if "?" in lowered:
         return False
 
-    # Reject interrogative openers — questions without '?'
+    # Reject interrogative openers - questions without '?'
     if _QUESTION_OPENER_RE.match(lowered):
         return False
 

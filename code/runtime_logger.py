@@ -3,8 +3,8 @@
 # ====================================================================================================
 # Session logger that writes timestamped run output to both stdout and a persistent log file.
 #
-# SessionLogger is used by main.py to record every stage of an orchestration run — planner prompts,
-# execution plan JSON, skill call outputs, the final LLM response, and validation results — so that
+# SessionLogger is used by main.py to record every stage of an orchestration run - planner prompts,
+# execution plan JSON, skill call outputs, the final LLM response, and validation results - so that
 # runs can be reviewed after the fact without re-executing. Each session writes to a unique file
 # named with the run timestamp.
 #
@@ -16,6 +16,7 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -26,6 +27,33 @@ import sys
 # ====================================================================================================
 SECTION_SEPARATOR = "=" * 100
 HORIZONTAL_SEPARATOR = "-" * 100
+
+
+# ====================================================================================================
+# MARK: TEE WRITER
+# ====================================================================================================
+class _TeeWriter:
+    """Wraps sys.stdout so that print() calls go to both the console and the log file."""
+
+    def __init__(self, original, file_path: Path):
+        self._original  = original
+        self._file_path = file_path
+
+    def write(self, text: str) -> None:
+        self._original.write(text)
+        with self._file_path.open("a", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def flush(self) -> None:
+        self._original.flush()
+
+    @property
+    def encoding(self) -> str:
+        return getattr(self._original, "encoding", None) or "utf-8"
+
+    @property
+    def errors(self) -> str:
+        return getattr(self._original, "errors", None) or "replace"
 
 
 # ====================================================================================================
@@ -67,19 +95,31 @@ class SessionLogger:
 
     # ----------------------------------------------------------------------------------------------------
     def log_file_only(self, message: str = "") -> None:
-        """Write to the log file only — no stdout. Used for verbose orchestration detail in chat mode."""
+        """Write to the log file only - no stdout. Used for verbose orchestration detail in chat mode."""
         text = str(message)
         with self.file_path.open("a", encoding="utf-8") as handle:
             handle.write(text + "\n")
 
     # ----------------------------------------------------------------------------------------------------
     def log_section_file_only(self, title: str) -> None:
-        """Write a section header to the log file only — no stdout."""
+        """Write a section header to the log file only - no stdout."""
         stamped = f"{title}  [{datetime.now().strftime('%H:%M:%S')}]"
         self.log_file_only("")
         self.log_file_only(SECTION_SEPARATOR)
         self.log_file_only(stamped)
         self.log_file_only(SECTION_SEPARATOR)
+
+    # ----------------------------------------------------------------------------------------------------
+    @contextmanager
+    def tee_stdout(self):
+        """Context manager: redirect sys.stdout so print() calls inside skill code go to both
+        the console and the log file for the duration of the block."""
+        original    = sys.stdout
+        sys.stdout  = _TeeWriter(original, self.file_path)
+        try:
+            yield
+        finally:
+            sys.stdout = original
 
 
 # ====================================================================================================

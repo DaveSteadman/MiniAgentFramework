@@ -123,7 +123,7 @@ def resolve_execution_model(requested_model: str) -> str:
     if resolved is None:
         fallback = available_models[0]
         print(
-            f"[model] '{requested_model}' not found \u2014 falling back to '{fallback}'.\n"
+            f"[model] '{requested_model}' not found - falling back to '{fallback}'.\n"
             f"        Available: {', '.join(available_models)}"
         )
         return fallback
@@ -182,7 +182,7 @@ def _format_plan_summary(plan, model_name: str) -> str:
                     val_str = val_str[:117] + "..."
                 lines.append(f"       {arg_name} = {val_str}")
     else:
-        lines.append("(no Python calls planned — LLM will answer directly)")
+        lines.append("(no Python calls planned - LLM will answer directly)")
 
     if plan.final_prompt_template:
         tmpl = plan.final_prompt_template.strip()
@@ -341,7 +341,7 @@ def orchestrate_prompt(
 
     Returns (final_response, prompt_tokens, completion_tokens, run_success, tokens_per_second).
 
-    When quiet=True, verbose orchestration stages are written to the log file only —
+    When quiet=True, verbose orchestration stages are written to the log file only -
     the behaviour used in chat/dashboard/scheduler modes to keep output clean.
     """
     def _log(msg: str = "") -> None:
@@ -350,7 +350,7 @@ def orchestrate_prompt(
     def _log_section(title: str) -> None:
         logger.log_section_file_only(title) if quiet else logger.log_section(title)
 
-    # Always write to file only — used for verbose/bulk content that clutters stdout/console.
+    # Always write to file only - used for verbose/bulk content that clutters stdout/console.
     def _log_file_only(msg: str = "") -> None:
         logger.log_file_only(msg)
 
@@ -389,7 +389,6 @@ def orchestrate_prompt(
         if planner_feedback:
             planner_ask = f"{_PLANNER_ASK} Previous iteration feedback: {planner_feedback}"
 
-        _log_file_only(f"[progress] Iteration {iteration}: calling planner LLM ({config.resolved_model})...")
         plan, planner_prompt, planner_llm_result = create_skill_execution_plan(
             user_prompt=planner_user_prompt,
             skills_summary_path=_SKILLS_SUMMARY_PATH,
@@ -403,7 +402,7 @@ def orchestrate_prompt(
         _log_section(f"ITERATION {iteration} - SKILL PLAN")
         _log(_format_plan_summary(plan, config.resolved_model))
 
-        # Full planner prompt — file only. Replace the static skills catalog block with a
+        # Full planner prompt - file only. Replace the static skills catalog block with a
         # path reference so the log contains only the dynamic, actionable parts.
         _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN (verbose)")
         _skills_marker = "Skills summary context:\n"
@@ -425,15 +424,16 @@ def orchestrate_prompt(
 
         _log_section(f"ITERATION {iteration} - SKILL EXECUTION FLOW")
         _log_file_only(f"[progress] Iteration {iteration}: executing {len(plan.python_calls)} skill call(s)...")
-        python_call_outputs, last_call_output = execute_skill_plan_calls(
-            plan=plan,
-            user_prompt=user_prompt,
-            skills_payload=config.skills_payload,
-        )
+        with logger.tee_stdout():
+            python_call_outputs, last_call_output = execute_skill_plan_calls(
+                plan=plan,
+                user_prompt=user_prompt,
+                skills_payload=config.skills_payload,
+            )
         _log_file_only(f"[progress] Iteration {iteration}: skill execution complete.")
         _log(_format_skill_flow(python_call_outputs))
 
-        # Full outputs JSON (may contain large text/HTML payloads) — file only.
+        # Full outputs JSON (may contain large text/HTML payloads) - file only.
         _log_section_file_only(f"ITERATION {iteration} - PYTHON CALL OUTPUTS (verbose)")
         _log_file_only(json.dumps(python_call_outputs, indent=2))
 
@@ -461,12 +461,11 @@ def orchestrate_prompt(
         _log_section(f"ITERATION {iteration} - FINAL LLM EXECUTION")
 
         if config.skip_final_llm:
-            _log("[skip-final] Final LLM call skipped — returning skill output directly.")
+            _log("[skip-final] Final LLM call skipped - returning skill output directly.")
             final_response    = last_call_output if isinstance(last_call_output, str) else str(last_call_output)
             run_success       = True
             break
 
-        _log_file_only(f"[progress] Iteration {iteration}: calling final LLM ({config.resolved_model})...")
         try:
             result            = call_ollama_extended(model_name=config.resolved_model, prompt=final_prompt, num_ctx=config.num_ctx)
             final_response    = result.response.strip()

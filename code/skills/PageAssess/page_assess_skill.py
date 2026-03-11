@@ -4,7 +4,7 @@
 # PageAssess skill for MiniAgentFramework.
 #
 # Fetches a URL and classifies it as an "article", "index", or "mixed" page using lightweight
-# heuristics — no LLM call is made.  Returns a structured assessment including:
+# heuristics - no LLM call is made.  Returns a structured assessment including:
 #   - page_type    : "article", "index", or "mixed"
 #   - word_count   : deduped prose words extracted
 #   - link_count   : article-candidate links found in the content area
@@ -13,7 +13,7 @@
 #
 # Primary public function:
 #   assess_page(url, topic="", max_links=10)
-#     -> Returns a dict — never raises; returns {"error": "..."} on failure.
+#     -> Returns a dict - never raises; returns {"error": "..."} on failure.
 #
 # This skill does NOT write any files to disk.
 #
@@ -54,7 +54,7 @@ _SKIP_TAGS = frozenset({
     "button", "svg", "picture", "iframe",
 })
 
-# Tags that also carry navigation noise — pruned from the content container.
+# Tags that also carry navigation noise - pruned from the content container.
 _NAV_SKIP_TAGS = frozenset({
     "nav", "header", "footer", "aside", "form",
 })
@@ -322,7 +322,7 @@ def assess_page(
       prose_preview -- first 100 words of extracted prose
       article_links -- list of {title, url} dicts filtered/ranked by topic
 
-    On failure: returns {"error": "<description>"} — never raises.
+    On failure: returns {"error": "<description>"} - never raises.
 
     Planner guide for page_type:
       "article" -> call mine_url directly; the page has substantial content

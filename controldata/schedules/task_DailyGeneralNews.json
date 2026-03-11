@@ -12,31 +12,31 @@
     {
       "name": "DailyNews_Mine",
       "enabled": true,
-      "schedule": { "type": "daily", "time": "07:09" },
+      "schedule": { "type": "daily", "time": "07:05" },
       "prompts": [
         "/model 20b",
         "/timeout 300",
         "/skip-final",
-        "deep research UK news headlines for {today} into the GeneralNews domain",
-        "deep research French news headlines for {today} into the GeneralNews domain",
-        "deep research German news headlines for {today} into the GeneralNews domain"
+        "deep web mine UK news headlines for {today} into the GeneralNews domain using the top 10 articles from 5 news sources",
+        "deep web mine French news headlines for {today} into the GeneralNews domain",
+        "deep web mine EU news headlines for {today} into the GeneralNews domain"
       ]
     },
     {
       "name": "DailyNews_Analyse",
       "enabled": true,
-      "schedule": { "type": "daily", "time": "07:09" },
+      "schedule": { "type": "daily", "time": "07:10" },
       "prompts": [
         "/model 20b",
         "/timeout 1800",
         "/skip-final",
-        "Analyse the daily research for the GeneralNews domain for {today}, to create a summary of the top 10 articles at around 500 words each"
+        "Use the WebResearchAnalysis skill to create a daily summary for the GeneralNews domain for {today}, with topic 'UK, French, and EU news headlines', focus on the top 10 themes ranked by their geopolitical significance"
       ]
     },
     {
       "name": "DailyNews_Output",
       "enabled": true,
-      "schedule": { "type": "daily", "time": "07:09" },
+      "schedule": { "type": "daily", "time": "07:15" },
       "prompts": [
         "/skip-final",
         "Save an HTML report for the GeneralNews domain for {today} using the dark template"

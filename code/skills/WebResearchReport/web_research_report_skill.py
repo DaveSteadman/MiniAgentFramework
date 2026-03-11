@@ -5,13 +5,13 @@
 #
 # Reads analysis files from the 02-Analysis research stage, converts them to a styled
 # standalone HTML report, and saves the result to the 03-Presentation research stage.
-# All HTML template and formatting logic lives here — WebResearchOutput (email/SFTP
+# All HTML template and formatting logic lives here - WebResearchOutput (email/SFTP
 # dispatch) has no knowledge of styling or conversion.
 #
 # Primary public functions:
 #   save_html_report(domain, date="", template="default")
 #     -> Reads analysis.md for domain/date, renders to styled HTML, saves to
-#        03-Presentation/<domain>/yyyy/mm/dd/NNN-daily-report/report.html.
+#        03-Presentation/<domain>/yyyy/mm/dd/report.html.
 #        Returns "Saved: <path>" on success or an "Error: ..." string.
 #
 #   get_analysis_text(domain, date="")
@@ -44,7 +44,7 @@ from webresearch_utils import (
     STAGE_PRESENTATION,
     get_domain_dir,
     get_date_dir,
-    create_item_dir,
+    ensure_date_dir,
 )
 
 
@@ -57,7 +57,7 @@ _SPACE_RE = re.compile(r"\s+")
 # ====================================================================================================
 # MARK: HTML REPORT TEMPLATE
 # ====================================================================================================
-# Self-contained standalone HTML — no external dependencies, print-friendly.
+# Self-contained standalone HTML - no external dependencies, print-friendly.
 _REPORT_HTML_TEMPLATE = """\
 <!DOCTYPE html>
 <html lang="en">
@@ -421,7 +421,7 @@ def _build_report_html(domain: str, when: _date, body_md: str, template: str = "
     """Render analysis Markdown into the styled standalone HTML report template."""
     now        = _datetime.now().strftime("%Y-%m-%d %H:%M")
     date_label = when.strftime("%A, %d %B %Y")
-    title      = f"{domain} Research Report — {when.strftime('%Y-%m-%d')}"
+    title      = f"{domain} Research Report - {when.strftime('%Y-%m-%d')}"
     body_html  = _md_to_html(body_md)
     tmpl       = _TEMPLATES.get(template, _REPORT_HTML_TEMPLATE)
     return tmpl.format(
@@ -437,24 +437,18 @@ def _build_report_html(domain: str, when: _date, body_md: str, template: str = "
 # MARK: ANALYSIS FILE LOCATOR
 # ====================================================================================================
 def _find_analysis_file(domain: str, when: _date) -> Path | None:
-    """Return the most recent analysis.md under 02-Analysis/<domain>/yyyy/mm/dd/, or None."""
-    date_dir = get_date_dir(STAGE_ANALYSIS, domain, when)
-    if not date_dir.exists():
-        return None
-    candidates = sorted(date_dir.rglob("analysis.md"))
-    return candidates[-1] if candidates else None
+    """Return analysis.md under 02-Analysis/<domain>/yyyy/mm/dd/, or None."""
+    path = get_date_dir(STAGE_ANALYSIS, domain, when) / "analysis.md"
+    return path if path.exists() else None
 
 
 # ====================================================================================================
 # MARK: REPORT FILE LOCATOR
 # ====================================================================================================
 def _find_report_file(domain: str, when: _date) -> Path | None:
-    """Return the most recent report.html under 03-Presentation/<domain>/yyyy/mm/dd/, or None."""
-    date_dir = get_date_dir(STAGE_PRESENTATION, domain, when)
-    if not date_dir.exists():
-        return None
-    candidates = sorted(date_dir.rglob("report.html"))
-    return candidates[-1] if candidates else None
+    """Return report.html under 03-Presentation/<domain>/yyyy/mm/dd/, or None."""
+    path = get_date_dir(STAGE_PRESENTATION, domain, when) / "report.html"
+    return path if path.exists() else None
 
 
 # ====================================================================================================
@@ -497,10 +491,10 @@ def save_html_report(domain: str, date: str = "", template: str = "default") -> 
     template : reserved for future use; currently only "default" is supported
 
     The report is saved to:
-      webresearch/03-Presentation/<domain>/yyyy/mm/dd/NNN-daily-report/report.html
+      webresearch/03-Presentation/<domain>/yyyy/mm/dd/report.html
 
     Returns "Saved: <path>  (N words)" on success.
-    Returns a descriptive "Error: ..." string on failure — never raises.
+    Returns a descriptive "Error: ..." string on failure - never raises.
 
     Prerequisite: run WebResearchAnalysis.create_daily_summary first to produce analysis.md.
     """
@@ -528,8 +522,8 @@ def save_html_report(domain: str, date: str = "", template: str = "default") -> 
     html_content = _build_report_html(domain.strip(), when, analysis_text, template)
 
     try:
-        item_dir    = create_item_dir(STAGE_PRESENTATION, domain.strip(), "daily-report", when)
-        report_path = item_dir / "report.html"
+        date_dir    = ensure_date_dir(STAGE_PRESENTATION, domain.strip(), when)
+        report_path = date_dir / "report.html"
         report_path.write_text(html_content, encoding="utf-8")
     except Exception as exc:
         return f"Error: could not write report file: {exc}"
@@ -615,6 +609,6 @@ def list_reports(domain: str, max_days: int = 7) -> str:
 
     lines = [f"Available HTML reports for domain '{domain}':"]
     for d, day_dir in entries:
-        count = len(list(day_dir.rglob("report.html")))
-        lines.append(f"  {d.strftime('%Y-%m-%d')}:  {count} report file(s)")
+        exists = (day_dir / "report.html").exists()
+        lines.append(f"  {d.strftime('%Y-%m-%d')}:  {'1 report file' if exists else 'no report file'}")
     return "\n".join(lines)

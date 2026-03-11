@@ -1,7 +1,7 @@
 # CodeExecute Skill
 
 ## Purpose
-Execute a Python code snippet in a sandboxed environment and return the captured stdout as a string — use when the user requests computed or generated data (sequences, tables, calculations) that no other skill can produce.
+Execute a Python code snippet in a sandboxed environment and return the captured stdout as a string - use when the user requests computed or generated data (sequences, tables, calculations) that no other skill can produce.
 
 ## Interface
 - Module: `code/skills/CodeExecute/code_execute_skill.py`
@@ -10,7 +10,7 @@ Execute a Python code snippet in a sandboxed environment and return the captured
 ## Input
 - `run_python_snippet(code: str)`
   - `code`: a complete, self-contained Python snippet.
-  - The snippet must use print() to emit all output — the return value of the last
+  - The snippet must use print() to emit all output - the return value of the last
     expression is not captured, only printed lines.
   - Imports are restricted to a safe whitelist: math, itertools, collections, csv, io,
     json, re, random, statistics, datetime, decimal, fractions, functools,
@@ -32,8 +32,8 @@ Execute a Python code snippet in a sandboxed environment and return the captured
 
 ## Planner guidance
 When this skill is selected alongside FileAccess, chain calls as follows:
-- Order 1: `run_python_snippet(code=<snippet>)` — generates the data.
-- Order 2: FileAccess write_text_file with text="{{output_of_first_call}}" — writes the data.
+- Order 1: `run_python_snippet(code=<snippet>)` - generates the data.
+- Order 2: FileAccess write_text_file with text="{{output_of_first_call}}" - writes the data.
 The snippet should build the full file content (including any headers) and print it to stdout.
 For CSV output, the snippet should print header and rows using print().
 

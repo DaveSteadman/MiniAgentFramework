@@ -19,4 +19,4 @@ Use one canonical function separator line:
 Do not use no-space variants such as `#MARK:` or `#====================================================================================================`.
 
 ## No EM Dashes
-The — character will be replaced with - in all cases.
+The - character will be replaced with - in all cases.

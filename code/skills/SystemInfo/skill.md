@@ -3,7 +3,7 @@
 ## Purpose
 Provide runtime system information for prompt-context enrichment, including OS name, Python/Ollama versions, RAM usage, and disk usage.
 This skill should be selected for any request that asks about the system, machine, hardware, runtime, environment, OS, Python or Ollama version,
-RAM, memory, disk space, storage, available space, or free space — including indirect phrasing such as "can we fit", "do we have enough",
+RAM, memory, disk space, storage, available space, or free space - including indirect phrasing such as "can we fit", "do we have enough",
 "how much is available", "how much is free", "what OS", "what version", "is there enough", "show me specs", or "health".
 
 ## Interface

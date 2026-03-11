@@ -1,12 +1,14 @@
-# WebResearch Skill
+# WebMine Skill
 
 ## Purpose
-Mine web content into a structured three-stage research workspace. Handles both direct URL
-fetching and DuckDuckGo searches, formatting results as clean Markdown files filed under
-`webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<slug>/`.
+Mine web content (direct URLs or DuckDuckGo searches) and save raw results as structured
+Markdown files in `webresearch/01-Mine/<domain>/yyyy/mm/dd/`.
+Does not analyse, summarise, or produce reports.
+
+**CRITICAL - DDG query rules:** Use `"topic month-name year source"` format (e.g. `"UK news March 2026 BBC"`). Never include ISO dates or day numbers in queries - `"UK news March 11 2026"` and `"BBC News 2026-03-11"` both return no results. Never use `site:` operators. A prompt date like `2026-03-11` is for folder filing only - convert it to `"March 2026"` in the query string.
 
 ## Interface
-- Module: `code/skills/WebResearch/web_research_skill.py`
+- Module: `code/skills/WebMine/web_mine_skill.py`
 - Primary functions:
   - `mine_url(url: str, domain: str, slug: str = None, max_words: int = 1200)`
   - `mine_search(query: str, domain: str, max_results: int = 5, fetch_content: bool = True, content_words: int = 600)`
@@ -50,9 +52,9 @@ fetching and DuckDuckGo searches, formatting results as clean Markdown files fil
 
 ## Saved file structure
 
-`mine_url` saves `source.md` inside a new numbered item folder:
+`mine_url` saves a numbered `.md` file directly in the date directory:
 ```
-webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<slug>/source.md
+webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<slug>.md
 ```
 File contents:
 ```markdown
@@ -69,9 +71,9 @@ File contents:
 [extracted prose text up to max_words words]
 ```
 
-`mine_search` saves `results.md` inside a new numbered item folder:
+`mine_search` saves a numbered `.md` file directly in the date directory:
 ```
-webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-search-<query>/results.md
+webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<query>.md
 ```
 File contents:
 ```markdown
@@ -91,14 +93,13 @@ File contents:
 - **Snippet:** Short description text
 ```
 
-`mine_search_deep` groups all articles from one call under a single query-level folder:
+`mine_search_deep` saves each article as its own numbered `.md` file directly in the date directory:
 ```
-webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-deep-<query>/
-  001-<article-title>/source.md
-  002-<article-title>/source.md
-  ...
+webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<article-title>.md
+webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<article-title>.md
+...
 ```
-One top-level numbered folder per call; each article gets its own numbered sub-folder inside it.
+All articles from one call land in the same flat `yyyy/mm/dd/` directory.
 
 ## Workspace layout (three stages)
 ```
@@ -107,46 +108,70 @@ webresearch/
   02-Analysis/      <- summarised / processed artefacts
   03-Presentation/  <- final polished outputs
 ```
-Each stage follows the same `<domain>/yyyy/mm/dd/NNN-<slug>/` structure.
+Each stage uses `<domain>/yyyy/mm/dd/` - all files sit directly in the date directory.
 Path management is handled by `code/webresearch_utils.py`.
+
+## Query construction
+
+DuckDuckGo is the search engine. Write queries that work well with it:
+
+**DO:**
+- Use natural topic + source name: `"UK news BBC"`, `"UK politics Guardian"`, `"French news Le Monde"`
+- Use month + year for recency: `"UK news March 2026 BBC"` - human-readable month names index well
+- Keep queries short: 3–5 words
+
+**DO NOT:**
+- Include ISO dates in queries: `"BBC News 2026-03-11"` - almost always returns no results
+- Include day numbers in queries: `"UK news March 11 2026"` - also returns no results
+- Use `site:` operators: `"site:bbc.co.uk"` - unreliable in DuckDuckGo's HTML interface
+- Use `intitle:`, `inurl:`, or other advanced operators - not supported
+
+When a prompt contains a date like `2026-03-11`, use that date only for the `domain` filing - convert it to `"March 2026"` for the search query string itself.
+
+| Prompt context | Good query | Bad query |
+|---|---|---|
+| "UK news for 2026-03-11" | `"UK news March 2026 BBC"` | `"BBC News 2026-03-11"` |
+| "French news today" | `"French news March 2026 Le Monde"` | `"2026-03-11 site:lemonde.fr"` |
+| "German headlines" | `"German news March 2026 Der Spiegel"` | `"Der Spiegel 2026-03-11"` |
 
 ## Typical trigger phrases
 
-**`mine_url`** — you have a specific URL to save:
+**`mine_url`** - you have a specific URL to save:
 - `mine this URL into the <domain> research area`
 - `mine the URL <url> into <domain>`
 - `fetch and save <url> to the <domain> research area`
 - `save this article/page to the <domain> research area`
 
-**`mine_search`** — search and save a results summary (fast, one file):
+**`mine_search`** - search and save a results summary (fast, one file):
+- `web mine <topic> into the <domain> domain`
+- `web mine <topic> for <date> into the <domain> domain`
 - `search for <query> and save to the <domain> research area`
 - `search for <query> and save results to <domain>`
 - `research <query> into <domain>`
 - `research <topic> and save it to <domain>`
 
-**`mine_search_deep`** — search and mine individual articles (slower, multiple files, maximum content):
+**`mine_search_deep`** - search and mine individual articles (slower, multiple files, maximum content):
 - `deep research <query> into <domain>`
 - `deep research <topic> and save articles to <domain>`
 - `deep research <query> in the <domain> area`
 
 **Use this skill whenever the user asks to save, store, mine, or file web content into a named domain or research area.**
-Do NOT use WebSearch or WebExtract for these requests — those skills return content to the LLM but do not save anything to the webresearch workspace.
+Do NOT use WebSearch or WebExtract for these requests - those skills return content to the LLM but do not save anything to the webresearch workspace.
 
 **Choosing the right function:**
-- `mine_url` — you have a specific article URL and want to save it.
-- `mine_search` — fast search save: one `results.md` with inline snippets. Use when the user says **"research X into Y"**.
-- `mine_search_deep` — maximum content: each qualifying article saved as its own file. Use when the user says **"deep research X into Y"**.
+- `mine_url` - you have a specific article URL and want to save it.
+- `mine_search` - **default for all "web mine" and "research X into Y" prompts.** Fast: one `.md` file with inline snippets per query.
+- `mine_search_deep` - only when the user explicitly says **"deep web mine"**. Slower: fetches and saves each qualifying article as its own file.
 
 ## Examples
 - `mine_url("https://example.com/article", "GeneralNews")`
-  → `webresearch/01-Mine/GeneralNews/2026/03/07/001-article-title/source.md`
+  → `webresearch/01-Mine/GeneralNews/2026/03/07/001-article-title.md`
 
 - `mine_search("electric vehicle battery 2026", "CarIndustry", max_results=5)`
-  → `webresearch/01-Mine/CarIndustry/2026/03/07/001-search-electric-vehicle-battery-2026/results.md`
+  → `webresearch/01-Mine/CarIndustry/2026/03/07/001-electric-vehicle-battery-2026.md`
 
 - `mine_search_deep("UK politics March 2026", "GeneralNews", target_articles=8)`
-  → `webresearch/01-Mine/GeneralNews/2026/03/08/NNN-deep-uk-politics-march-2026/`
-  → up to 8 `source.md` files inside that folder, one per article discovered
+  → up to 8 `.md` files saved directly in `webresearch/01-Mine/GeneralNews/2026/03/08/`
 
 ## Date tokens in queries
 Query strings and URLs passed to any function support date tokens that are resolved at
@@ -167,9 +192,9 @@ Tokens are case-insensitive. A scheduled entry like:
 becomes `"UK politics March 2026"` in March and `"UK politics April 2026"` in April automatically.
 
 ## Notes
-- Uses DuckDuckGo HTML search — no API key or account required.
+- Uses DuckDuckGo HTML search - no API key or account required.
 - Uses `beautifulsoup4` for high-quality content extraction; falls back to stdlib `html.parser`.
-- Extracted prose is deduplicated before saving — responsive-layout pages that repeat the same
+- Extracted prose is deduplicated before saving - responsive-layout pages that repeat the same
   content block for different viewport sizes will not produce garbled repeated text.
 - `mine_url` works best on article-level URLs. For homepages or section index pages, use the
   PageAssess skill first to classify the page and discover individual article links.

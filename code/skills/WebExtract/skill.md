@@ -28,14 +28,14 @@ Fetch a web page by URL and extract its readable prose content, stripping all HT
 - `summarize the page at ...`
 
 ## Example
-Typical chained usage — planner selects both WebSearch and WebExtract:
+Typical chained usage - planner selects both WebSearch and WebExtract:
 1. WebSearch returns a list of results including URLs.
 2. `fetch_page_text("https://example.com/article", max_words=400)` → returns page prose.
 3. Final LLM synthesizes an answer from the extracted text.
 
 ## Notes
 - Uses `beautifulsoup4` (installed) for high-quality extraction; falls back to stdlib html.parser if unavailable.
-- Only supports `http` and `https` URLs — local paths and ftp are rejected.
+- Only supports `http` and `https` URLs - local paths and ftp are rejected.
 - Returns an error string (never raises) so orchestration can continue if a page fails to load.
 - Best paired with the WebSearch skill which provides the candidate URLs.
-- **If the user wants to SAVE or MINE a URL into a research area or domain, use the WebResearch skill instead (`mine_url`). This skill only returns text to the LLM — it does not persist anything.**
+- **If the user wants to SAVE or MINE a URL into a research area or domain, use the WebResearch skill instead (`mine_url`). This skill only returns text to the LLM - it does not persist anything.**

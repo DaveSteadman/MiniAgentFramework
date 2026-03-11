@@ -35,6 +35,7 @@ from modes.dashboard import run_dashboard_mode
 from ollama_client import ensure_ollama_running
 from ollama_client import format_running_model_report
 from ollama_client import get_llm_timeout
+from ollama_client import register_llm_call_logger
 from orchestration import ConversationHistory
 from orchestration import OrchestratorConfig
 from orchestration import orchestrate_prompt
@@ -143,7 +144,7 @@ def run_chat_mode(
     history = ConversationHistory(max_turns=MAX_CHAT_HISTORY_TURNS)
     turn = 0
 
-    print(f"\nChat mode active \u2014 model: {config.resolved_model} | num_ctx: {config.num_ctx:,}")
+    print(f"\nChat mode active - model: {config.resolved_model} | num_ctx: {config.num_ctx:,}")
     print(f"Log file: {log_path.as_posix()}")
     print(f"History window: last {MAX_CHAT_HISTORY_TURNS} turns")
     print("Type 'exit' or 'quit' to end the session.\n")
@@ -197,7 +198,7 @@ def run_chat_mode(
         print(status_line)
 
         if not run_success:
-            print("(orchestration validation failed \u2014 response may be incomplete)")
+            print("(orchestration validation failed - response may be incomplete)")
             logger.log_file_only("Orchestration validation failed.")
 
         print(final_response)
@@ -233,7 +234,7 @@ def run_scheduler_mode(
     original_sigint = signal.getsignal(signal.SIGINT)
 
     def _request_shutdown(signum, frame):  # noqa: ARG001
-        print("\n[SCHEDULER] Shutdown requested — current LLM call will finish, then stopping.")
+        print("\n[SCHEDULER] Shutdown requested - current LLM call will finish, then stopping.")
         shutdown.set()
 
     signal.signal(signal.SIGINT, _request_shutdown)
@@ -246,7 +247,7 @@ def run_scheduler_mode(
         for t in enabled_tasks
     }
 
-    print(f"\nScheduler mode active — {len(enabled_tasks)} enabled task(s) | model: {config.resolved_model}")
+    print(f"\nScheduler mode active - {len(enabled_tasks)} enabled task(s) | model: {config.resolved_model}")
     print(f"Log file: {log_path.as_posix()}")
     print(f"Poll interval: {SCHEDULER_POLL_SECS}s | Press Ctrl+C to stop after current task.\n")
 
@@ -277,7 +278,7 @@ def run_scheduler_mode(
                         last_run[n] = last_run.get(n)
                         print(f"[SCHEDULER] Task updated: {n}")
                     enabled_tasks = fresh_enabled
-                    print(f"[SCHEDULER] Schedule refreshed — {len(enabled_tasks)} enabled task(s)")
+                    print(f"[SCHEDULER] Schedule refreshed - {len(enabled_tasks)} enabled task(s)")
             except Exception as exc:
                 print(f"[SCHEDULER] Schedule reload error: {exc}")
 
@@ -296,10 +297,10 @@ def run_scheduler_mode(
                     continue
 
                 if not llm_lock.acquire(blocking=False):
-                    logger.log(f"[SCHEDULER] Task '{name}' is due but LLM is busy — will retry next cycle")
+                    logger.log(f"[SCHEDULER] Task '{name}' is due but LLM is busy - will retry next cycle")
                     continue
 
-                # Lock is now held — record start time and run the task.
+                # Lock is now held - record start time and run the task.
                 last_run[name] = now
                 logger.log_section(f"SCHEDULER TASK: {name}")
                 print(f"[SCHEDULER] Starting task: {name} ({len(prompts)} prompt(s)) at {now.strftime('%H:%M:%S')}")
@@ -314,7 +315,7 @@ def run_scheduler_mode(
 
                     for step_index, prompt_text in enumerate(prompts, start=1):
                         if shutdown.is_set():
-                            print(f"  [SCHEDULER] Shutdown — skipping remaining steps for '{name}'.")
+                            print(f"  [SCHEDULER] Shutdown - skipping remaining steps for '{name}'.")
                             logger.log_file_only(f"[SCHEDULER] Task '{name}' step {step_index} skipped (shutdown).")
                             break
 
@@ -384,10 +385,10 @@ def run_schedule_item_mode(
 
     prompts = task.get("prompts", [])
     if not prompts:
-        print(f"[scheduled-item] Task '{item_name}' has no prompts — nothing to run.")
+        print(f"[scheduled-item] Task '{item_name}' has no prompts - nothing to run.")
         return
 
-    print(f"\nScheduled-item mode — running task: '{item_name}' ({len(prompts)} prompt(s))")
+    print(f"\nScheduled-item mode - running task: '{item_name}' ({len(prompts)} prompt(s))")
     print(f"Log file: {log_path.as_posix()}\n")
     logger.log_section(f"SCHEDULE ITEM: {item_name}")
 
@@ -442,6 +443,7 @@ def main() -> None:
 
     log_path = create_log_file_path(log_dir=LOG_DIR)
     logger   = SessionLogger(log_path)
+    register_llm_call_logger(logger.log_file_only)
 
     # Ensure local Ollama server is ready before model discovery and LLM calls.
     ensure_ollama_running()

@@ -4,8 +4,8 @@
 # Executes the approved Python skill calls declared in an ExecutionPlan.
 #
 # Loads skill modules dynamically at runtime using importlib, but only after verifying each call
-# against an allow-list derived from the skills_summary catalog. This two-step guard — allow-list
-# check then dynamic import — prevents arbitrary code execution if a malformed or adversarial plan
+# against an allow-list derived from the skills_summary catalog. This two-step guard - allow-list
+# check then dynamic import - prevents arbitrary code execution if a malformed or adversarial plan
 # is received from the LLM planner.
 #
 # Also resolves template argument placeholders (e.g. {{user_prompt}}, {{output_of_previous_call}})
