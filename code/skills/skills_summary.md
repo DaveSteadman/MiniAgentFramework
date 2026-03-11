@@ -273,7 +273,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "WebResearchReport Skill",
       "relative_path": "code/skills/WebResearchReport/skill.md",
       "purpose": "",
-      "module": "",
+      "module": "code/skills/WebResearchReport/web_research_report_skill.py",
       "functions": [
         "get_analysis_text(domain, date=\"\")",
         "get_report_html(domain, date=\"\")",

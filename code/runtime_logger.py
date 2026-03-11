@@ -52,9 +52,10 @@ class SessionLogger:
 
     # ----------------------------------------------------------------------------------------------------
     def log_section(self, title: str) -> None:
+        stamped = f"{title}  [{datetime.now().strftime('%H:%M:%S')}]"
         self.log("")
         self.log(SECTION_SEPARATOR)
-        self.log(title)
+        self.log(stamped)
         self.log(SECTION_SEPARATOR)
         self.log("")
 
@@ -74,9 +75,10 @@ class SessionLogger:
     # ----------------------------------------------------------------------------------------------------
     def log_section_file_only(self, title: str) -> None:
         """Write a section header to the log file only — no stdout."""
+        stamped = f"{title}  [{datetime.now().strftime('%H:%M:%S')}]"
         self.log_file_only("")
         self.log_file_only(SECTION_SEPARATOR)
-        self.log_file_only(title)
+        self.log_file_only(stamped)
         self.log_file_only(SECTION_SEPARATOR)
 
 

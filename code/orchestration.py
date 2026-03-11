@@ -62,10 +62,11 @@ class OrchestratorConfig:
     Fields are intentionally mutable so slash commands (/model, /ctx) can update them
     at runtime without rebuilding the object.
     """
-    resolved_model: str
-    num_ctx:        int
-    max_iterations: int
-    skills_payload: dict
+    resolved_model:  str
+    num_ctx:         int
+    max_iterations:  int
+    skills_payload:  dict
+    skip_final_llm:  bool = False   # /skip-final sets True; /run-final resets to False
 
 
 # ====================================================================================================
@@ -307,6 +308,7 @@ def build_final_llm_prompt(
         "Prioritize the user question over all other text.\n"
         "Answer directly and concisely without generic assistant filler.\n"
         "Never claim a tool action succeeded unless the Python skill outputs explicitly show success.\n"
+        "Do not call any tools or functions. Respond with plain text only.\n"
         "\n"
         f"{history_section}"
         f"User question:\n{user_prompt}\n"
@@ -357,7 +359,9 @@ def orchestrate_prompt(
 
     user_prompt = resolve_tokens(user_prompt)
 
+    _log_file_only("[progress] Storing prompt memories...")
     memory_store_result = store_prompt_memories(user_prompt=user_prompt)
+    _log_file_only("[progress] Recalling relevant memories...")
     recalled_memories   = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
     planner_user_prompt = user_prompt
     if recalled_memories.startswith("Relevant memories:"):
@@ -385,6 +389,7 @@ def orchestrate_prompt(
         if planner_feedback:
             planner_ask = f"{_PLANNER_ASK} Previous iteration feedback: {planner_feedback}"
 
+        _log_file_only(f"[progress] Iteration {iteration}: calling planner LLM ({config.resolved_model})...")
         plan, planner_prompt, planner_llm_result = create_skill_execution_plan(
             user_prompt=planner_user_prompt,
             skills_summary_path=_SKILLS_SUMMARY_PATH,
@@ -393,6 +398,7 @@ def orchestrate_prompt(
             num_ctx=config.num_ctx,
             skills_payload=config.skills_payload,
         )
+        _log_file_only(f"[progress] Iteration {iteration}: planner complete.")
 
         _log_section(f"ITERATION {iteration} - SKILL PLAN")
         _log(_format_plan_summary(plan, config.resolved_model))
@@ -418,11 +424,13 @@ def orchestrate_prompt(
                  f"  ({planner_llm_result.completion_tokens} tokens)")
 
         _log_section(f"ITERATION {iteration} - SKILL EXECUTION FLOW")
+        _log_file_only(f"[progress] Iteration {iteration}: executing {len(plan.python_calls)} skill call(s)...")
         python_call_outputs, last_call_output = execute_skill_plan_calls(
             plan=plan,
             user_prompt=user_prompt,
             skills_payload=config.skills_payload,
         )
+        _log_file_only(f"[progress] Iteration {iteration}: skill execution complete.")
         _log(_format_skill_flow(python_call_outputs))
 
         # Full outputs JSON (may contain large text/HTML payloads) — file only.
@@ -451,6 +459,14 @@ def orchestrate_prompt(
         _log_file_only(json.dumps(prompt_context, indent=2))
 
         _log_section(f"ITERATION {iteration} - FINAL LLM EXECUTION")
+
+        if config.skip_final_llm:
+            _log("[skip-final] Final LLM call skipped — returning skill output directly.")
+            final_response    = last_call_output if isinstance(last_call_output, str) else str(last_call_output)
+            run_success       = True
+            break
+
+        _log_file_only(f"[progress] Iteration {iteration}: calling final LLM ({config.resolved_model})...")
         try:
             result            = call_ollama_extended(model_name=config.resolved_model, prompt=final_prompt, num_ctx=config.num_ctx)
             final_response    = result.response.strip()

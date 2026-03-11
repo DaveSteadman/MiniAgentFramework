@@ -28,7 +28,8 @@ from planner_engine import ExecutionPlan
 
 # Matches placeholder tokens that the skill executor will actually resolve.
 _CHAIN_PLACEHOLDER_RE = re.compile(
-    r"\{\{output_of_(?:first|previous)_call\}\}"
+    r"\{\{output_of_(?:first|previous|\w+)_call\}\}"
+    r"|\{\{output\d+\}\}"
     r"|\$\{output\d+(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}"
     r"|\{\d+\}(?:\.[A-Za-z_][A-Za-z0-9_]*)*"
 )
@@ -92,9 +93,12 @@ def validate_orchestration_iteration(
     if len(plan.python_calls) > 1:
         min_order = min(call.order for call in plan.python_calls)
         downstream_calls = [call for call in plan.python_calls if call.order > min_order]
-        any_uses_placeholder = any(
-            any(_CHAIN_PLACEHOLDER_RE.search(str(v)) for v in call.arguments.values())
-            for call in downstream_calls
+        any_uses_placeholder = (
+            any(
+                any(_CHAIN_PLACEHOLDER_RE.search(str(v)) for v in call.arguments.values())
+                for call in downstream_calls
+            )
+            or _CHAIN_PLACEHOLDER_RE.search(plan.final_prompt_template or "")
         )
         if not any_uses_placeholder:
             return False, (

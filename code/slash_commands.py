@@ -230,6 +230,21 @@ def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _cmd_skip_final(arg: str, ctx: SlashCommandContext) -> None:
+    ctx.config.skip_final_llm = True
+    ctx.output("Final LLM synthesis disabled — skill output will be returned directly.", "success")
+    ctx.output("Use /run-final to re-enable.", "dim")
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_run_final(arg: str, ctx: SlashCommandContext) -> None:
+    ctx.config.skip_final_llm = False
+    ctx.output("Final LLM synthesis re-enabled.", "success")
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
     from pathlib import Path
     from skills_catalog_builder import (
@@ -273,23 +288,27 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
 # MARK: REGISTRY
 # ====================================================================================================
 _REGISTRY: dict[str, Callable] = {
-    "/help":      _cmd_help,
-    "/exit":      _cmd_exit,
-    "/models":    _cmd_models,
-    "/model":     _cmd_model,
-    "/ctx":       _cmd_ctx,
-    "/timeout":   _cmd_timeout,
-    "/stopmodel": _cmd_stopmodel,
-    "/reskills":  _cmd_reskills,
+    "/help":        _cmd_help,
+    "/exit":        _cmd_exit,
+    "/models":      _cmd_models,
+    "/model":       _cmd_model,
+    "/ctx":         _cmd_ctx,
+    "/timeout":     _cmd_timeout,
+    "/stopmodel":   _cmd_stopmodel,
+    "/reskills":    _cmd_reskills,
+    "/skip-final":  _cmd_skip_final,
+    "/run-final":   _cmd_run_final,
 }
 
 _DESCRIPTIONS: dict[str, str] = {
-    "/help":      "List available slash commands",
-    "/exit":      "Exit dashboard mode",
-    "/models":    "List installed Ollama models",
-    "/model":     "<name>  Switch active model for all subsequent runs",
-    "/ctx":       "<tokens>  Set context window size (e.g. /ctx 32768)",
-    "/timeout":   "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
-    "/stopmodel": "[name]  Unload a running model from VRAM (defaults to active model)",
-    "/reskills":  "Rebuild the skills catalog from skill.md files and hot-reload into session",
+    "/help":        "List available slash commands",
+    "/exit":        "Exit dashboard mode",
+    "/models":      "List installed Ollama models",
+    "/model":       "<name>  Switch active model for all subsequent runs",
+    "/ctx":         "<tokens>  Set context window size (e.g. /ctx 32768)",
+    "/timeout":     "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
+    "/stopmodel":   "[name]  Unload a running model from VRAM (defaults to active model)",
+    "/reskills":    "Rebuild the skills catalog from skill.md files and hot-reload into session",
+    "/skip-final":  "Skip the final LLM synthesis call; return skill output directly",
+    "/run-final":   "Re-enable the final LLM synthesis call (default state)",
 }

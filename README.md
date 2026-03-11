@@ -193,16 +193,22 @@ Slash commands (see [Slash Commands](#slash-commands) below) are available in th
 
 ## Slash Commands
 
-Slash commands are available in **Chat mode** (console) and the **Dashboard** chat input bar. They bypass the orchestration pipeline and take effect immediately.
+Slash commands are available in **Chat mode** (console), the **Dashboard** chat input bar, and inside **scheduled task prompt lists**. They bypass the orchestration pipeline and take effect immediately.
 
 Type `/help` at any prompt to see the full list. Current commands:
 
 | Command | Description |
 |---|---|
 | `/help` | List all available slash commands |
+| `/exit` | Exit dashboard mode |
 | `/models` | List installed Ollama models; the active model is marked with `►` |
 | `/model <name>` | Switch the active model for all subsequent runs (e.g. `/model 8b`). Accepts the same short aliases as `--model`. Clears conversation history. |
 | `/ctx <tokens>` | Set the context window size for all subsequent runs (e.g. `/ctx 16384`). Accepts integers with optional commas or underscores. |
+| `/timeout <seconds>` | Set the LLM generation timeout (e.g. `/timeout 1800` for heavy analysis tasks). |
+| `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
+| `/reskills` | Rebuild the skills catalog from `skill.md` files and hot-reload into the current session. |
+| `/skip-final` | Skip the final LLM synthesis call for all subsequent prompts; skill output is returned directly. Useful for pure data-collection steps (e.g. web mining) where no LLM summary is needed. |
+| `/run-final` | Re-enable the final LLM synthesis call (default state). |
 
 New slash commands can be added in [code/slash_commands.py](code/slash_commands.py) by adding a handler function and registering it in `_REGISTRY` and `_DESCRIPTIONS`.
 
