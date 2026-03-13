@@ -11,16 +11,14 @@
 #   Stage 3 - 03-Presentation:  Final polished outputs for sharing or reporting
 #
 # Each stage is internally partitioned by:
-#   Domain    - a topic label like "GeneralNews" or "CarIndustry"
-#   Date      - yyyy/mm/dd nested folders based on when the item was created
-#
-# All files are stored directly inside the date directory - no sub-folder layer.
+#   Domain    — a topic label like "GeneralNews" or "CarIndustry"
+#   Date      — yyyy/mm/dd nested folders based on when the item was created
+#   Sequence  — zero-padded NNN-slug folder inside each date directory
 #
 # Example directory layout:
-#   webresearch/01-Mine/GeneralNews/2026/03/07/001-ev-battery-breakthrough.md
-#   webresearch/01-Mine/GeneralNews/2026/03/07/002-search-ai-news.md
-#   webresearch/02-Analysis/CarIndustry/2026/03/07/analysis.md
-#   webresearch/03-Presentation/CarIndustry/2026/03/07/report.html
+#   webresearch/01-Mine/GeneralNews/2026/03/07/001-ev-battery-breakthrough/source.md
+#   webresearch/02-Analysis/CarIndustry/2026/03/07/001-ev-market-summary/analysis.md
+#   webresearch/03-Presentation/CarIndustry/2026/03/07/001-q1-report/report.md
 #
 # Well-known stage constants:
 #   STAGE_MINE          = "01-Mine"
@@ -29,17 +27,16 @@
 #   ALL_STAGES          = (STAGE_MINE, STAGE_ANALYSIS, STAGE_PRESENTATION)
 #
 # Path accessors:
-#   get_webresearch_root()                           -> <repo_root>/webresearch/
-#   get_stage_dir(stage)                             -> webresearch/<stage>/
-#   get_domain_dir(stage, domain)                    -> webresearch/<stage>/<domain>/
-#   get_date_dir(stage, domain, when=None)           -> webresearch/<stage>/<domain>/yyyy/mm/dd/
-#   ensure_date_dir(stage, domain, when=None)        -> Path (creates + returns date dir)
-#   next_item_number(date_dir)                       -> int  (next NNN sequence number)
-#   alloc_mine_file(stage, domain, slug, when=None)  -> Path (NNN-slug.md in date dir)
+#   get_webresearch_root()                          -> <repo_root>/webresearch/
+#   get_stage_dir(stage)                            -> webresearch/<stage>/
+#   get_domain_dir(stage, domain)                   -> webresearch/<stage>/<domain>/
+#   get_date_dir(stage, domain, when=None)          -> webresearch/<stage>/<domain>/yyyy/mm/dd/
+#   next_item_number(date_dir)                      -> int  (next NNN sequence number)
+#   create_item_dir(stage, domain, slug, when=None) -> Path (creates and returns NNN-slug/)
 #
 # Related modules:
 #   - workspace_utils.py                       -- provides get_workspace_root()
-#   - skills/WebMine/web_mine_skill.py -- primary consumer of this module
+#   - skills/WebMine/web_mine_skill.py          -- primary consumer of this module
 # ====================================================================================================
 
 
@@ -67,7 +64,7 @@ ALL_STAGES = (STAGE_MINE, STAGE_ANALYSIS, STAGE_PRESENTATION)
 _SAFE_DOMAIN_RE  = re.compile(r"[^\w-]")
 _SLUG_UNSAFE_RE  = re.compile(r"[^\w-]")
 _SLUG_DASH_RE    = re.compile(r"-{2,}")
-_SEQ_FILE_RE     = re.compile(r"^(\d+)-")
+_SEQ_FOLDER_RE   = re.compile(r"^(\d+)-")
 
 
 # ====================================================================================================
@@ -77,7 +74,7 @@ _SEQ_FILE_RE     = re.compile(r"^(\d+)-")
 def get_webresearch_root() -> Path:
     """Return the absolute path to the webresearch/ root directory.
 
-    Cached after first call - the path cannot change within a single process lifetime.
+    Cached after first call — the path cannot change within a single process lifetime.
     """
     return get_workspace_root() / "webresearch"
 
@@ -126,7 +123,27 @@ def get_date_dir(stage: str, domain: str, when: _date | None = None) -> Path:
 
 
 # ====================================================================================================
-# MARK: SLUG HELPER
+# MARK: SEQUENCE NUMBERING
+# ====================================================================================================
+def next_item_number(date_dir: Path) -> int:
+    """Return the next available sequence number inside a date directory.
+
+    Scans all NNN-* subdirectories present, finds the highest existing sequence number,
+    and returns max + 1.  Returns 1 when the directory is empty or does not yet exist.
+    """
+    if not date_dir.exists():
+        return 1
+    max_num = 0
+    for child in date_dir.iterdir():
+        if child.is_dir():
+            match = _SEQ_FOLDER_RE.match(child.name)
+            if match:
+                max_num = max(max_num, int(match.group(1)))
+    return max_num + 1
+
+
+# ====================================================================================================
+# MARK: ITEM DIRECTORY CREATION
 # ====================================================================================================
 def _make_slug(raw: str, max_length: int = 60) -> str:
     """Produce a clean, hyphen-separated lowercase slug from a raw string."""
@@ -137,54 +154,25 @@ def _make_slug(raw: str, max_length: int = 60) -> str:
     return slug or "item"
 
 
-# ====================================================================================================
-# MARK: SEQUENCE NUMBERING
-# ====================================================================================================
-def next_item_number(date_dir: Path) -> int:
-    """Return the next available sequence number inside a date directory.
-
-    Scans all NNN-*.md files present, finds the highest existing sequence number,
-    and returns max + 1.  Returns 1 when the directory is empty or does not yet exist.
-    """
-    if not date_dir.exists():
-        return 1
-    max_num = 0
-    for child in date_dir.iterdir():
-        if child.is_file():
-            match = _SEQ_FILE_RE.match(child.name)
-            if match:
-                max_num = max(max_num, int(match.group(1)))
-    return max_num + 1
-
-
-# ====================================================================================================
-# MARK: DATE DIRECTORY HELPERS
-# ====================================================================================================
-def ensure_date_dir(stage: str, domain: str, when: _date | None = None) -> Path:
-    """Create the yyyy/mm/dd directory for a stage + domain + date and return it.
-
-    Equivalent to get_date_dir() but guarantees the directory exists.
-    """
-    date_dir = get_date_dir(stage, domain, when)
-    date_dir.mkdir(parents=True, exist_ok=True)
-    return date_dir
-
-
 # ----------------------------------------------------------------------------------------------------
-def alloc_mine_file(
+def create_item_dir(
     stage: str,
     domain: str,
     slug: str,
     when: _date | None = None,
 ) -> Path:
-    """Allocate a unique numbered .md file path inside a stage/domain/date directory.
+    """Create a new numbered item directory and return its path.
 
-    File name format: NNN-slug.md  (e.g. 001-ev-battery-breakthrough.md)
+    Directory name format: NNN-slug  (e.g. 001-ev-battery-breakthrough)
 
-    The date directory is created if it does not yet exist.
+    The full directory tree is created if it does not yet exist.
     Thread-safety note: sequence numbering is not atomic; do not call concurrently
     from multiple processes targeting the same date directory.
     """
-    date_dir  = ensure_date_dir(stage, domain, when)
-    file_name = f"{next_item_number(date_dir):03d}-{_make_slug(slug)}.md"
-    return date_dir / file_name
+    date_dir = get_date_dir(stage, domain, when)
+    date_dir.mkdir(parents=True, exist_ok=True)
+
+    folder_name = f"{next_item_number(date_dir):03d}-{_make_slug(slug)}"
+    item_dir    = date_dir / folder_name
+    item_dir.mkdir(exist_ok=True)
+    return item_dir

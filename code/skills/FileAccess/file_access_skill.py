@@ -135,7 +135,10 @@ def _coerce_text_for_target(target_path: Path, text: str) -> str:
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
 def write_text_file(file_path: str, text: str) -> str:
-    target_path = _resolve_safe_path(file_path)
+    try:
+        target_path = _resolve_safe_path(file_path)
+    except ValueError as err:
+        return f"Error: {err}"
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(_coerce_text_for_target(target_path=target_path, text=text), encoding="utf-8")
     return f"Wrote {target_path.relative_to(WORKSPACE_ROOT).as_posix()}"
@@ -143,7 +146,10 @@ def write_text_file(file_path: str, text: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 def append_text_file(file_path: str, text: str) -> str:
-    target_path = _resolve_safe_path(file_path)
+    try:
+        target_path = _resolve_safe_path(file_path)
+    except ValueError as err:
+        return f"Error: {err}"
     target_path.parent.mkdir(parents=True, exist_ok=True)
     with target_path.open("a", encoding="utf-8") as output_file:
         output_file.write(str(text))
@@ -152,7 +158,10 @@ def append_text_file(file_path: str, text: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 def read_text_file(file_path: str, max_chars: int = 8000) -> str:
-    target_path = _resolve_safe_path(file_path)
+    try:
+        target_path = _resolve_safe_path(file_path)
+    except ValueError as err:
+        return f"Error: {err}"
     if not target_path.exists():
         return f"File not found: {target_path.relative_to(WORKSPACE_ROOT).as_posix()}"
 

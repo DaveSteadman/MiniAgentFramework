@@ -18,7 +18,7 @@
 # This skill does NOT write any files to disk.
 #
 # Related modules:
-#   - WebResearch skill -- mine_url / mine_search to persist content
+#   - WebMine skill     -- mine_url / mine_search to persist content
 #   - WebExtract skill  -- fetch prose text from a known article URL (ephemeral, no save)
 #   - webpage_utils.py  -- HTTP fetch utility (shared)
 # ====================================================================================================

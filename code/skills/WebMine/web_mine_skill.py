@@ -1,7 +1,7 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# WebMine (Mine stage) skill for MiniAgentFramework.
+# WebMine skill for MiniAgentFramework.
 #
 # Gen3 web mining skill - fetches single URLs or runs DuckDuckGo searches, formats the
 # retrieved content as structured Markdown, and writes files into the 01-Mine stage of the

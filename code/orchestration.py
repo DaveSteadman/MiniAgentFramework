@@ -482,7 +482,7 @@ def orchestrate_prompt(
         _log(final_response)
         _log(f"Final LLM TPS: {final_tps:.1f} tok/s  ({completion_tokens} tokens)")
 
-        is_valid, validation_message = validate_orchestration_iteration(
+        validation = validate_orchestration_iteration(
             plan=plan,
             python_call_outputs=python_call_outputs,
             final_prompt=final_prompt,
@@ -490,14 +490,15 @@ def orchestrate_prompt(
         )
 
         _log_section(f"ITERATION {iteration} - VALIDATION")
-        _log(validation_message)
+        for check_line in validation.checks_log:
+            _log(check_line)
 
-        if is_valid:
+        if validation.passed:
             run_success = True
             _log("Orchestration succeeded.")
             break
 
-        planner_feedback = validation_message
+        planner_feedback = validation.planner_feedback
         _log("Execution did not satisfy validation checks, retrying...")
 
     return final_response, prompt_tokens, completion_tokens, run_success, final_tps

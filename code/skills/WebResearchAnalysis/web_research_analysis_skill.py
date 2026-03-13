@@ -30,7 +30,7 @@
 # Related modules:
 #   - webresearch_utils.py               -- path management for all three research stages
 #   - ollama_client.py                   -- LLM call and model resolution
-#   - skills/WebResearch/                -- produces the 01-Mine content consumed here
+#   - skills/WebMine/                    -- produces the 01-Mine content consumed here
 #   - skills/WebResearchOutput/          -- consumes 02-Analysis content produced here
 # ====================================================================================================
 

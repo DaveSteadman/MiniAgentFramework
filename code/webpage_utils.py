@@ -24,7 +24,7 @@
 #   code/workspace_utils.py              -- workspace root path management
 #   code/webresearch_utils.py            -- three-stage research workspace management
 #   code/skills/WebExtract/              -- uses fetch_html, extract_content, truncate_to_words
-#   code/skills/WebResearch/             -- uses fetch_html, extract_content, truncate_to_words
+#   code/skills/WebMine/                 -- uses fetch_html, extract_content, truncate_to_words
 #   code/skills/PageAssess/              -- uses fetch_html
 #   code/skills/WebSearch/               -- uses fetch_html
 # ====================================================================================================
