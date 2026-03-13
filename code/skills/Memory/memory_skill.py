@@ -3,8 +3,11 @@
 # ====================================================================================================
 # Memory skill module for the MiniAgentFramework.
 #
-# Stores environment-specific facts extracted from user prompts in a plain text file and supports
-# lightweight relevance-based recall for later prompts.
+# Stores environment-specific facts extracted from user prompts in a structured JSON file and
+# supports lightweight relevance-based recall for later prompts. Facts are categorized
+# (identity, project, environment, preference, general) and newer facts on the same subject
+# supersede older ones to prevent stale duplicates. Access counts and last-accessed timestamps
+# are tracked per entry for future relevance weighting.
 #
 # Related modules:
 #   - main.py                   -- calls recall/store helpers during orchestration
@@ -15,7 +18,9 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import json
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -23,7 +28,9 @@ from pathlib import Path
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-MEMORY_STORE_PATH = Path(__file__).resolve().parent / "memory_store.txt"
+MEMORY_STORE_PATH        = Path(__file__).resolve().parent / "memory_store.json"
+MEMORY_STORE_LEGACY_PATH = Path(__file__).resolve().parent / "memory_store.txt"
+MEMORY_SCHEMA_VERSION    = "2.0"
 
 ENVIRONMENT_HINT_PATTERNS = [
     re.compile(r"[A-Za-z]:\\\\[^\s,;]+"),
@@ -97,6 +104,17 @@ _PREFERENCE_STATEMENT_PATTERNS = [
     re.compile(r"\bfor\s+this\s+(?:project|repo|environment|setup)\b", re.IGNORECASE),
 ]
 
+# Token sets used by subject-key extraction for supersede matching.
+_SUBJECT_STOP_WORDS = {
+    "the", "a", "an", "for", "this", "our", "my", "in", "on", "at", "to", "of",
+    "with", "by", "from", "as", "and", "or", "but", "that", "these", "those",
+}
+
+_ASSERTION_VERBS = {
+    "is", "are", "uses", "using", "has", "have", "located", "runs", "running",
+    "installed", "set", "was", "were", "called", "named",
+}
+
 
 # ====================================================================================================
 # MARK: HELPERS
@@ -106,16 +124,8 @@ def _utc_now_iso() -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _ensure_store_file() -> None:
-    if MEMORY_STORE_PATH.exists():
-        return
-
-    MEMORY_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MEMORY_STORE_PATH.write_text(
-        "# MiniAgentFramework memory store\n"
-        "# Format: <timestamp>|<fact>\n",
-        encoding="utf-8",
-    )
+def _short_id() -> str:
+    return uuid.uuid4().hex[:8]
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -132,84 +142,135 @@ def _tokenize(text: str) -> set[str]:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _read_memory_rows() -> list[tuple[str, str]]:
-    _ensure_store_file()
-    rows = []
-    for raw_line in MEMORY_STORE_PATH.read_text(encoding="utf-8").splitlines():
+def _categorize_fact(fact: str) -> str:
+    lowered = fact.lower()
+    if re.search(r"\bmy name is\b", lowered):
+        return "identity"
+    if any(p in lowered for p in ["prefer", "default", "favourite", "favorite", "like to use"]):
+        return "preference"
+    if any(p in lowered for p in ["project", "framework", "repo", "repository",
+                                   "we are building", "this project", "building an", "building a"]):
+        return "project"
+    if any(p in lowered for p in ["path", "version", "python", "windows", "linux", "macos",
+                                   "model", "workspace", "folder", "directory", "running on",
+                                   "installed", "ollama"]):
+        return "environment"
+    return "general"
+
+
+# ----------------------------------------------------------------------------------------------------
+def _extract_subject_tokens(normalized_fact: str) -> set[str]:
+    # Take meaningful tokens before the first assertion verb as the subject key.
+    tokens  = normalized_fact.split()
+    subject = []
+    for token in tokens:
+        clean = re.sub(r"[^a-z0-9]", "", token)
+        if clean in _ASSERTION_VERBS:
+            break
+        if clean and clean not in _SUBJECT_STOP_WORDS and len(clean) >= 2:
+            subject.append(clean)
+        if len(subject) >= 6:
+            break
+    return set(subject)
+
+
+# ----------------------------------------------------------------------------------------------------
+def _facts_supersede(existing_normalized: str, new_normalized: str,
+                     existing_category: str,  new_category: str) -> bool:
+    # A new fact supersedes an existing one when they share the same category and their
+    # subject-key tokens overlap by >= 60%, indicating they describe the same thing.
+    if existing_category != new_category:
+        return False
+    existing_subj = _extract_subject_tokens(existing_normalized)
+    new_subj      = _extract_subject_tokens(new_normalized)
+    if not existing_subj or not new_subj:
+        return False
+    overlap = existing_subj & new_subj
+    ratio   = len(overlap) / max(len(existing_subj), len(new_subj))
+    return ratio >= 0.6
+
+
+# ----------------------------------------------------------------------------------------------------
+def _migrate_legacy_if_needed() -> None:
+    # One-time migration: read memory_store.txt and write memory_store.json.
+    # The .txt file is left in place as a historical artifact.
+    if not MEMORY_STORE_LEGACY_PATH.exists():
+        return
+    entries = []
+    for raw_line in MEMORY_STORE_LEGACY_PATH.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "|" not in line:
+        if not line or line.startswith("#") or "|" not in line:
             continue
         timestamp, fact = line.split("|", maxsplit=1)
-        rows.append((timestamp.strip(), fact.strip()))
-    return rows
+        fact = fact.strip()
+        entries.append({
+            "id":            _short_id(),
+            "stored":        timestamp.strip(),
+            "updated":       None,
+            "category":      _categorize_fact(fact),
+            "fact":          fact,
+            "access_count":  0,
+            "last_accessed": None,
+        })
+    _write_store({"schema_version": MEMORY_SCHEMA_VERSION, "entries": entries})
+
+
+# ----------------------------------------------------------------------------------------------------
+def _read_store() -> dict:
+    if not MEMORY_STORE_PATH.exists():
+        _migrate_legacy_if_needed()
+    if not MEMORY_STORE_PATH.exists():
+        return {"schema_version": MEMORY_SCHEMA_VERSION, "entries": []}
+    try:
+        return json.loads(MEMORY_STORE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"schema_version": MEMORY_SCHEMA_VERSION, "entries": []}
+
+
+# ----------------------------------------------------------------------------------------------------
+def _write_store(store: dict) -> None:
+    MEMORY_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MEMORY_STORE_PATH.write_text(json.dumps(store, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 # ----------------------------------------------------------------------------------------------------
 def _is_memorable_fact(candidate: str) -> bool:
-    """Return True when the candidate sentence is a user-stated fact or preference worth storing.
-
-    Stores:
-      - Preference and identity statements: "my name is X", "I prefer Y", "we use Z"
-      - Project/domain context: "this project is called X", "our repo path is Y"
-      - Durable environment facts: tool versions, paths, model names stated as assertions
-
-    Does NOT store:
-      - Questions (with or without '?')
-      - Imperative commands ("show me", "list", "write")
-      - General knowledge topics (capital cities, scientific facts)
-      - Ephemeral requests (current time, stats)
-    """
+    # Return True when the candidate sentence is a user-stated fact or preference worth storing.
+    # Stores preference/identity statements, project/domain context, and durable environment facts.
+    # Does NOT store questions, imperative commands, general knowledge, or ephemeral requests.
     normalized = candidate.strip()
     if not normalized or len(normalized) < 8:
         return False
-
     lowered = normalized.lower()
-
-    # Reject explicit question mark
     if "?" in lowered:
         return False
-
-    # Reject interrogative openers - questions without '?'
     if _QUESTION_OPENER_RE.match(lowered):
         return False
-
-    # Reject imperative/command sentences
     if _COMMAND_OPENER_RE.match(lowered):
         return False
-
-    # Reject general-knowledge topics (not specific to this user/project)
     if any(token in lowered for token in GENERAL_KNOWLEDGE_HINTS):
         return False
-
-    # Accept: explicit preference, identity, or project-context statements
     if any(pattern.search(normalized) for pattern in _PREFERENCE_STATEMENT_PATTERNS):
         return True
-
-    # Accept: durable environment/tool facts accompanied by an assertion verb
-    has_env_keyword = any(keyword in lowered for keyword in ENVIRONMENT_KEYWORDS)
-    has_env_pattern = any(pattern.search(normalized) for pattern in ENVIRONMENT_HINT_PATTERNS)
+    has_env_keyword    = any(keyword in lowered for keyword in ENVIRONMENT_KEYWORDS)
+    has_env_pattern    = any(pattern.search(normalized) for pattern in ENVIRONMENT_HINT_PATTERNS)
     has_assertion_verb = bool(re.search(
         r"\b(is|are|uses|using|has|have|located|runs|running|installed|set to)\b", lowered
     ))
-
     return (has_env_keyword or has_env_pattern) and has_assertion_verb
 
 
 # ----------------------------------------------------------------------------------------------------
 def _extract_candidate_segments(user_prompt: str) -> list[str]:
     # Split on hard separators but avoid breaking decimal/version tokens and relative paths (./, ../).
-    split_segments = re.split(r"[\n\r;]+|(?<![\d./])\.(?![\d./])", user_prompt)
+    split_segments      = re.split(r"[\n\r;]+|(?<![\d./])\.(?![\d./])", user_prompt)
     normalized_segments = []
-
     for segment in split_segments:
         cleaned = segment.strip(" -\t")
         if not cleaned:
             continue
         cleaned = re.sub(r"\s+", " ", cleaned)
         normalized_segments.append(cleaned)
-
     return normalized_segments
 
 
@@ -218,20 +279,16 @@ def _extract_candidate_segments(user_prompt: str) -> list[str]:
 # ====================================================================================================
 def extract_environment_facts(user_prompt: str) -> list[str]:
     candidates = _extract_candidate_segments(user_prompt=user_prompt)
-
-    facts = []
-    seen = set()
+    facts      = []
+    seen       = set()
     for candidate in candidates:
         if not _is_memorable_fact(candidate):
             continue
-
         normalized = _normalize_fact(candidate)
         if not normalized or normalized in seen:
             continue
-
         seen.add(normalized)
         facts.append(candidate)
-
     return facts
 
 
@@ -239,71 +296,111 @@ def extract_environment_facts(user_prompt: str) -> list[str]:
 def store_prompt_memories(user_prompt: str) -> str:
     facts = extract_environment_facts(user_prompt=user_prompt)
     if not facts:
-        _ensure_store_file()
+        _read_store()  # ensure store is initialized / migrated
         return "No new environment-specific facts detected in prompt."
 
-    existing_rows = _read_memory_rows()
-    existing_keys = {_normalize_fact(fact) for _, fact in existing_rows}
-
-    added_count = 0
+    store     = _read_store()
+    entries   = store.setdefault("entries", [])
     timestamp = _utc_now_iso()
 
-    with MEMORY_STORE_PATH.open("a", encoding="utf-8") as memory_file:
-        for fact in facts:
-            normalized = _normalize_fact(fact)
-            if normalized in existing_keys:
-                continue
+    added_count   = 0
+    updated_count = 0
 
-            memory_file.write(f"{timestamp}|{fact}\n")
-            existing_keys.add(normalized)
-            added_count += 1
+    for fact in facts:
+        normalized = _normalize_fact(fact)
+        category   = _categorize_fact(fact)
 
-    if added_count == 0:
+        # Exact duplicate - skip
+        if any(_normalize_fact(e["fact"]) == normalized for e in entries):
+            continue
+
+        # Supersede match - update the existing entry in place
+        superseded = next(
+            (e for e in entries
+             if _facts_supersede(_normalize_fact(e["fact"]), normalized, e["category"], category)),
+            None,
+        )
+        if superseded:
+            superseded["fact"]     = fact
+            superseded["updated"]  = timestamp
+            superseded["category"] = category
+            updated_count += 1
+            continue
+
+        entries.append({
+            "id":            _short_id(),
+            "stored":        timestamp,
+            "updated":       None,
+            "category":      category,
+            "fact":          fact,
+            "access_count":  0,
+            "last_accessed": None,
+        })
+        added_count += 1
+
+    if added_count == 0 and updated_count == 0:
         return "No new memories were stored (all detected facts already existed)."
 
-    return f"Stored {added_count} new memory fact(s)."
+    store["schema_version"] = MEMORY_SCHEMA_VERSION
+    _write_store(store)
+
+    parts = []
+    if added_count:
+        parts.append(f"Stored {added_count} new memory fact(s).")
+    if updated_count:
+        parts.append(f"Updated {updated_count} existing memory fact(s).")
+    return " ".join(parts)
 
 
 # ----------------------------------------------------------------------------------------------------
 def recall_relevant_memories(user_prompt: str, limit: int = 5, min_score: float = 0.25) -> str:
-    rows = _read_memory_rows()
-    if not rows:
+    store   = _read_store()
+    entries = store.get("entries", [])
+    if not entries:
         return "No memories stored yet."
 
     query_tokens = _tokenize(user_prompt)
     if not query_tokens:
         return "No memories recalled (query had no meaningful tokens)."
 
-    scored_rows = []
-    for timestamp, fact in rows:
+    scored = []
+    for entry in entries:
+        fact        = entry["fact"]
         fact_tokens = _tokenize(fact)
         if not fact_tokens:
             continue
-
         overlap = query_tokens & fact_tokens
         if not overlap:
             continue
-
         score = len(overlap) / max(len(query_tokens), 1)
         if score < min_score and user_prompt.lower() not in fact.lower() and fact.lower() not in user_prompt.lower():
             continue
+        scored.append((score, entry))
 
-        scored_rows.append((score, timestamp, fact))
-
-    if not scored_rows:
+    if not scored:
         return "No relevant memories matched this prompt."
 
-    scored_rows.sort(key=lambda item: (-item[0], item[1]))
-    selected = scored_rows[: max(limit, 1)]
+    scored.sort(key=lambda item: (-item[0], item[1]["stored"]))
+    selected = scored[: max(limit, 1)]
+
+    # Update access stats
+    timestamp = _utc_now_iso()
+    for _, entry in selected:
+        entry["access_count"]  = entry.get("access_count", 0) + 1
+        entry["last_accessed"] = timestamp
+    _write_store(store)
 
     lines = ["Relevant memories:"]
-    for score, timestamp, fact in selected:
-        lines.append(f"- ({score:.2f}) {fact} [stored: {timestamp}]")
-
+    for score, entry in selected:
+        category = entry.get("category", "general")
+        stored   = entry.get("stored", "")
+        updated  = entry.get("updated")
+        date_ref = f"updated: {updated}" if updated else f"stored: {stored}"
+        lines.append(f"- [{category}] ({score:.2f}) {entry['fact']} [{date_ref}]")
     return "\n".join(lines)
 
 
 # ----------------------------------------------------------------------------------------------------
 def get_memory_store_text() -> str:
-    _ensure_store_file()
-    return MEMORY_STORE_PATH.read_text(encoding="utf-8")
+    store = _read_store()
+    return json.dumps(store, indent=2, ensure_ascii=False)
