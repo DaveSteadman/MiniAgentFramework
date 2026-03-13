@@ -15,7 +15,10 @@ For user-facing setup and usage see [README.md](README.md).
 
 ### 2) LLM + Ollama client layer
 - `code/ollama_client.py`
-  - Ollama health checks and auto-startup (`ensure_ollama_running`).
+  - Supports local Ollama, LAN-hosted Ollama machines, and Ollama Cloud via `configure_host(host, api_key=None)`.
+  - The active host and optional API key are module-level state (same pattern as `_DEFAULT_LLM_TIMEOUT`); all public functions resolve to them automatically so no caller needs to pass a host.
+  - `configure_host` is called from `main()` at startup using `--ollama-host` / `OLLAMA_HOST` env var and `--ollama-api-key` / `OLLAMA_API_KEY` env var.
+  - `_is_local_host()` guards features that only make sense locally: `ensure_ollama_running` will not attempt to auto-start `ollama serve` for remote/cloud hosts, and `get_ollama_ps_rows` returns `[]` (since `ollama ps` is a local subprocess).
   - Model discovery and alias resolution (`list_ollama_models`, `resolve_model_name`). Short aliases like `"20b"` resolve to the first installed model whose tag contains that string.
   - LLM call with full token metrics (`call_ollama_extended`).
   - `OllamaCallResult` carries `prompt_tokens`, `completion_tokens`, `eval_duration_ns`, and a computed `tokens_per_second` property.
@@ -54,7 +57,8 @@ For user-facing setup and usage see [README.md](README.md).
 - `code/skills/FileAccess/` - sandboxed file read/write/list functions.
 - `code/skills/Memory/`
   - Extracts and recalls durable environment facts via keyword relevance scoring.
-  - Persists facts across runs in `code/skills/Memory/memory_store.txt`.
+  - Persists facts across runs in `code/skills/Memory/memory_store.json` (JSON, schema v2.0).
+  - Auto-migrates legacy `memory_store.txt` on first run.
 - `code/skills/WebSearch/` - searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
 - `code/skills/WebExtract/` - fetches a URL and extracts its readable prose, stripping HTML markup, navigation, and ads, ready for LLM synthesis.
 - `code/skills/WebMine/` - mines URLs or DuckDuckGo searches into persisted Markdown files in the `webresearch/01-Mine/` workspace. Supports inline article content embedding via `fetch_content=True`.
@@ -84,6 +88,7 @@ For user-facing setup and usage see [README.md](README.md).
   - Invokes `code/main.py` as a subprocess for each prompt in a configurable test suite.
   - Records timing, exit code, final LLM output, and log file path to a timestamped CSV in `controldata/test_results/`.
   - Prompt suites are JSON files in `controldata/test_prompts/` and are loaded via `--prompts-file`.
+  - Accepts `--ollama-host` and `--ollama-api-key` to run the full suite against a LAN or cloud Ollama host.
 
 - `testcode/test_analyzer.py`
   - Reads a test results CSV and parses each run's log file for structured diagnostics.
@@ -315,7 +320,32 @@ compose them correctly. Each serves a different stage in the "find â†’ assess â†
 - `summarise the page at <url>`
 - `what does this page say: <url>`
 - `read this link and tell me about it: <url>`
-- (also triggered implicitly by the planner when a prior WebSearch result needs to be read)
+
+---
+
+## Known Ollama Hosts
+
+The framework resolves the active Ollama host at startup via `ollama_client.configure_host()`.
+Pass the host as a CLI argument or set the environment variable before launching.
+
+```
+python code/main.py --ollama-host http://MONTBLANC:11434
+python code/main.py --ollama-host https://api.ollama.com --ollama-api-key <key>
+# or via env vars:
+set OLLAMA_HOST=http://MONTBLANC:11434
+set OLLAMA_API_KEY=<key>
+```
+
+| Name | URL | Models | Notes |
+|------|-----|--------|-------|
+| Local | `http://localhost:11434` | *(locally installed)* | Default; `ollama serve` auto-started if not running |
+| MONTBLANC (LAN) | `http://192.168.1.169:11434` | `qwen3-coder:480b-cloud`, `gpt-oss:20b` | LAN machine; no API key required |
+| Ollama Cloud | `https://api.ollama.com` | *(cloud catalogue)* | Requires `--ollama-api-key` or `OLLAMA_API_KEY` |
+
+**Behaviour differences for non-local hosts:**
+- `ensure_ollama_running` skips the auto-start attempt and raises a clean error if the host is unreachable.
+- `get_ollama_ps_rows` returns `[]` (running-model list is a localhost-only API). The SYSTEM STATUS block will show "unavailable for remote host".
+- All inference and model-listing calls work identically regardless of host.
 
 ---
 

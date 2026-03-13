@@ -1,19 +1,24 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# HTTP client and server-management utilities for the local Ollama inference service.
+# HTTP client and server-management utilities for Ollama inference services.
+#
+# Supports local Ollama, LAN-hosted Ollama machines, and Ollama Cloud. The active host
+# and optional API key are configured once at startup via configure_host(); all subsequent
+# calls use the configured values without requiring callers to thread them through.
 #
 # Provides a thin layer over Ollama's REST API, covering:
-#   - Health-checking and auto-starting the Ollama background process.
+#   - Host configuration and connectivity checking.
+#   - Health-checking and auto-starting the local Ollama process (local only).
 #   - Listing installed models and resolving short aliases to fully-qualified model tags.
-#   - Parsing `ollama ps` output to report real-time model runtime status.
+#   - Parsing `ollama ps` output to report real-time model runtime status (local only).
 #   - Sending prompt/completion requests and surfacing actionable error messages.
 #
 # Related modules:
-#   - main.py                 -- uses ensure_ollama_running, call_ollama, and model utilities
-#   - planner_engine.py       -- uses call_ollama for planner LLM calls
+#   - main.py                   -- calls configure_host(), ensure_ollama_running(), model utilities
+#   - planner_engine.py         -- uses call_ollama_extended for planner LLM calls
 #   - skills_catalog_builder.py -- uses call_ollama for optional LLM skill summarisation
-#   - system_check.py         -- uses model listing and call_ollama for diagnostics
+#   - system_check.py           -- uses model listing and call_ollama for diagnostics
 # ====================================================================================================
 
 
@@ -33,7 +38,13 @@ from dataclasses import dataclass
 # MARK: CONSTANTS
 # ====================================================================================================
 DEFAULT_OLLAMA_HOST   = "http://localhost:11434"
+OLLAMA_CLOUD_HOST     = "https://api.ollama.com"
 _DEFAULT_LLM_TIMEOUT: int = 300   # seconds; updated at runtime by /timeout slash command
+
+# Active host and optional API key - set once at startup via configure_host().
+# Default to local Ollama; overridden by --ollama-host / OLLAMA_HOST env var.
+_active_host:    str        = DEFAULT_OLLAMA_HOST
+_active_api_key: str | None = None
 
 
 def get_llm_timeout() -> int:
@@ -59,6 +70,34 @@ def register_llm_call_logger(fn) -> None:
     """
     global _llm_call_log_fn
     _llm_call_log_fn = fn
+
+
+# ====================================================================================================
+# MARK: CONFIGURATION
+# ====================================================================================================
+def configure_host(host: str, api_key: str | None = None) -> None:
+    """Set the active Ollama host and optional API key for all subsequent LLM calls.
+
+    - Local Ollama (default): http://localhost:11434  - no API key needed.
+    - LAN machine:            http://<ip>:11434       - no API key needed.
+    - Ollama Cloud:           https://api.ollama.com  - requires an API key.
+
+    Stored as module-level state; mirrors the pattern used by set_llm_timeout().
+    """
+    global _active_host, _active_api_key
+    _active_host    = host.rstrip("/")
+    _active_api_key = api_key or None
+
+
+# ----------------------------------------------------------------------------------------------------
+def get_active_host() -> str:
+    """Return the currently configured Ollama host URL."""
+    return _active_host
+
+
+# ----------------------------------------------------------------------------------------------------
+def _is_local_host(host: str) -> bool:
+    return "localhost" in host or "127.0.0.1" in host or "0.0.0.0" in host
 
 
 # ====================================================================================================
@@ -91,7 +130,10 @@ def _request_json(url: str, method: str = "GET", payload: dict | None = None, ti
 
     if payload is not None:
         request_data = json.dumps(payload).encode("utf-8")
-        headers      = {"Content-Type": "application/json"}
+        headers["Content-Type"] = "application/json"
+
+    if _active_api_key:
+        headers["Authorization"] = f"Bearer {_active_api_key}"
 
     request = urllib.request.Request(
         url=url,
@@ -107,7 +149,8 @@ def _request_json(url: str, method: str = "GET", payload: dict | None = None, ti
 
 
 # ----------------------------------------------------------------------------------------------------
-def is_ollama_running(host: str = DEFAULT_OLLAMA_HOST) -> bool:
+def is_ollama_running(host: str | None = None) -> bool:
+    host = host or _active_host
     try:
         _request_json(url=f"{host.rstrip('/')}/api/tags", timeout=3.0)
         return True
@@ -141,14 +184,15 @@ def start_ollama_server() -> None:
 
 # ----------------------------------------------------------------------------------------------------
 def ensure_ollama_running(
-    host: str = DEFAULT_OLLAMA_HOST,
+    host: str | None = None,
     start_if_needed: bool = True,
     wait_seconds: float = 20.0,
 ) -> None:
+    host = host or _active_host
     if is_ollama_running(host=host):
         return
 
-    if not start_if_needed:
+    if not start_if_needed or not _is_local_host(host):
         raise RuntimeError(f"Ollama is not reachable at {host}")
 
     start_ollama_server()
@@ -163,7 +207,8 @@ def ensure_ollama_running(
 
 
 # ----------------------------------------------------------------------------------------------------
-def list_ollama_models(host: str = DEFAULT_OLLAMA_HOST) -> list[str]:
+def list_ollama_models(host: str | None = None) -> list[str]:
+    host   = host or _active_host
     body   = _request_json(url=f"{host.rstrip('/')}/api/tags", timeout=10.0)
     models = body.get("models", [])
     return [entry.get("model", "") for entry in models if entry.get("model")]
@@ -171,6 +216,9 @@ def list_ollama_models(host: str = DEFAULT_OLLAMA_HOST) -> list[str]:
 
 # ----------------------------------------------------------------------------------------------------
 def get_ollama_ps_rows() -> list[dict[str, str]]:
+    # ollama ps is a local subprocess call - not available for remote or cloud hosts.
+    if not _is_local_host(_active_host):
+        return []
     result = subprocess.run(
         ["ollama", "ps"],
         capture_output=True,
@@ -218,6 +266,8 @@ def get_running_model_row(model_name: str) -> dict[str, str] | None:
 
 # ----------------------------------------------------------------------------------------------------
 def format_running_model_report(model_name: str) -> str:
+    if not _is_local_host(_active_host):
+        return f"Model runtime status: unavailable for remote host ({_active_host})."
     row = get_running_model_row(model_name)
     if row is None:
         return f"Model runtime status: {model_name} not currently loaded (ollama ps)."
@@ -279,13 +329,14 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
 # ----------------------------------------------------------------------------------------------------
 def stop_model(
     model_name: str,
-    host: str = DEFAULT_OLLAMA_HOST,
+    host: str | None = None,
 ) -> None:
     """Unload a model from VRAM immediately by sending keep_alive=0 to the generate endpoint.
 
     Ollama interprets a generate request with keep_alive=0 as an instruction to evict the
     model from memory as soon as the (empty) call completes.  Raises RuntimeError on failure.
     """
+    host    = host or _active_host
     payload = {
         "model":      model_name,
         "prompt":     "",
@@ -310,7 +361,7 @@ def stop_model(
 def call_ollama_extended(
     model_name: str,
     prompt: str,
-    host: str = DEFAULT_OLLAMA_HOST,
+    host: str | None = None,
     num_ctx: int | None = None,
     timeout: int | None = None,
 ) -> OllamaCallResult:
@@ -318,6 +369,7 @@ def call_ollama_extended(
 
     timeout defaults to the module-level _DEFAULT_LLM_TIMEOUT (set via set_llm_timeout()).
     """
+    host = host or _active_host
     ensure_ollama_running(host=host, start_if_needed=True)
 
     if _llm_call_log_fn is not None:
@@ -391,7 +443,7 @@ def call_ollama_extended(
 def call_ollama(
     model_name: str,
     prompt: str,
-    host: str = DEFAULT_OLLAMA_HOST,
+    host: str | None = None,
     num_ctx: int | None = None,
 ) -> str:
     """Convenience wrapper - returns the response text only. See call_ollama_extended for token counts."""

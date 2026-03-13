@@ -69,6 +69,8 @@ python .\code\main.py --user-prompt "what version of ollama is in use"
 | `--user-prompt TEXT` | `"output the time"` | The prompt to run. |
 | `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` are resolved to the first installed model whose tag contains that string. |
 | `--num-ctx N` | `32768` | Context window size (tokens) passed to Ollama for both the planner and final LLM calls. |
+| `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address (e.g. `http://MONTBLANC:11434`) or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. |
+| `--ollama-api-key KEY` | *(none)* | API key for authenticated hosts (Ollama Cloud). Falls back to `OLLAMA_API_KEY` env var. Applies to all modes. |
 
 **Example - specify model and context window:**
 ```powershell
@@ -206,6 +208,7 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/ctx <tokens>` | Set the context window size for all subsequent runs (e.g. `/ctx 16384`). Accepts integers with optional commas or underscores. |
 | `/timeout <seconds>` | Set the LLM generation timeout (e.g. `/timeout 1800` for heavy analysis tasks). |
 | `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
+| `/clearmemory` | Delete the memory store file (`memory_store.json`), starting the next session with a blank memory. |
 | `/reskill` | Rebuild the skills catalog from `skill.md` files and hot-reload into the current session. |
 | `/skip-final` | Skip the final LLM synthesis call for all subsequent prompts; skill output is returned directly. Useful for pure data-collection steps (e.g. web mining) where no LLM summary is needed. |
 | `/run-final` | Re-enable the final LLM synthesis call (default state). |
@@ -227,6 +230,9 @@ python .\testcode\test_wrapper.py
 | `--prompts TEXT [TEXT ...]` | - | One or more prompt strings (overrides `--prompts-file`). |
 | `--prompts-file PATH` | `controldata/test_prompts/default_prompts.json` | JSON file containing an array of prompt strings. |
 | `--output-dir PATH` | `controldata/test_results/` | Directory where the CSV results file is written. |
+| `--model ALIAS` | `"20b"` | Ollama model alias passed to each `main.py` subprocess invocation. |
+| `--ollama-host URL` | *(local)* | Ollama host for all subprocess invocations (e.g. `http://MONTBLANC:11434`). |
+| `--ollama-api-key KEY` | *(none)* | API key forwarded to each subprocess invocation. |
 
 Each row in the CSV captures: `timestamp`, `prompt`, `final_output`, `duration_seconds`, `exit_code`, `log_file`, `stderr`.
 

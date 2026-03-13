@@ -25,12 +25,14 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import argparse
+import os
 import signal
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 
+import ollama_client
 from modes.dashboard import run_dashboard_mode
 from ollama_client import ensure_ollama_running
 from ollama_client import format_running_model_report
@@ -120,6 +122,20 @@ def parse_main_args() -> argparse.Namespace:
         default=None,
         metavar="NAME",
         help="Run a single named scheduled task immediately (debugging aid; ignores enabled flag).",
+    )
+    parser.add_argument(
+        "--ollama-host",
+        type=str,
+        default=os.environ.get("OLLAMA_HOST", ollama_client.DEFAULT_OLLAMA_HOST),
+        metavar="URL",
+        help="Ollama host URL. Defaults to http://localhost:11434. Also read from OLLAMA_HOST env var.",
+    )
+    parser.add_argument(
+        "--ollama-api-key",
+        type=str,
+        default=os.environ.get("OLLAMA_API_KEY", ""),
+        metavar="KEY",
+        help="API key for Ollama Cloud or authenticated hosts. Also read from OLLAMA_API_KEY env var.",
     )
     return parser.parse_args()
 
@@ -445,7 +461,11 @@ def main() -> None:
     logger   = SessionLogger(log_path)
     register_llm_call_logger(logger.log_file_only)
 
-    # Ensure local Ollama server is ready before model discovery and LLM calls.
+    # Configure the active Ollama host and optional API key before any Ollama calls.
+    # For remote / LAN / cloud hosts this is a connectivity check; auto-start is local-only.
+    ollama_client.configure_host(args.ollama_host, args.ollama_api_key or None)
+
+    # Ensure Ollama server is ready before model discovery and LLM calls.
     ensure_ollama_running()
     # Resolve the requested model alias/tag into an installed concrete model name.
     resolved_model = resolve_execution_model(args.model)
@@ -461,6 +481,7 @@ def main() -> None:
     )
 
     logger.log_section("SYSTEM STATUS")
+    logger.log(f"Ollama host:     {ollama_client.get_active_host()}")
     logger.log(f"Requested model: {args.model}")
     logger.log(f"Resolved model:  {resolved_model}")
     mode_label = (

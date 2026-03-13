@@ -245,6 +245,25 @@ def _cmd_run_final(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _cmd_clearmemory(arg: str, ctx: SlashCommandContext) -> None:
+    from pathlib import Path
+    store_path = Path(__file__).resolve().parent / "skills" / "Memory" / "memory_store.json"
+    legacy_path = Path(__file__).resolve().parent / "skills" / "Memory" / "memory_store.txt"
+
+    deleted = []
+    for path in (store_path, legacy_path):
+        if path.exists():
+            path.unlink()
+            deleted.append(path.name)
+
+    if deleted:
+        ctx.output(f"Memory store cleared ({', '.join(deleted)} deleted).", "success")
+    else:
+        ctx.output("Memory store was already empty.", "dim")
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
     from pathlib import Path
     from skills_catalog_builder import (
@@ -288,27 +307,29 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
 # MARK: REGISTRY
 # ====================================================================================================
 _REGISTRY: dict[str, Callable] = {
-    "/help":        _cmd_help,
-    "/exit":        _cmd_exit,
-    "/models":      _cmd_models,
-    "/model":       _cmd_model,
-    "/ctx":         _cmd_ctx,
-    "/timeout":     _cmd_timeout,
-    "/stopmodel":   _cmd_stopmodel,
-    "/reskill":     _cmd_reskills,
-    "/skip-final":  _cmd_skip_final,
-    "/run-final":   _cmd_run_final,
+    "/help":          _cmd_help,
+    "/exit":          _cmd_exit,
+    "/models":        _cmd_models,
+    "/model":         _cmd_model,
+    "/ctx":           _cmd_ctx,
+    "/timeout":       _cmd_timeout,
+    "/stopmodel":     _cmd_stopmodel,
+    "/clearmemory":   _cmd_clearmemory,
+    "/reskill":       _cmd_reskills,
+    "/skip-final":    _cmd_skip_final,
+    "/run-final":     _cmd_run_final,
 }
 
 _DESCRIPTIONS: dict[str, str] = {
-    "/help":        "List available slash commands",
-    "/exit":        "Exit dashboard mode",
-    "/models":      "List installed Ollama models",
-    "/model":       "<name>  Switch active model for all subsequent runs",
-    "/ctx":         "<tokens>  Set context window size (e.g. /ctx 32768)",
-    "/timeout":     "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
-    "/stopmodel":   "[name]  Unload a running model from VRAM (defaults to active model)",
-    "/reskill":     "Rebuild the skills catalog from skill.md files and hot-reload into session",
-    "/skip-final":  "Skip the final LLM synthesis call; return skill output directly",
-    "/run-final":   "Re-enable the final LLM synthesis call (default state)",
+    "/help":          "List available slash commands",
+    "/exit":          "Exit dashboard mode",
+    "/models":        "List installed Ollama models",
+    "/model":         "<name>  Switch active model for all subsequent runs",
+    "/ctx":           "<tokens>  Set context window size (e.g. /ctx 32768)",
+    "/timeout":       "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
+    "/stopmodel":     "[name]  Unload a running model from VRAM (defaults to active model)",
+    "/clearmemory":   "Delete the memory store file, starting with a blank memory next session",
+    "/reskill":       "Rebuild the skills catalog from skill.md files and hot-reload into session",
+    "/skip-final":    "Skip the final LLM synthesis call; return skill output directly",
+    "/run-final":     "Re-enable the final LLM synthesis call (default state)",
 }

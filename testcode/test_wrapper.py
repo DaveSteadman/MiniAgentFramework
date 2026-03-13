@@ -11,6 +11,9 @@
 #   python testcode/test_wrapper.py
 #   python testcode/test_wrapper.py --output-dir controldata/test_results
 #   python testcode/test_wrapper.py --prompts "output the time" "what is today's date"
+#   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/test_code_execute_prompts.json
+#   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/default_prompts.json --ollama-host http://MONTBLANC:11434
+#   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/default_prompts.json --ollama-host https://api.ollama.com --ollama-api-key <key>
 # ====================================================================================================
 
 
@@ -61,13 +64,22 @@ def load_prompts_file(path: Path) -> list[str]:
 # ====================================================================================================
 # MARK: INVOCATION
 # ====================================================================================================
-def invoke_framework(prompt: str, model: str | None = None) -> tuple[float, int, str, str]:
+def invoke_framework(
+    prompt: str,
+    model: str | None = None,
+    ollama_host: str | None = None,
+    ollama_api_key: str | None = None,
+) -> tuple[float, int, str, str]:
     """Invoke code/main.py with the given prompt and return (duration, exit_code, stdout, stderr)."""
     start_time = time.monotonic()
 
     cmd = [sys.executable, str(MAIN_SCRIPT), "--user-prompt", prompt]
     if model:
         cmd += ["--model", model]
+    if ollama_host:
+        cmd += ["--ollama-host", ollama_host]
+    if ollama_api_key:
+        cmd += ["--ollama-api-key", ollama_api_key]
 
     result = subprocess.run(
         cmd,
@@ -187,11 +199,18 @@ def append_csv_row(output_path: Path, row: dict) -> None:
 # ====================================================================================================
 # MARK: TEST RUNNER
 # ====================================================================================================
-def run_tests(prompts: list[str], output_dir: Path, model: str | None = None) -> Path:
+def run_tests(
+    prompts: list[str],
+    output_dir: Path,
+    model: str | None = None,
+    ollama_host: str | None = None,
+    ollama_api_key: str | None = None,
+) -> Path:
     output_path = build_output_path(output_dir)
     initialize_csv(output_path)
     model_label = f" (model: {model})" if model else ""
-    print(f"Results file initialized: {output_path}{model_label}")
+    host_label  = f" (host: {ollama_host})" if ollama_host else ""
+    print(f"Results file initialized: {output_path}{model_label}{host_label}")
 
     total_prompts = len(prompts)
 
@@ -207,7 +226,12 @@ def run_tests(prompts: list[str], output_dir: Path, model: str | None = None) ->
         final_output = ""
 
         try:
-            duration, exit_code, stdout, stderr = invoke_framework(prompt, model=model)
+            duration, exit_code, stdout, stderr = invoke_framework(
+                prompt,
+                model=model,
+                ollama_host=ollama_host,
+                ollama_api_key=ollama_api_key,
+            )
             log_file     = extract_log_file(stdout_text=stdout)
             final_output = extract_final_output(stdout_text=stdout, stderr_text=stderr, log_file=log_file)
         except subprocess.TimeoutExpired as timeout_error:
@@ -281,6 +305,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Ollama model alias to pass to main.py (overrides its default).",
     )
+    parser.add_argument(
+        "--ollama-host",
+        type=str,
+        default=None,
+        help="Ollama host URL to pass to main.py (e.g. http://MONTBLANC:11434).",
+    )
+    parser.add_argument(
+        "--ollama-api-key",
+        type=str,
+        default=None,
+        help="Ollama API key to pass to main.py (for Ollama Cloud).",
+    )
     return parser.parse_args()
 
 
@@ -297,4 +333,10 @@ if __name__ == "__main__":
     else:
         prompts = load_prompts_file(DEFAULT_PROMPTS_FILE)
 
-    run_tests(prompts=prompts, output_dir=args.output_dir, model=args.model)
+    run_tests(
+        prompts=prompts,
+        output_dir=args.output_dir,
+        model=args.model,
+        ollama_host=args.ollama_host,
+        ollama_api_key=args.ollama_api_key,
+    )
