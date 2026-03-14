@@ -1,5 +1,46 @@
 from . import colors
 
+
+# ====================================================================================================
+# MARK: HELPERS
+# ====================================================================================================
+
+def _wrap_text(text: str, width: int) -> list[str]:
+    """Word-wrap a single line of text to fit within *width* columns.
+
+    Returns a list of visual-row strings.  Words longer than *width* are hard-split.
+    """
+    if width <= 0:
+        return [text] if text else [""]
+    if len(text) <= width:
+        return [text] if text else [""]
+    rows: list[str] = []
+    current = ""
+    for word in text.split(" "):
+        # Hard-split individual words that exceed the available width.
+        while len(word) > width:
+            if current:
+                rows.append(current)
+                current = ""
+            rows.append(word[:width])
+            word = word[width:]
+        if not word:
+            # Trailing space or consecutive spaces - keep an explicit space.
+            if current:
+                current += " "
+            continue
+        if not current:
+            current = word
+        elif len(current) + 1 + len(word) <= width:
+            current += " " + word
+        else:
+            rows.append(current)
+            current = word
+    if current:
+        rows.append(current)
+    return rows if rows else [""]
+
+
 # ====================================================================================================
 # MARK: SCROLL LOG
 # ====================================================================================================
@@ -32,7 +73,7 @@ class ScrollLog:
         self._lines  = []
         self._scroll = 0
 
-    def scroll_up(self, n=1):   self._scroll = min(self._scroll + n, max(0, len(self._lines) - 1))
+    def scroll_up(self, n=1):   self._scroll += n
     def scroll_down(self, n=1): self._scroll = max(self._scroll - n, 0)
     def scroll_to_bottom(self): self._scroll = 0
 
@@ -44,10 +85,19 @@ class ScrollLog:
         if not self._lines or h <= 0 or w <= 0:
             return
 
-        total   = len(self._lines)
+        # Expand logical lines into visual rows by word-wrapping to the panel width.
+        visual: list[tuple[str, str]] = []
+        for text, attr in self._lines:
+            for segment in _wrap_text(text, w):
+                visual.append((segment, attr))
+
+        total = len(visual)
+        # Clamp scroll so we can never scroll past the top of actual content.
+        self._scroll = min(self._scroll, max(0, total - 1))
+
         end     = total - self._scroll
         start   = max(0, end - h)
-        visible = self._lines[start:end]
+        visible = visual[start:end]
 
         for row, (text, attr) in enumerate(visible):
             screen.put_str(y + row, x, text, attr, clip_w=w)

@@ -41,7 +41,7 @@ from pathlib import Path
 
 from chat_input import append_to_history as _append_chat_history
 from chat_input import load_history as _load_chat_history
-from ollama_client import get_active_host, get_ollama_ps_rows
+from ollama_client import get_active_host, get_llm_timeout, get_ollama_ps_rows
 from orchestration import ConversationHistory
 from orchestration import OrchestratorConfig
 from orchestration import SessionContext
@@ -144,6 +144,7 @@ def run_dashboard_mode(
                     ui_colors.RED,
                 )
                 return
+            app.add_chat_line(f"Agent\u25b6 [thinking... timeout {get_llm_timeout()}s]", ui_colors.DIM)
             response = ""
             p_tokens = 0
             tps_str  = ""
