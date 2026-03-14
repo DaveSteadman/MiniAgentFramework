@@ -2,6 +2,8 @@
 
 For user-facing setup and usage see [README.md](README.md).
 
+Before writing or editing any code in this project, read [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md).
+
 ---
 
 ## Module Breakdown
@@ -12,6 +14,12 @@ For user-facing setup and usage see [README.md](README.md).
   - Runs iterative planning → execution → validation loop (up to `MAX_ITERATIONS` retries).
   - A single `threading.Lock` (`llm_lock`) is shared across all modes to serialise LLM calls.
   - Graceful shutdown uses `threading.Event` + SIGINT handler; sleeping loops wake every 0.5 s to check the event.
+
+- `code/chat_input.py`
+  - Provides `prompt_with_history(prompt_text)` for the interactive chat loop in `main.py`.
+  - Wraps `prompt_toolkit` to support up/down arrow navigation through persistent cross-session history.
+  - History is stored in `controldata/chathistory.json` (max 500 entries, consecutive duplicates de-duped).
+  - Falls back to plain `input()` when `prompt_toolkit` is not installed.
 
 ### 2) LLM + Ollama client layer
 - `code/ollama_client.py`
@@ -110,6 +118,7 @@ For user-facing setup and usage see [README.md](README.md).
 | `get_schedules_dir()` | `<repo_root>/controldata/schedules/` |
 | `get_test_prompts_dir()` | `<repo_root>/controldata/test_prompts/` |
 | `get_test_results_dir()` | `<repo_root>/controldata/test_results/` |
+| `get_chatsessions_dir()` | `<repo_root>/controldata/chatsessions/` |
 
 - `code/webresearch_utils.py`
   - Three-stage web research workspace under `webresearch/`.
@@ -152,6 +161,7 @@ All runtime dependencies are listed in [`requirements.txt`](requirements.txt).
 |---|---|---|---|
 | `beautifulsoup4` | ≥ 4.12 | WebExtract, WebMine skills | Optional but strongly recommended - both skills fall back to stdlib `html.parser` if absent, but bs4 gives much cleaner extraction from real-world pages. |
 | `psutil` | ≥ 5.9 | `system_check.py` | Provides RAM, disk, and CPU metrics. |
+| `prompt_toolkit` | ≥ 3.0 | `chat_input.py` | Enables up/down arrow history in the console chat prompt. Optional - falls back to plain `input()` if not installed. |
 
 All other imports (`urllib`, `json`, `re`, `threading`, `pathlib`, …) are Python stdlib.
 
@@ -247,7 +257,7 @@ code/                        Main Python source; all imports are relative to thi
   skills/                    One subdirectory per skill; each has skill.md + implementation.
   ui/                        Terminal UI components (dashboard only).
 controldata/
-  logs/                      Runtime evidence logs (run_YYYYMMDD_HHMMSS.txt).
+  logs/YYYY-MM-DD/            Runtime evidence logs (run_YYYYMMDD_HHMMSS.txt) in dated subfolders.
   schedules/                 Schedule definition JSON files (*.json).
   test_prompts/              Prompt suite JSON files for the test wrapper.
   test_results/              CSV results and analysis files from test runs.

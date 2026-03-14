@@ -46,6 +46,10 @@ class ExecutedCall(dict):
 # Avoids re-executing module-level code on every skill invocation within a session.
 _callable_cache: dict[tuple[str, str], object] = {}
 
+# Pre-compiled pattern for inline ${outputN.field} placeholders embedded within larger strings.
+# Compiled at module level to avoid repeated re.compile() calls inside the hot argument-resolution loop.
+_INLINE_PLACEHOLDER_RE = re.compile(r"\$\{output\d+(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}")
+
 
 # ----------------------------------------------------------------------------------------------------
 def _load_callable_from_module_path(module_path: str, function_name: str):
@@ -94,8 +98,41 @@ def _build_allowlist(skills_payload: dict) -> set[tuple[str, str]]:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _validate_call_allowed(call: PythonCall, allowlist: set[tuple[str, str]]) -> None:
-    key = (normalize_module_path(call.module), call.function)
+def _build_module_stem_index(skills_payload: dict) -> dict[str, str]:
+    """Map each skill module's bare stem and folder alias to its full normalised path.
+
+    Allows the LLM planner to emit short names like 'code_execute_skill' or the folder
+    alias 'CodeExecute' instead of the full catalog path
+    'code/skills/CodeExecute/code_execute_skill'.
+    """
+    index: dict[str, str] = {}
+    for skill in skills_payload.get("skills", []):
+        full = normalize_module_path(skill.get("module", ""))
+        if full:
+            parts = full.split("/")
+            # Index by file stem (e.g. 'web_search_skill').
+            index[parts[-1]] = full
+            # Also index by the containing folder name (e.g. 'WebSearch') so the
+            # planner can emit the skill folder alias and still resolve correctly.
+            if len(parts) >= 2:
+                index[parts[-2]] = full
+    return index
+
+
+# ----------------------------------------------------------------------------------------------------
+def _resolve_call_module(raw_module: str, stem_index: dict[str, str]) -> str:
+    """Return the full normalised module path for *raw_module*.
+
+    If *raw_module* normalises to a known stem, the full catalog path is returned.
+    Otherwise *raw_module* is returned as-is (already a full path).
+    """
+    norm = normalize_module_path(raw_module)
+    return stem_index.get(norm, norm)
+
+
+# ----------------------------------------------------------------------------------------------------
+def _validate_call_allowed(call: PythonCall, allowlist: set[tuple[str, str]], resolved_module: str) -> None:
+    key = (resolved_module, call.function)
     if key not in allowlist:
         raise RuntimeError(f"Planned call is not allow-listed by skills summary: {call.module}.{call.function}")
 
@@ -166,8 +203,7 @@ def _resolve_argument_placeholders(call_arguments: dict, previous_results: list[
             continue
 
         # Substitute any placeholder tokens embedded within a larger string.
-        inline_re = re.compile(r"\$\{output\d+(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}")
-        if inline_re.search(normalized):
+        if _INLINE_PLACEHOLDER_RE.search(normalized):
             def _substitute_inline(match: re.Match) -> str:
                 substituted, ok = _resolve_structured_reference(
                     reference=match.group(0),
@@ -175,7 +211,7 @@ def _resolve_argument_placeholders(call_arguments: dict, previous_results: list[
                 )
                 return str(substituted) if ok else match.group(0)
 
-            resolved[key] = inline_re.sub(_substitute_inline, normalized)
+            resolved[key] = _INLINE_PLACEHOLDER_RE.sub(_substitute_inline, normalized)
             continue
 
         resolved[key] = resolve_tokens(value)
@@ -187,14 +223,18 @@ def _resolve_argument_placeholders(call_arguments: dict, previous_results: list[
 # MARK: EXECUTION
 # ====================================================================================================
 def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_payload: dict) -> tuple[list[dict], str]:
-    allowlist     = _build_allowlist(skills_payload=skills_payload)
-    call_outputs  = []
-    raw_results   = []
+    allowlist    = _build_allowlist(skills_payload=skills_payload)
+    stem_index   = _build_module_stem_index(skills_payload=skills_payload)
+    call_outputs = []
+    raw_results  = []
     latest_output = user_prompt
 
     for call in sorted(plan.python_calls, key=lambda item: item.order):
+        # Resolve bare module stem (e.g. 'code_execute_skill') to full catalog path.
+        resolved_module = _resolve_call_module(call.module, stem_index)
+
         # Enforce strict allow-list from skills_summary before any dynamic import execution.
-        _validate_call_allowed(call=call, allowlist=allowlist)
+        _validate_call_allowed(call=call, allowlist=allowlist, resolved_module=resolved_module)
 
         call_arguments = _resolve_argument_placeholders(
             call_arguments=dict(call.arguments),
@@ -203,7 +243,7 @@ def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_paylo
         )
 
         # Dynamically import the approved skill module and invoke the selected function.
-        function_ref = _load_callable_from_module_path(module_path=call.module, function_name=call.function)
+        function_ref = _load_callable_from_module_path(module_path=resolved_module, function_name=call.function)
         result       = function_ref(**call_arguments)
 
         call_outputs.append(

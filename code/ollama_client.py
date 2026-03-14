@@ -96,6 +96,12 @@ def get_active_host() -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
+def get_active_api_key() -> str | None:
+    """Return the currently configured Ollama API key, or None for local/LAN hosts."""
+    return _active_api_key
+
+
+# ----------------------------------------------------------------------------------------------------
 def _is_local_host(host: str) -> bool:
     return "localhost" in host or "127.0.0.1" in host or "0.0.0.0" in host
 
@@ -216,9 +222,17 @@ def list_ollama_models(host: str | None = None) -> list[str]:
 
 # ----------------------------------------------------------------------------------------------------
 def get_ollama_ps_rows() -> list[dict[str, str]]:
-    # ollama ps is a local subprocess call - not available for remote or cloud hosts.
-    if not _is_local_host(_active_host):
-        return []
+    """Return currently running models as a list of dicts with at least a 'name' key.
+
+    For local hosts: parses `ollama ps` subprocess output (preserves existing behaviour).
+    For remote/cloud hosts: calls the /api/ps REST endpoint instead (same data, over HTTP).
+    """
+    if _is_local_host(_active_host):
+        return _get_ollama_ps_rows_local()
+    return _get_ollama_ps_rows_remote(_active_host)
+
+
+def _get_ollama_ps_rows_local() -> list[dict[str, str]]:
     result = subprocess.run(
         ["ollama", "ps"],
         capture_output=True,
@@ -248,6 +262,34 @@ def get_ollama_ps_rows() -> list[dict[str, str]]:
     return rows
 
 
+def _get_ollama_ps_rows_remote(host: str) -> list[dict[str, str]]:
+    """Call /api/ps on a remote Ollama host and normalise the response into the same row shape."""
+    try:
+        data   = _request_json(f"{host.rstrip('/')}/api/ps", timeout=10.0)
+        models = data.get("models") or []
+    except Exception:
+        return []
+
+    rows = []
+    for m in models:
+        details      = m.get("details") or {}
+        size_bytes   = m.get("size", 0)
+        size_gb      = f"{size_bytes / 1_073_741_824:.1f} GB" if size_bytes else ""
+        size_vram    = m.get("size_vram", 0)
+        vram_gb      = f"{size_vram / 1_073_741_824:.1f} GB" if size_vram else "0 B"
+        rows.append({
+            "name":       m.get("name", ""),
+            "id":         m.get("digest", "")[:12],
+            "size":       size_gb,
+            "processor":  "100% GPU" if size_vram else "100% CPU",
+            "vram":       vram_gb,
+            "until":      m.get("expires_at", ""),
+            "param_size": details.get("parameter_size", ""),
+        })
+
+    return rows
+
+
 # ----------------------------------------------------------------------------------------------------
 def get_running_model_row(model_name: str) -> dict[str, str] | None:
     rows             = get_ollama_ps_rows()
@@ -266,15 +308,13 @@ def get_running_model_row(model_name: str) -> dict[str, str] | None:
 
 # ----------------------------------------------------------------------------------------------------
 def format_running_model_report(model_name: str) -> str:
-    if not _is_local_host(_active_host):
-        return f"Model runtime status: unavailable for remote host ({_active_host})."
     row = get_running_model_row(model_name)
     if row is None:
         return f"Model runtime status: {model_name} not currently loaded (ollama ps)."
 
     size      = row.get("size", "unknown")
     processor = row.get("processor", "unknown")
-    context   = row.get("context", "unknown")
+    context   = row.get("context", row.get("param_size", "unknown"))
     until     = row.get("until", "unknown")
     running   = row.get("name", model_name)
 
@@ -286,6 +326,9 @@ def format_running_model_report(model_name: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 def resolve_model_name(requested_model: str, available_models: list[str]) -> str | None:
+    # Resolution order: (1) exact match, (2) base-name prefix (e.g. "llama3" → "llama3:8b"),
+    # (3) tag suffix (e.g. "8b" → "llama3:8b"), (4) word-boundary token match (e.g. "20b").
+    # Each step only returns a result when there is exactly one candidate, to avoid ambiguity.
     requested_lower = requested_model.lower().strip()
     if not requested_lower:
         return None
@@ -315,10 +358,11 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
 
     # Substring match as a last resort - only accepted when exactly one model matches.
     # Use word-boundary-aware matching so that "20b" doesn't match "120b" and vice-versa.
+    # Hyphens are also treated as part of the name (e.g. "qwen3" must not match "qwen3-coder").
     token_matches = [
         model_name
         for model_name in available_models
-        if re.search(rf"(?<![0-9]){re.escape(requested_lower)}(?![0-9a-z])", model_name.lower())
+        if re.search(rf"(?<![0-9]){re.escape(requested_lower)}(?![0-9a-z\-])", model_name.lower())
     ]
     if len(token_matches) == 1:
         return token_matches[0]

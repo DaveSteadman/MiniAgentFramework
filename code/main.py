@@ -40,6 +40,7 @@ from ollama_client import get_llm_timeout
 from ollama_client import register_llm_call_logger
 from orchestration import ConversationHistory
 from orchestration import OrchestratorConfig
+from orchestration import SessionContext
 from orchestration import orchestrate_prompt
 from orchestration import resolve_execution_model
 from planner_engine import load_skills_payload
@@ -50,8 +51,11 @@ from scheduler import llm_lock
 from scheduler import load_schedules_dir
 from slash_commands import SlashCommandContext
 from slash_commands import handle as handle_slash
+from chat_input import prompt_with_history
+from workspace_utils import get_chatsessions_dir
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
+from workspace_utils import get_workspace_root
 
 
 # ====================================================================================================
@@ -137,6 +141,13 @@ def parse_main_args() -> argparse.Namespace:
         metavar="KEY",
         help="API key for Ollama Cloud or authenticated hosts. Also read from OLLAMA_API_KEY env var.",
     )
+    parser.add_argument(
+        "--chat-sequence-file",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="JSON file containing an array of prompt strings to run as a shared-history exchange.",
+    )
     return parser.parse_args()
 
 
@@ -158,16 +169,20 @@ def run_chat_mode(
     context overflow as the session grows.
     """
     history = ConversationHistory(max_turns=MAX_CHAT_HISTORY_TURNS)
+    session_ctx = SessionContext(
+        session_id   = log_path.stem,
+        persist_path = get_chatsessions_dir() / f"{log_path.stem}.json",
+    )
     turn = 0
 
     print(f"\nChat mode active - model: {config.resolved_model} | num_ctx: {config.num_ctx:,}")
     print(f"Log file: {log_path.as_posix()}")
     print(f"History window: last {MAX_CHAT_HISTORY_TURNS} turns")
-    print("Type 'exit' or 'quit' to end the session.\n")
+    print("Type 'exit' or 'quit' to end the session. Up/down arrows scroll through history.\n")
 
     while True:
         try:
-            user_prompt = input("You: ").strip()
+            user_prompt = prompt_with_history("You: ")
         except (EOFError, KeyboardInterrupt):
             print("\nChat session ended.")
             break
@@ -181,15 +196,17 @@ def run_chat_mode(
         # Slash commands bypass orchestration entirely.
         def _cli_clear_history():
             history.clear()
+            session_ctx.clear()
 
         def _cli_output(text: str, level: str = 'info') -> None:
             prefix = "[!] " if level == 'error' else ""
             print(f"{prefix}{text}")
 
         cli_ctx = SlashCommandContext(
-            config        = config,
-            output        = _cli_output,
-            clear_history = _cli_clear_history,
+            config         = config,
+            output         = _cli_output,
+            clear_history  = _cli_clear_history,
+            session_context= session_ctx,
         )
         if handle_slash(user_prompt, cli_ctx):
             continue
@@ -203,6 +220,7 @@ def run_chat_mode(
             config=config,
             logger=logger,
             conversation_history=history.as_list() or None,
+            session_context=session_ctx,
             quiet=True,
         )
 
@@ -224,6 +242,66 @@ def run_chat_mode(
 
 
 # run_dashboard_mode lives in modes/dashboard.py and is imported at the top of this file.
+
+
+# ====================================================================================================
+# MARK: CHAT SEQUENCE MODE
+# ====================================================================================================
+def run_chat_sequence_mode(
+    sequence_file: Path,
+    config: OrchestratorConfig,
+    logger: SessionLogger,
+    log_path: Path,
+) -> None:
+    """Run a pre-defined sequence of prompts through a shared ConversationHistory + SessionContext.
+
+    Used by the test wrapper to exercise multi-turn exchanges.  Outputs each turn in a
+    structured format that the wrapper can parse:
+
+        [TURN 1] User: <prompt>
+        [TURN 1] Agent: <response>
+        [TURN 1] tokens=<n> tps=<f>
+
+    Exits with code 1 if the sequence file cannot be read or is malformed.
+    """
+    import json as _json, sys as _sys
+    try:
+        turns_raw = _json.loads(sequence_file.read_text(encoding="utf-8"))
+        if not isinstance(turns_raw, list):
+            raise ValueError("sequence file must contain a JSON array")
+        prompts = [str(t) for t in turns_raw]
+    except Exception as exc:
+        print(f"[chat-sequence] Cannot load '{sequence_file}': {exc}", file=_sys.stderr)
+        _sys.exit(1)
+
+    history     = ConversationHistory(max_turns=MAX_CHAT_HISTORY_TURNS)
+    session_ctx = SessionContext(
+        session_id   = log_path.stem,
+        persist_path = get_chatsessions_dir() / f"{log_path.stem}.json",
+    )
+
+    for turn_idx, user_prompt in enumerate(prompts, start=1):
+        print(f"[TURN {turn_idx}] User: {user_prompt}")
+        logger.log_section_file_only(f"SEQUENCE TURN {turn_idx}")
+        logger.log_file_only(f"User: {user_prompt}")
+
+        final_response, p_tokens, _c, run_success, tps = orchestrate_prompt(
+            user_prompt=user_prompt,
+            config=config,
+            logger=logger,
+            conversation_history=history.as_list() or None,
+            session_context=session_ctx,
+            quiet=True,
+        )
+
+        history.add(user_prompt, final_response)
+        tps_str = f"{tps:.1f}" if tps > 0 else "0"
+        print(f"[TURN {turn_idx}] Agent: {final_response}")
+        print(f"[TURN {turn_idx}] tokens={p_tokens} tps={tps_str}")
+
+        logger.log_file_only(f"Agent: {final_response}")
+        if not run_success:
+            logger.log_file_only("[WARN] Orchestration validation failed for this turn.")
 
 
 # ====================================================================================================
@@ -323,10 +401,15 @@ def run_scheduler_mode(
 
                 try:
                     task_hist  = ConversationHistory()
+                    task_ctx   = SessionContext(
+                        session_id   = f"task_{name}",
+                        persist_path = get_chatsessions_dir() / f"task_{name}.json",
+                    )
                     sched_ctx  = SlashCommandContext(
-                        config        = config,
-                        output        = lambda text, level='info': logger.log_file_only(f"[slash/{level}] {text}"),
-                        clear_history = task_hist.clear,
+                        config         = config,
+                        output         = lambda text, level='info': logger.log_file_only(f"[slash/{level}] {text}"),
+                        clear_history  = task_hist.clear,
+                        session_context= task_ctx,
                     )
 
                     for step_index, prompt_text in enumerate(prompts, start=1):
@@ -348,6 +431,7 @@ def run_scheduler_mode(
                             config=config,
                             logger=logger,
                             conversation_history=task_hist.as_list() or None,
+                            session_context=task_ctx,
                             quiet=True,
                         )
 
@@ -409,10 +493,15 @@ def run_schedule_item_mode(
     logger.log_section(f"SCHEDULE ITEM: {item_name}")
 
     task_hist = ConversationHistory()
+    task_ctx  = SessionContext(
+        session_id   = f"task_{item_name}",
+        persist_path = get_chatsessions_dir() / f"task_{item_name}.json",
+    )
     sched_ctx = SlashCommandContext(
-        config        = config,
-        output        = lambda text, level='info': logger.log_file_only(f"[slash/{level}] {text}"),
-        clear_history = task_hist.clear,
+        config         = config,
+        output         = lambda text, level='info': logger.log_file_only(f"[slash/{level}] {text}"),
+        clear_history  = task_hist.clear,
+        session_context= task_ctx,
     )
 
     for step_index, prompt_text in enumerate(prompts, start=1):
@@ -429,6 +518,7 @@ def run_schedule_item_mode(
             config=config,
             logger=logger,
             conversation_history=task_hist.as_list() or None,
+            session_context=task_ctx,
             quiet=True,
         )
 
@@ -489,6 +579,7 @@ def main() -> None:
         "scheduler"     if args.scheduler     else
         "dashboard"     if args.dashboard     else
         f"scheduled-item:{args.scheduled_item}" if args.scheduled_item else
+        f"chat-sequence:{args.chat_sequence_file.name}" if args.chat_sequence_file else
         "single-shot"
     )
     logger.log(f"Mode:            {mode_label}")
@@ -512,6 +603,10 @@ def main() -> None:
 
     if args.scheduled_item:
         run_schedule_item_mode(item_name=args.scheduled_item, config=config, logger=logger, log_path=log_path)
+        return
+
+    if args.chat_sequence_file:
+        run_chat_sequence_mode(sequence_file=args.chat_sequence_file, config=config, logger=logger, log_path=log_path)
         return
 
     # Single-shot mode: orchestrate one prompt and validate.

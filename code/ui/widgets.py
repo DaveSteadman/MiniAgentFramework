@@ -69,13 +69,17 @@ class ScrollLog:
 
 class TextEdit:
 
-    def __init__(self, prompt='> ', max_len=1024):
-        self._buf    = []       # list of chars
-        self._cursor = 0
-        self._prompt = prompt
-        self._max    = max_len
-        self.locked   = False   # when True input is suppressed
-        self.lock_msg = ''     # message shown in the bar while locked
+    def __init__(self, prompt='> ', max_len=1024, history=None):
+        self._buf      = []       # list of chars
+        self._cursor   = 0
+        self._prompt   = prompt
+        self._max      = max_len
+        self.locked    = False    # when True input is suppressed
+        self.lock_msg  = ''       # message shown in the bar while locked
+        # History navigation - shared mutable list supplied by the caller.
+        self._history  = history if history is not None else []
+        self._hist_idx: int | None = None   # None = not navigating; else index into _history
+        self._presave  = ''       # text saved when user first presses K_UP
 
     # ----------------------------------------------------------------------------------------------------
 
@@ -84,8 +88,10 @@ class TextEdit:
         return ''.join(self._buf)
 
     def clear(self):
-        self._buf    = []
-        self._cursor = 0
+        self._buf      = []
+        self._cursor   = 0
+        self._hist_idx = None
+        self._presave  = ''
 
     # ----------------------------------------------------------------------------------------------------
     # Process a key token (string from keys.read_key()).
@@ -99,6 +105,29 @@ class TextEdit:
         from . import keys
 
         if key == keys.ENTER:                   return True
+
+        if key == keys.K_UP:
+            if self._history:
+                if self._hist_idx is None:
+                    self._presave  = self.value
+                    self._hist_idx = len(self._history) - 1
+                elif self._hist_idx > 0:
+                    self._hist_idx -= 1
+                self._buf    = list(self._history[self._hist_idx])
+                self._cursor = len(self._buf)
+            return False
+
+        if key == keys.K_DOWN:
+            if self._hist_idx is not None:
+                self._hist_idx += 1
+                if self._hist_idx >= len(self._history):
+                    self._hist_idx = None
+                    self._buf      = list(self._presave)
+                    self._presave  = ''
+                else:
+                    self._buf    = list(self._history[self._hist_idx])
+                self._cursor = len(self._buf)
+            return False
 
         if key == keys.BACKSPACE:
             if self._cursor > 0:

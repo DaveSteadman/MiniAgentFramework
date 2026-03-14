@@ -6,6 +6,7 @@
 # Provides:
 #   OrchestratorConfig      -- immutable session-level settings bundle
 #   ConversationHistory     -- rolling window of user/assistant turn pairs
+#   SessionContext          -- per-session skill-output cache for cross-turn injection
 #   resolve_execution_model -- model alias → installed Ollama model name
 #   orchestrate_prompt      -- full planner → skill → LLM → validate pipeline
 #
@@ -104,6 +105,160 @@ class ConversationHistory:
 
     def __bool__(self) -> bool:
         return bool(self._turns)
+
+
+# ====================================================================================================
+# MARK: SESSION CONTEXT
+# ====================================================================================================
+def _truncate_words(text: str, max_words: int) -> str:
+    """Truncate *text* to at most *max_words* words, appending ' …' when cut."""
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]) + " …"
+
+
+class SessionContext:
+    """Structured per-session cache of skill outputs for cross-turn context injection.
+
+    After each orchestration turn the raw skill outputs are distilled into a compact,
+    token-efficient form and stored here.  On subsequent turns the last N turns' summaries
+    are automatically injected into the final synthesis prompt so the LLM can reference
+    prior fetched data (web pages, code output, file content) without re-running the skills.
+
+    Optionally persisted to a JSON file (e.g. in progress/) so state survives restarts
+    and scheduled tasks can optionally cross-load each other's context.
+    """
+
+    MAX_CONTENT_WORDS = 300   # max words stored per web-extract / file-read body
+    MAX_INJECT_TURNS  = 2     # how many prior turns to include in each new prompt
+
+    def __init__(self, session_id: str, persist_path: Path | None = None) -> None:
+        self._session_id = session_id
+        self._path       = persist_path
+        self._turns: list[dict] = []
+        if persist_path and persist_path.exists():
+            try:
+                data = json.loads(persist_path.read_text(encoding="utf-8"))
+                self._turns = data.get("turns", [])
+            except Exception:
+                pass
+
+    # --------------------------------------------------------------------------
+
+    def add_turn(
+        self,
+        user_prompt: str,
+        assistant_response: str,
+        skill_outputs: list[dict],
+    ) -> None:
+        """Append a completed turn with its compact skill-output summary."""
+        turn_num = len(self._turns) + 1
+        compact  = [self._compact_output(o) for o in skill_outputs]
+        self._turns.append({
+            "turn":               turn_num,
+            "user_prompt":        user_prompt,
+            "assistant_response": assistant_response,
+            "skill_outputs":      compact,
+        })
+        self._save()
+
+    # --------------------------------------------------------------------------
+
+    def clear(self) -> None:
+        self._turns = []
+        self._save()
+
+    def turn_count(self) -> int:
+        return len(self._turns)
+
+    # --------------------------------------------------------------------------
+
+    def as_inject_block(self, max_turns: int | None = None) -> str:
+        """Return a text block for injection into the synthesis prompt.
+
+        Covers the last *max_turns* turns (default: MAX_INJECT_TURNS).  Returns an
+        empty string when there are no prior turns to inject.
+        """
+        n      = max_turns if max_turns is not None else self.MAX_INJECT_TURNS
+        recent = self._turns[-n:] if n else list(self._turns)
+        if not recent:
+            return ""
+
+        parts = []
+        for t in recent:
+            lines = [f"Turn {t['turn']} | user: {t['user_prompt'][:100]}"]
+            for o in t["skill_outputs"]:
+                skill   = o.get("skill", "?")
+                summary = o.get("summary", "")
+                lines.append(f"  [{skill}] {summary}")
+                for r in o.get("results", []):
+                    snippet = r.get("snippet", "")[:80]
+                    lines.append(f"    · {r.get('url', '')}  \"{r.get('title', '')}\"  {snippet}")
+                if "content" in o:
+                    lines.append(f"    {o['content'][:1500]}")
+            parts.append("\n".join(lines))
+
+        return "Prior turn skill context (for follow-up reference):\n\n" + "\n\n".join(parts)
+
+    # --------------------------------------------------------------------------
+
+    def _compact_output(self, output: dict) -> dict:
+        """Distil a raw skill output dict to a compact, token-efficient summary."""
+        module   = Path(output.get("module", "")).stem
+        function = output.get("function", "?")
+        args     = output.get("arguments", {}) or {}
+        result   = output.get("result")
+
+        entry: dict = {"skill": f"{module}.{function}"}
+        for key in ("query", "url", "path", "file_path", "domain", "topic"):
+            if key in args:
+                entry[key] = str(args[key])[:200]
+                break
+
+        if result is None:
+            entry["summary"] = "(no result)"
+        elif isinstance(result, list):
+            items = []
+            for item in result:
+                if isinstance(item, dict):
+                    items.append({
+                        "url":     item.get("url",     ""),
+                        "title":   item.get("title",   ""),
+                        "snippet": _truncate_words(
+                            item.get("snippet") or item.get("body", ""), 50
+                        ),
+                    })
+            entry["results"] = items
+            entry["summary"] = f"{len(items)} result(s) returned"
+        elif isinstance(result, dict):
+            url  = result.get("url", "")
+            text = result.get("text") or result.get("content") or result.get("result", "")
+            if url:
+                entry["url"] = url
+            entry["content"] = _truncate_words(str(text), self.MAX_CONTENT_WORDS)
+            entry["summary"] = f"text extracted ({self.MAX_CONTENT_WORDS} word limit)"
+        elif isinstance(result, str):
+            entry["content"] = _truncate_words(result, self.MAX_CONTENT_WORDS)
+            entry["summary"] = f"text output ({len(result)} chars)"
+        else:
+            entry["summary"] = str(result)[:200]
+
+        return entry
+
+    # --------------------------------------------------------------------------
+
+    def _save(self) -> None:
+        if not self._path:
+            return
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"session_id": self._session_id, "turns": self._turns}
+            self._path.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            pass
 
 
 # ====================================================================================================
@@ -268,6 +423,7 @@ def build_final_llm_prompt(
     recalled_memories: str,
     ambient_system_info: str = "",
     conversation_history: list[dict] | None = None,
+    prior_skill_context: str = "",
 ) -> str:
     call_outputs_json = json.dumps(python_call_outputs, indent=2)
     template_text     = (plan.final_prompt_template or "").strip()
@@ -303,6 +459,8 @@ def build_final_llm_prompt(
             f"{ambient_system_info}\n\n"
         )
 
+    prior_context_section = f"{prior_skill_context}\n\n" if prior_skill_context else ""
+
     return (
         "You are answering exactly one user question.\n"
         "Prioritize the user question over all other text.\n"
@@ -314,7 +472,8 @@ def build_final_llm_prompt(
         f"User question:\n{user_prompt}\n"
         "\n"
         f"{system_context_section}"
-        "Python skill outputs (authoritative context):\n"
+        f"{prior_context_section}"
+        "Python skill outputs (current turn, authoritative):\n"
         f"{call_outputs_json}\n"
         "\n"
         "Relevant recalled memories (if any):\n"
@@ -335,6 +494,7 @@ def orchestrate_prompt(
     config: OrchestratorConfig,
     logger: SessionLogger,
     conversation_history: list[dict] | None = None,
+    session_context: "SessionContext | None" = None,
     quiet: bool = False,
 ) -> tuple[str, int, int, bool, float]:
     """Run the full planner -> skill -> LLM -> validate pipeline for one prompt.
@@ -375,12 +535,14 @@ def orchestrate_prompt(
     _log_section("AMBIENT SYSTEM INFO")
     _log(ambient_system_info)
 
-    planner_feedback  = ""
-    run_success       = False
-    prompt_tokens     = 0
-    completion_tokens = 0
-    final_response    = ""
-    final_tps         = 0.0
+    planner_feedback    = ""
+    run_success         = False
+    prompt_tokens       = 0
+    completion_tokens   = 0
+    final_response      = ""
+    final_tps           = 0.0
+    python_call_outputs: list[dict] = []
+    _prior_inject = session_context.as_inject_block() if session_context else ""
 
     for iteration in range(1, config.max_iterations + 1):
         _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN")
@@ -445,6 +607,7 @@ def orchestrate_prompt(
             recalled_memories=recalled_memories,
             ambient_system_info=ambient_system_info,
             conversation_history=conversation_history,
+            prior_skill_context=_prior_inject,
         )
 
         prompt_context = build_prompt_context(
@@ -500,5 +663,12 @@ def orchestrate_prompt(
 
         planner_feedback = validation.planner_feedback
         _log("Execution did not satisfy validation checks, retrying...")
+
+    if session_context is not None and run_success and python_call_outputs:
+        session_context.add_turn(
+            user_prompt=user_prompt,
+            assistant_response=final_response,
+            skill_outputs=python_call_outputs,
+        )
 
     return final_response, prompt_tokens, completion_tokens, run_success, final_tps

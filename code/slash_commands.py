@@ -45,10 +45,11 @@ from typing import Callable
 @dataclass
 class SlashCommandContext:
     """All mutable state and I/O wiring needed by slash command handlers."""
-    config:        object                        # OrchestratorConfig; .resolved_model is writable
-    output:        Callable[[str, str], None]    # (text, level) -> None
-    clear_history: Callable[[], None]            # resets conversation history
-    request_exit:  Callable[[], None] | None = None  # optional: signals the host to shut down
+    config:          object                        # OrchestratorConfig; .resolved_model is writable
+    output:          Callable[[str, str], None]    # (text, level) -> None
+    clear_history:   Callable[[], None]            # resets conversation history + session context
+    request_exit:    Callable[[], None] | None = None   # optional: signals the host to shut down
+    session_context: object | None = None               # SessionContext; None in non-interactive modes
 
 
 # ====================================================================================================
@@ -83,6 +84,18 @@ def handle(text: str, ctx: SlashCommandContext) -> bool:
 # ====================================================================================================
 # MARK: HANDLERS
 # ====================================================================================================
+# Handler functions import their heavy dependencies inside the function body rather than at module
+# level.  This is intentional: it avoids circular-import risk at startup and keeps the import cost
+# near-zero when only a subset of commands are ever invoked in a given session.
+# ====================================================================================================
+
+# Well-known Ollama host aliases resolved by the /host command.
+_HOST_ALIASES: dict[str, str] = {
+    "local":     "http://localhost:11434",
+    "localhost":  "http://localhost:11434",
+}
+
+
 def _cmd_help(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output("Available slash commands:", "info")
     for name, description in sorted(_DESCRIPTIONS.items()):
@@ -230,17 +243,17 @@ def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
-def _cmd_skip_final(arg: str, ctx: SlashCommandContext) -> None:
-    ctx.config.skip_final_llm = True
-    ctx.output("Final LLM synthesis disabled - skill output will be returned directly.", "success")
-    ctx.output("Use /run-final to re-enable.", "dim")
-
-
-# ----------------------------------------------------------------------------------------------------
-
-def _cmd_run_final(arg: str, ctx: SlashCommandContext) -> None:
-    ctx.config.skip_final_llm = False
-    ctx.output("Final LLM synthesis re-enabled.", "success")
+def _cmd_finalgen(arg: str, ctx: SlashCommandContext) -> None:
+    sub = arg.strip().lower()
+    if sub == "on":
+        ctx.config.skip_final_llm = False
+        ctx.output("Final LLM synthesis enabled - skill output will be synthesised by the LLM.", "success")
+    elif sub == "off":
+        ctx.config.skip_final_llm = True
+        ctx.output("Final LLM synthesis disabled - skill output will be returned directly.", "success")
+    else:
+        state = "off" if ctx.config.skip_final_llm else "on"
+        ctx.output(f"Usage: /finalgen <on|off>  |  current: {state}", "dim")
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -303,6 +316,209 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output(f"Error rebuilding skills catalog: {exc}", "error")
 
 
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_recall(arg: str, ctx: SlashCommandContext) -> None:
+    sc = ctx.session_context
+    if sc is None:
+        ctx.output("No session context available in this mode.", "error")
+        return
+
+    n = sc.turn_count()
+    if n == 0:
+        ctx.output("Session context is empty - no skill outputs stored yet.", "dim")
+        return
+
+    ctx.output(f"Session context: {n} turn(s) stored", "info")
+    for t in sc._turns:
+        ctx.output(f"  Turn {t['turn']}: {t['user_prompt'][:80]}", "item")
+        for o in t["skill_outputs"]:
+            skill   = o.get("skill", "?")
+            summary = o.get("summary", "")
+            url     = o.get("url", "")
+            extra   = f"  url: {url}" if url else ""
+            ctx.output(f"    [{skill}] {summary}{extra}", "dim")
+            for r in o.get("results", []):
+                ctx.output(f"      · {r.get('url', '')}  {r.get('title', '')[:60]}", "dim")
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_host(arg: str, ctx: SlashCommandContext) -> None:
+    from ollama_client import configure_host, get_active_host, list_ollama_models
+
+    if not arg:
+        ctx.output(
+            f"Usage: /host <hostname|url|local> [api-key]  |  current: {get_active_host()}",
+            "dim",
+        )
+        return
+
+    parts     = arg.split(None, 1)
+    raw       = parts[0].strip()
+    api_key   = parts[1].strip() if len(parts) > 1 else None
+
+    # Resolve well-known aliases first, then treat bare hostnames / IPs
+    # (anything without a scheme) as Ollama servers on the default port.
+    url = _HOST_ALIASES.get(raw.lower(), raw)
+    if "://" not in url:
+        url = f"http://{url}:11434"
+
+    old_host = get_active_host()
+
+    try:
+        configure_host(url, api_key)
+        models = list_ollama_models()
+        ctx.clear_history()
+        ctx.output(f"Host switched: {old_host} \u2192 {url}", "success")
+        if models:
+            ctx.output(f"  {len(models)} model(s): {', '.join(models)}", "item")
+        ctx.output("(conversation history cleared)", "dim")
+    except Exception as exc:
+        configure_host(old_host)
+        ctx.output(f"Cannot reach '{url}': {exc}", "error")
+        ctx.output(f"Still using: {old_host}", "dim")
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
+    import subprocess
+    import sys
+    from pathlib import Path
+    from ollama_client import get_active_api_key, get_active_host
+
+    test_prompts_dir = Path(__file__).resolve().parent.parent / "controldata" / "test_prompts"
+
+    if not arg:
+        ctx.output(
+            "Usage: /test <prompts-file>  (filename from controldata/test_prompts/ or full path)",
+            "dim",
+        )
+        if test_prompts_dir.exists():
+            files = sorted(test_prompts_dir.glob("*.json"))
+            if files:
+                ctx.output("Available files:", "info")
+                for f in files:
+                    ctx.output(f"  {f.name}", "item")
+        return
+
+    candidate = Path(arg)
+    if not candidate.is_absolute():
+        candidate = test_prompts_dir / arg
+        if not candidate.suffix:
+            candidate = candidate.with_suffix(".json")
+
+    if not candidate.exists():
+        ctx.output(f"Prompts file not found: {candidate}", "error")
+        return
+
+    wrapper = Path(__file__).resolve().parent.parent / "testcode" / "test_wrapper.py"
+    cmd = [
+        sys.executable, str(wrapper),
+        "--prompts-file", str(candidate),
+        "--model", ctx.config.resolved_model,
+    ]
+    active_host = get_active_host()
+    if "localhost" not in active_host and "127.0.0.1" not in active_host:
+        cmd += ["--ollama-host", active_host]
+    active_key = get_active_api_key()
+    if active_key:
+        cmd += ["--ollama-api-key", active_key]
+
+    ctx.output(f"Running test suite: {candidate.name} …", "info")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+        )
+        for line in proc.stdout:
+            ctx.output(line.rstrip(), "dim")
+        proc.wait()
+        if proc.returncode == 0:
+            ctx.output("Test suite completed.", "success")
+        else:
+            ctx.output(f"Test suite exited with code {proc.returncode}.", "error")
+    except Exception as exc:
+        ctx.output(f"Error running test wrapper: {exc}", "error")
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_sandbox(arg: str, ctx: SlashCommandContext) -> None:
+    try:
+        from skills.CodeExecute.code_execute_skill import get_sandbox_enabled, set_sandbox_enabled
+    except ImportError:
+        ctx.output("CodeExecute skill not available.", "error")
+        return
+
+    sub = arg.strip().lower()
+    if sub == "on":
+        set_sandbox_enabled(True)
+        ctx.output("Python sandbox enabled — imports restricted to the safe whitelist.", "success")
+    elif sub == "off":
+        set_sandbox_enabled(False)
+        ctx.output("Python sandbox disabled — code snippets run with full Python access.", "success")
+        ctx.output("Warning: /sandbox off allows unrestricted code execution. Re-enable with /sandbox on.", "dim")
+    else:
+        state = "on" if get_sandbox_enabled() else "off"
+        ctx.output(f"Usage: /sandbox <on|off>  |  current: {state}", "dim")
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
+    import re
+    import shutil
+    from datetime import date
+    from datetime import timedelta
+    from workspace_utils import get_logs_dir
+
+    if not arg.strip():
+        ctx.output("Usage: /deletelogs <days>  |  delete log date-folders older than N days", "dim")
+        return
+
+    try:
+        days = int(arg.strip())
+    except ValueError:
+        ctx.output(f"Invalid value '{arg}' - must be an integer number of days.", "error")
+        return
+
+    if days < 1:
+        ctx.output("Days must be at least 1.", "error")
+        return
+
+    log_dir    = get_logs_dir()
+    cutoff     = date.today() - timedelta(days=days)
+    date_re    = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    deleted    = []
+    errors     = []
+
+    for folder in sorted(log_dir.iterdir()):
+        if not folder.is_dir() or not date_re.match(folder.name):
+            continue
+        try:
+            folder_date = date.fromisoformat(folder.name)
+        except ValueError:
+            continue
+        if folder_date < cutoff:
+            try:
+                shutil.rmtree(folder)
+                deleted.append(folder.name)
+            except Exception as exc:
+                errors.append(f"{folder.name}: {exc}")
+
+    if deleted:
+        ctx.output(f"Deleted {len(deleted)} log folder(s): {', '.join(deleted)}", "success")
+    else:
+        ctx.output(f"No log date-folders older than {days} day(s) found.", "dim")
+    for err in errors:
+        ctx.output(f"Error deleting {err}", "error")
+
+
 # ====================================================================================================
 # MARK: REGISTRY
 # ====================================================================================================
@@ -311,13 +527,17 @@ _REGISTRY: dict[str, Callable] = {
     "/exit":          _cmd_exit,
     "/models":        _cmd_models,
     "/model":         _cmd_model,
+    "/host":          _cmd_host,
     "/ctx":           _cmd_ctx,
     "/timeout":       _cmd_timeout,
     "/stopmodel":     _cmd_stopmodel,
     "/clearmemory":   _cmd_clearmemory,
     "/reskill":       _cmd_reskills,
-    "/skip-final":    _cmd_skip_final,
-    "/run-final":     _cmd_run_final,
+    "/finalgen":      _cmd_finalgen,
+    "/sandbox":       _cmd_sandbox,
+    "/deletelogs":    _cmd_deletelogs,
+    "/test":          _cmd_test,
+    "/recall":        _cmd_recall,
 }
 
 _DESCRIPTIONS: dict[str, str] = {
@@ -325,11 +545,15 @@ _DESCRIPTIONS: dict[str, str] = {
     "/exit":          "Exit dashboard mode",
     "/models":        "List installed Ollama models",
     "/model":         "<name>  Switch active model for all subsequent runs",
+    "/host":          "<hostname|url|local> [api-key]  Switch active Ollama host (LAN, cloud, or local)",
     "/ctx":           "<tokens>  Set context window size (e.g. /ctx 32768)",
     "/timeout":       "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
     "/stopmodel":     "[name]  Unload a running model from VRAM (defaults to active model)",
     "/clearmemory":   "Delete the memory store file, starting with a blank memory next session",
     "/reskill":       "Rebuild the skills catalog from skill.md files and hot-reload into session",
-    "/skip-final":    "Skip the final LLM synthesis call; return skill output directly",
-    "/run-final":     "Re-enable the final LLM synthesis call (default state)",
+    "/finalgen":      "<on|off>  Enable/disable final LLM synthesis of skill output (default: on)",
+    "/sandbox":       "<on|off>  Enable/disable Python code execution sandbox (import whitelist + blocked builtins)",
+    "/deletelogs":    "<days>  Delete log date-folders older than N days (e.g. /deletelogs 10)",
+    "/test":          "<prompts-file>  Run test_wrapper on a prompts file; streams results live",
+    "/recall":        "Show a summary of prior skill outputs stored in this session's context",
 }

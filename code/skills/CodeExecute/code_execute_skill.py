@@ -31,6 +31,19 @@ import threading
 # ====================================================================================================
 _EXECUTION_TIMEOUT_S = 15
 
+# Runtime flag: when False the allowed-import whitelist and blocked-builtins list are bypassed.
+# Toggle via /sandbox on|off slash command.
+_sandbox_enabled: bool = True
+
+
+def get_sandbox_enabled() -> bool:
+    return _sandbox_enabled
+
+
+def set_sandbox_enabled(value: bool) -> None:
+    global _sandbox_enabled
+    _sandbox_enabled = value
+
 # Modules the sandboxed code is permitted to import.
 _ALLOWED_MODULES = frozenset({
     "math", "cmath", "decimal", "fractions", "statistics",
@@ -98,15 +111,23 @@ def run_python_snippet(code: str) -> str:
     if not code:
         return "Error: No code provided to run_python_snippet."
 
+    # LLMs sometimes JSON-double-escape quote characters, producing literal \" or \'
+    # in the code string (e.g. f\"Error: {e}\").  That is a Python syntax error because
+    # \ is treated as a line-continuation character.  Unescape them now so exec() receives
+    # valid source.
+    code = code.replace('\\"', '"').replace("\\'", "'")
+
     stdout_buf   = io.StringIO()
     result_slot: list[str] = []
     error_slot:  list[str] = []
+
+    sandbox_globals = _make_restricted_globals() if _sandbox_enabled else {}
 
     def _run() -> None:
         old_stdout = sys.stdout
         sys.stdout = stdout_buf
         try:
-            exec(code, _make_restricted_globals())  # noqa: S102
+            exec(code, sandbox_globals)  # noqa: S102
             result_slot.append(stdout_buf.getvalue())
         except Exception as exc:  # noqa: BLE001
             error_slot.append(f"Error: {exc}")

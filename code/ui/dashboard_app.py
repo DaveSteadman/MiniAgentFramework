@@ -6,7 +6,9 @@
 # Layout (example 120×40 terminal):
 #
 #   ┌─ Ollama ─────────────────────────────────────────────────────────────────────┐  H_TOP rows
-#   │  ollama ps table                                                             │
+#   │  host: http://localhost:11434                                                │
+#   │  NAME            SIZE          PROCESSOR     UNTIL                          │
+#   │  gpt-oss:20b     16.4 GB       100% GPU      2026-...                       │
 #   ├─ Timeline ──────┬─ [Log]  Chat ─────────────────────────────────────────────┤  fills middle
 #   │  HH:MM tasks    │  Tab cycles Log ↔ Chat                                    │
 #   │  ►HH:MM  NOW    │  Up/Down/PgUp/PgDn scrolls active tab                     │
@@ -53,7 +55,7 @@ from . import colors
 # MARK: LAYOUT CONSTANTS
 # ====================================================================================================
 W_TIMELINE = 20    # left timeline column total width, including its border
-H_TOP      = 4     # ollama ps bar total height, including border (2 inner content rows)
+H_TOP      = 5     # ollama ps bar total height, including border (3 inner content rows)
 H_BOTTOM   = 3     # chat input bar total height, including border
 FRAME_S    = 0.02  # target frame interval (~50 fps)
 
@@ -67,12 +69,13 @@ class DashboardApp:
     TAB_CHAT = 'Chat'
 
     # ----------------------------------------------------------------------------------------------------
-    def __init__(self, tasks=None, last_run=None, on_submit=None, shutdown_event=None, llm_lock=None):
+    def __init__(self, tasks=None, last_run=None, on_submit=None, shutdown_event=None, llm_lock=None, chat_history_entries=None):
         """
-        tasks          list of enabled task dicts from task_schedule.json
-        last_run       mutable dict {task_name: datetime|None} shared with the scheduler thread
-        on_submit      callable(text: str) invoked when the user presses Enter in the input bar
-        shutdown_event threading.Event; when set the UI loop exits cleanly on the next frame
+        tasks                list of enabled task dicts from task_schedule.json
+        last_run             mutable dict {task_name: datetime|None} shared with the scheduler thread
+        on_submit            callable(text: str) invoked when the user presses Enter in the input bar
+        shutdown_event       threading.Event; when set the UI loop exits cleanly on the next frame
+        chat_history_entries mutable list[str] of prior inputs (oldest-first); shared with caller
         """
         self.tasks          = tasks or []
         self.last_run       = last_run or {}
@@ -83,7 +86,7 @@ class DashboardApp:
         self.ollama_log = ScrollLog(max_lines=50)
         self.chat_log   = ScrollLog(max_lines=2000)
         self.runlog_log = ScrollLog(max_lines=2000)
-        self.input_edit = TextEdit(prompt='> ')
+        self.input_edit = TextEdit(prompt='> ', history=chat_history_entries)
         self._timeline  = TimelineWidget()
         self._active_tab = self.TAB_LOG        # start on Log so scheduler output is visible
 
@@ -165,8 +168,19 @@ class DashboardApp:
             return
 
         active_log = self.runlog_log if self._active_tab == self.TAB_LOG else self.chat_log
-        if key == K_UP:   active_log.scroll_up();     return
-        if key == K_DOWN: active_log.scroll_down();   return
+        if key == K_UP:
+            # In Chat tab K_UP/K_DOWN cycle the input-bar history; in Log tab they scroll.
+            if self._active_tab == self.TAB_CHAT:
+                self.input_edit.handle_key(key)
+            else:
+                active_log.scroll_up()
+            return
+        if key == K_DOWN:
+            if self._active_tab == self.TAB_CHAT:
+                self.input_edit.handle_key(key)
+            else:
+                active_log.scroll_down()
+            return
         if key == K_PGUP: active_log.scroll_up(10);   return
         if key == K_PGDN: active_log.scroll_down(10); return
 

@@ -126,5 +126,7 @@ class SessionLogger:
 # MARK: HELPERS
 # ====================================================================================================
 def create_log_file_path(log_dir: Path) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return log_dir / f"run_{timestamp}.txt"
+    # Organise logs into YYYY-MM-DD dated subfolders to keep the logs root manageable.
+    now      = datetime.now()
+    date_dir = log_dir / now.strftime("%Y-%m-%d")
+    return date_dir / f"run_{now.strftime('%Y%m%d_%H%M%S')}.txt"

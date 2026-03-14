@@ -39,9 +39,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from ollama_client import get_ollama_ps_rows
+from chat_input import append_to_history as _append_chat_history
+from chat_input import load_history as _load_chat_history
+from ollama_client import get_active_host, get_ollama_ps_rows
 from orchestration import ConversationHistory
 from orchestration import OrchestratorConfig
+from orchestration import SessionContext
 from orchestration import orchestrate_prompt
 from runtime_logger import SessionLogger
 from runtime_logger import create_log_file_path
@@ -52,8 +55,10 @@ from slash_commands import SlashCommandContext
 from slash_commands import handle as handle_slash
 from ui import colors as ui_colors
 from ui.dashboard_app import DashboardApp
+from workspace_utils import get_chatsessions_dir
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
+from workspace_utils import get_workspace_root
 
 
 # ====================================================================================================
@@ -88,11 +93,21 @@ def run_dashboard_mode(
     }
 
     chat_history = ConversationHistory(max_turns=_MAX_CHAT_HISTORY)
+    _dash_session_id = f"dashboard_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    chat_session = SessionContext(
+        session_id   = _dash_session_id,
+        persist_path = get_chatsessions_dir() / f"{_dash_session_id}.json",
+    )
 
     # ---------------------------------------------------------------------------
     # Chat-submit callback: called from the UI thread on each user submission.
     # ---------------------------------------------------------------------------
     def on_chat_submit(text: str) -> None:
+        # Persist to history file and keep the in-memory list in sync for the input bar.
+        _append_chat_history(text)
+        if not _chat_history or _chat_history[-1] != text:
+            _chat_history.append(text)
+
         app.add_chat_line(f"You  \u25b6 {text}", ui_colors.INPUT)
         app.set_active_tab(DashboardApp.TAB_CHAT)
 
@@ -110,12 +125,14 @@ def run_dashboard_mode(
 
         def _dash_clear_history() -> None:
             chat_history.clear()
+            chat_session.clear()
 
         dash_ctx = SlashCommandContext(
-            config        = config,
-            output        = _dash_output,
-            clear_history = _dash_clear_history,
-            request_exit  = shutdown.set,
+            config         = config,
+            output         = _dash_output,
+            clear_history  = _dash_clear_history,
+            request_exit   = shutdown.set,
+            session_context= chat_session,
         )
         if handle_slash(text, dash_ctx):
             return
@@ -142,6 +159,7 @@ def run_dashboard_mode(
                     config=config,
                     logger=run_logger,
                     conversation_history=hist,
+                    session_context=chat_session,
                     quiet=True,
                 )
 
@@ -162,12 +180,14 @@ def run_dashboard_mode(
         threading.Thread(target=_run, daemon=True, name="chat-dispatch").start()
 
     # ---------------------------------------------------------------------------
+    _chat_history = _load_chat_history()
     app = DashboardApp(
         tasks=enabled_tasks,
         last_run=last_run,
         on_submit=on_chat_submit,
         shutdown_event=shutdown,
         llm_lock=llm_lock,
+        chat_history_entries=_chat_history,
     )
 
     # ---- Background: ollama ps ----
@@ -177,14 +197,14 @@ def run_dashboard_mode(
                 rows = get_ollama_ps_rows()
                 if rows:
                     w_name = max((len(r.get('name', '')) for r in rows), default=10)
-                    header = f"{'NAME':<{w_name}}  SIZE        PROCESSOR   UNTIL"
-                    lines  = [header]
+                    lines  = [f"  host: {get_active_host()}"]
+                    lines.append(f"  {'NAME':<{w_name}}  {'SIZE':<12}  {'PROCESSOR':<12}  UNTIL")
                     for row in rows:
                         n = (row.get('name')      or '').ljust(w_name)
-                        s = (row.get('size')      or '').ljust(10)
-                        p = (row.get('processor') or '').ljust(10)
+                        s = (row.get('size')      or '').ljust(12)
+                        p = (row.get('processor') or '').ljust(12)
                         u =  row.get('until')     or ''
-                        lines.append(f"{n}  {s}  {p}  {u}")
+                        lines.append(f"  {n}  {s}  {p}  {u}")
                     app.set_ollama_lines(lines)
                 else:
                     app.set_ollama_lines(["  (no models currently loaded)"])
@@ -201,7 +221,7 @@ def run_dashboard_mode(
         pos = 0
         while not shutdown.is_set():
             try:
-                log_files = sorted(_LOG_DIR.glob("run_*.txt"))
+                log_files = sorted(_LOG_DIR.glob("*/run_*.txt"))
                 if log_files:
                     latest = log_files[-1]
                     if latest != watched:
@@ -283,10 +303,15 @@ def run_dashboard_mode(
 
                 try:
                     task_hist  = ConversationHistory()
+                    task_ctx   = SessionContext(
+                        session_id   = f"task_{name}",
+                        persist_path = get_chatsessions_dir() / f"task_{name}.json",
+                    )
                     sched_ctx  = SlashCommandContext(
-                        config        = config,
-                        output        = lambda text, level='info': task_logger.log_file_only(f"[slash/{level}] {text}"),
-                        clear_history = task_hist.clear,
+                        config         = config,
+                        output         = lambda text, level='info': task_logger.log_file_only(f"[slash/{level}] {text}"),
+                        clear_history  = task_hist.clear,
+                        session_context= task_ctx,
                     )
                     for step_index, prompt_text in enumerate(prompts, start=1):
                         if shutdown.is_set():
@@ -304,6 +329,7 @@ def run_dashboard_mode(
                             config=config,
                             logger=task_logger,
                             conversation_history=hist,
+                            session_context=task_ctx,
                             quiet=True,
                         )
                         task_hist.add(prompt_text, response)

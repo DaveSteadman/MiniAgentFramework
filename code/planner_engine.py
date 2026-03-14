@@ -279,15 +279,41 @@ def parse_execution_plan(plan_dict: dict) -> ExecutionPlan:
 
 # ----------------------------------------------------------------------------------------------------
 # ----------------------------------------------------------------------------------------------------
-_FALLBACK_SYSTEM_KEYWORDS = frozenset({
-    "system", "disk", "ram", "memory", "cpu", "storage", "space", "available",
-    "free", "os", "operating", "platform", "python", "ollama", "runtime",
-    "environment", "machine", "version", "health", "spec", "stat", "usage",
-})
-_FALLBACK_FILE_KEYWORDS = frozenset({
-    "file", "write", "read", "append", "create", "save", "store",
-    "csv", "txt", "open", "directory", "folder", "path",
-})
+# Deterministic skill-router used as a fallback when the LLM planner cannot produce a valid plan.
+# Each entry maps a module filename fragment to a frozenset of trigger keywords extracted from the
+# user prompt.  Evaluated in order; the first match with sufficient keyword overlap wins.
+# These lists are heuristic only - they are NOT a source of truth for skill capabilities.
+# The authoritative source remains the skills_summary catalog (skills_summary.md).
+_SKILL_ROUTING: list[tuple[str, frozenset[str]]] = [
+    ("system_info_skill.py",  frozenset({
+        "system", "disk", "ram", "memory", "cpu", "storage", "space", "available",
+        "free", "os", "operating", "platform", "python", "ollama", "runtime",
+        "environment", "machine", "version", "health", "spec", "stat", "usage",
+    })),
+    ("code_execute_skill.py", frozenset({
+        "calculate", "compute", "print", "list", "generate", "count", "sum",
+        "fibonacci", "prime", "factorial", "sequence", "matrix", "sort",
+        "average", "mean", "median", "mode", "convert", "binary", "hex",
+        "octal", "table", "triangle", "palindrome", "power", "square", "cube",
+        "multiply", "divide", "percentage", "compound", "interest", "collatz",
+        "output", "number", "numbers", "integer", "integers",
+    })),
+    ("file_access_skill.py",  frozenset({
+        "file", "write", "read", "append", "create", "save", "store",
+        "csv", "txt", "open", "directory", "folder", "path",
+    })),
+    ("datetime_skill.py",     frozenset({
+        "time", "date", "today", "yesterday", "now", "when", "clock", "current",
+    })),
+]
+
+# Skills whose raw text output can be piped directly into a write_text_file call when the
+# prompt mentions a file path.  Only used by the deterministic fallback planner.
+_WRITE_SKILLS = frozenset({"system_info_skill.py", "code_execute_skill.py"})
+
+# Lookup: fragment → table index (used for ordering).
+_SKILL_PRIORITY = {frag: i for i, (frag, _) in enumerate(_SKILL_ROUTING)}
+
 _PROMPT_PATH_RE = re.compile(
     r"(?<![\w./-])((?:\./)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:csv|txt|md|json|jsonl|log))(?![\w./-])",
     re.IGNORECASE,
@@ -309,123 +335,101 @@ def _extract_path_from_prompt(user_prompt: str) -> str:
     return path_match.group(1).strip().strip('"').strip("'")
 
 
+def _select_skill_fragments(prompt_words: set[str], target_path: str) -> list[str]:
+    """Score each skill by keyword overlap; return an ordered list of fragment names to use."""
+    hits = {frag for frag, kw in _SKILL_ROUTING if prompt_words & kw}
+
+    if not hits:
+        return ["datetime_skill.py"]
+
+    # datetime is the last-resort default; don't combine it with real skills.
+    if len(hits) > 1:
+        hits.discard("datetime_skill.py")
+
+    # A compute skill + file skill only makes sense when there is a concrete target path.
+    if "file_access_skill.py" in hits and hits & _WRITE_SKILLS and not target_path:
+        hits.discard("file_access_skill.py")
+
+    # Cap at two: the highest-priority compute skill plus optionally the file skill.
+    ordered = sorted(hits, key=lambda f: _SKILL_PRIORITY.get(f, 99))
+    if len(ordered) > 2:
+        compute = [f for f in ordered if f != "file_access_skill.py"][:1]
+        writer  = ["file_access_skill.py"] if "file_access_skill.py" in ordered else []
+        ordered = compute + writer
+
+    return ordered
+
+
+def _make_fallback_call(
+    order: int, fragment: str, module: str,
+    user_prompt: str, target_path: str, is_chained: bool,
+) -> "PythonCall":
+    """Return a PythonCall for the given skill fragment, handling chained-write semantics."""
+    if fragment == "system_info_skill.py":
+        return PythonCall(order=order, module=module, function="get_system_info_string", arguments={})
+    if fragment == "code_execute_skill.py":
+        return PythonCall(order=order, module=module, function="run_python_snippet",
+                          arguments={"code": "# LLM will supply code"})
+    if fragment == "file_access_skill.py":
+        if is_chained and target_path:
+            return PythonCall(order=order, module=module, function="write_text_file",
+                              arguments={"file_path": target_path, "text": "{{output_of_previous_call}}"})
+        return PythonCall(order=order, module=module, function="execute_file_instruction",
+                          arguments={"user_prompt": user_prompt})
+    # datetime_skill.py and any unknown fragment
+    return PythonCall(order=order, module=module, function="get_datetime_data", arguments={})
+
+
+def _fallback_template(fragments: list[str]) -> str:
+    has_code   = "code_execute_skill.py"  in fragments
+    has_system = "system_info_skill.py"   in fragments
+    has_file   = "file_access_skill.py"   in fragments
+    if (has_code or has_system) and has_file:
+        return "Compute the requested content, write it to the file, then confirm to the user."
+    if has_code:
+        return "Write and execute Python code to fulfil the user request. Return the code output as the answer."
+    if has_system:
+        return "Use the system info output to answer the user question directly."
+    if has_file:
+        return "Report the result of the file operation to the user."
+    return "Return only the requested field from the date/time data."
+
+
 def build_fallback_plan(user_prompt: str, skills_payload: dict) -> ExecutionPlan:
-    skills       = skills_payload.get("skills", [])
-    prompt_lower = user_prompt.lower()
-    prompt_words = set(prompt_lower.replace("?", " ").replace(",", " ").split())
-    target_path  = _extract_path_from_prompt(user_prompt)
+    skills      = skills_payload.get("skills", [])
+    prompt_words = set(re.sub(r"[^a-z0-9 ]", " ", user_prompt.lower()).split())
+    target_path = _extract_path_from_prompt(user_prompt)
 
-    # Pick skill based on keyword presence in the user prompt.
-    has_system_keyword = bool(prompt_words & _FALLBACK_SYSTEM_KEYWORDS)
-    has_file_keyword   = bool(prompt_words & _FALLBACK_FILE_KEYWORDS)
+    fragments = _select_skill_fragments(prompt_words, target_path)
 
-    if has_system_keyword and has_file_keyword and target_path:
-        system_skill = _skill_by_module_fragment(skills, "system_info_skill.py")
-        file_skill   = _skill_by_module_fragment(skills, "file_access_skill.py")
-        if system_skill is not None and file_skill is not None:
-            system_module = str(system_skill.get("module", ""))
-            file_module   = str(file_skill.get("module", ""))
-            return ExecutionPlan(
-                user_prompt=user_prompt,
-                selected_skills=[
-                    SelectedSkill(
-                        skill_name=str(system_skill.get("skill_name", "SystemInfo Skill")),
-                        relative_path=str(system_skill.get("relative_path", "")),
-                        module=system_module,
-                        reason="Fallback: system/resource keywords detected in prompt.",
-                    ),
-                    SelectedSkill(
-                        skill_name=str(file_skill.get("skill_name", "FileAccess Skill")),
-                        relative_path=str(file_skill.get("relative_path", "")),
-                        module=file_module,
-                        reason="Fallback: file output keywords detected in prompt.",
-                    ),
-                ],
-                python_calls=[
-                    PythonCall(order=1, module=system_module, function="get_system_info_string", arguments={}),
-                    PythonCall(
-                        order=2,
-                        module=file_module,
-                        function="write_text_file",
-                        arguments={
-                            "file_path": target_path,
-                            "text": "{{output_of_previous_call}}",
-                        },
-                    ),
-                ],
-                final_prompt_template="Report the file write result to the user using the FileAccess output.",
-            )
+    selected_skills: list[SelectedSkill] = []
+    python_calls:    list[PythonCall]    = []
 
-    if has_system_keyword and not has_file_keyword:
-        skill = _skill_by_module_fragment(skills, "system_info_skill.py")
-        if skill is not None:
-            module = str(skill.get("module", ""))
-            return ExecutionPlan(
-                user_prompt=user_prompt,
-                selected_skills=[
-                    SelectedSkill(
-                        skill_name=str(skill.get("skill_name", "SystemInfo Skill")),
-                        relative_path=str(skill.get("relative_path", "")),
-                        module=module,
-                        reason="Fallback: system/resource keywords detected in prompt.",
-                    )
-                ],
-                python_calls=[
-                    PythonCall(order=1, module=module, function="get_system_info_string", arguments={})
-                ],
-                final_prompt_template="Use the system info output to answer the user question directly.",
-            )
+    for idx, frag in enumerate(fragments, start=1):
+        skill = _skill_by_module_fragment(skills, frag)
+        if skill is None:
+            continue
+        module     = str(skill.get("module", ""))
+        is_chained = (frag == "file_access_skill.py") and (idx > 1) and bool(target_path)
+        selected_skills.append(SelectedSkill(
+            skill_name=str(skill.get("skill_name", frag)),
+            relative_path=str(skill.get("relative_path", "")),
+            module=module,
+            reason=f"Fallback: {frag.replace('_skill.py', '')} selected by keyword match.",
+        ))
+        python_calls.append(_make_fallback_call(idx, frag, module, user_prompt, target_path, is_chained))
 
-    if has_file_keyword:
-        skill = _skill_by_module_fragment(skills, "file_access_skill.py")
-        if skill is not None:
-            module = str(skill.get("module", ""))
-            return ExecutionPlan(
-                user_prompt=user_prompt,
-                selected_skills=[
-                    SelectedSkill(
-                        skill_name=str(skill.get("skill_name", "FileAccess Skill")),
-                        relative_path=str(skill.get("relative_path", "")),
-                        module=module,
-                        reason="Fallback: file operation keywords detected in prompt.",
-                    )
-                ],
-                python_calls=[
-                    PythonCall(
-                        order=1,
-                        module=module,
-                        function="execute_file_instruction",
-                        arguments={"user_prompt": user_prompt},
-                    )
-                ],
-                final_prompt_template="Report the result of the file operation to the user.",
-            )
-
-    # Default: DateTime (temporal questions or when no keywords matched).
-    skill = _skill_by_module_fragment(skills, "datetime_skill.py")
-    if skill is not None:
-        module = str(skill.get("module", ""))
+    if not python_calls:
         return ExecutionPlan(
-            user_prompt=user_prompt,
-            selected_skills=[
-                SelectedSkill(
-                    skill_name=str(skill.get("skill_name", "DateTime Skill")),
-                    relative_path=str(skill.get("relative_path", "")),
-                    module=module,
-                    reason="Fallback: default DateTime skill.",
-                )
-            ],
-            python_calls=[
-                PythonCall(order=1, module=module, function="get_datetime_data", arguments={})
-            ],
-            final_prompt_template="Return only the requested field from the date/time data.",
+            user_prompt=user_prompt, selected_skills=[], python_calls=[],
+            final_prompt_template="No skills available in fallback plan.",
         )
 
     return ExecutionPlan(
         user_prompt=user_prompt,
-        selected_skills=[],
-        python_calls=[],
-        final_prompt_template="No skills selected in fallback plan.",
+        selected_skills=selected_skills,
+        python_calls=python_calls,
+        final_prompt_template=_fallback_template(fragments),
     )
 
 

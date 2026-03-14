@@ -96,6 +96,7 @@ Single JSON payload for orchestration planning.
         "recall_relevant_memories(...)",
         "recall_relevant_memories(user_prompt: str, limit: int = 5, min_score: float = 0.25)",
         "store_prompt_memories(\"Our workspace path is c:/Util/GithubRepos/MiniAgentFramework\")",
+        "store_prompt_memories(\"Our workspace path is c:/Util/NewLocation\")",
         "store_prompt_memories(...)",
         "store_prompt_memories(user_prompt: str)"
       ],
@@ -113,9 +114,9 @@ Single JSON payload for orchestration planning.
       ],
       "outputs": [
         "`extract_environment_facts(...)` returns a list of candidate environment-specific facts.",
-        "`store_prompt_memories(...)` returns a status string describing what was stored.",
-        "`recall_relevant_memories(...)` returns a formatted, ranked memory recall string.",
-        "`get_memory_store_text()` returns the full text content of the memory store file."
+        "`store_prompt_memories(...)` returns a status string - e.g. \"Stored 1 new memory fact(s).\" or \"Updated 1 existing memory fact(s).\"",
+        "`recall_relevant_memories(...)` returns a formatted, ranked memory recall string with categories.",
+        "`get_memory_store_text()` returns the full pretty-printed JSON of the memory store."
       ]
     },
     {
@@ -136,12 +137,12 @@ Single JSON payload for orchestration planning.
       ],
       "outputs": [
         "`page_type` is one of:",
-        "`\"article\"` - substantial prose content (\u2265 300 words, \u2264 4 links per 100 words)",
-        "`\"index\"` - listing/aggregation page (< 150 words, or \u2265 7 links per 100 words)",
-        "`\"mixed\"` - some content plus significant navigation (common on news section pages)",
+        "`\"article\"` \u2014 substantial prose content (\u2265 300 words, \u2264 4 links per 100 words)",
+        "`\"index\"` \u2014 listing/aggregation page (< 150 words, or \u2265 7 links per 100 words)",
+        "`\"mixed\"` \u2014 some content plus significant navigation (common on news section pages)",
         "`word_count`: prose words extracted after noise removal and deduplication",
         "`article_links`: sorted by `topic` match score when `topic` provided; otherwise page order",
-        "On failure: `{\"error\": \"description of what went wrong\"}` - never raises"
+        "On failure: `{\"error\": \"description of what went wrong\"}` \u2014 never raises"
       ]
     },
     {
@@ -197,7 +198,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "WebMine Skill",
       "relative_path": "code/skills/WebMine/skill.md",
-      "purpose": "STAGE 1 - MINING ONLY. Fetch URLs or run DuckDuckGo searches and save raw content as .md files in 01-Mine. Does not analyse, summarise, or produce reports. QUERY RULES: Use natural topic + source name (e.g. 'UK news March 2026 BBC', 'French news March 2026 Le Monde'). Use month name + year for recency - NOT ISO dates or day numbers ('UK news March 11 2026' and 'BBC News 2026-03-11' both return no results). NEVER use site: operators. When a prompt contains a date like 2026-03-11, convert it to 'March 2026' for the query string.",
+      "purpose": "Mine web content (direct URLs or DuckDuckGo searches) and save raw results as structured",
       "module": "code/skills/WebMine/web_mine_skill.py",
       "functions": [
         "mine_search(\"electric vehicle battery 2026\", \"CarIndustry\", max_results=5)",
@@ -241,7 +242,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "WebResearchAnalysis Skill",
       "relative_path": "code/skills/WebResearchAnalysis/skill.md",
-      "purpose": "**STAGE 2 - Analysis only.**",
+      "purpose": "Read already-mined content from the 01-Mine research stage and produce a structured daily",
       "module": "code/skills/WebResearchAnalysis/web_research_analysis_skill.py",
       "functions": [
         "create_daily_summary(domain, date, topic, model, num_ctx)",

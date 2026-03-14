@@ -99,6 +99,8 @@ Verbose orchestration detail (planner prompts, plan JSON, skill outputs, validat
 
 Conversation history is passed as context for each subsequent turn, capped at the last 10 turns to prevent context overflow.
 
+In console chat mode the prompt supports persistent keyboard history (up/down arrows) backed by `controldata/chathistory.json`, shared across all sessions.
+
 Slash commands (see [Slash Commands](#slash-commands) below) are available at the prompt to change model or context size without restarting.
 
 | Option | Default | Description |
@@ -205,13 +207,30 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/exit` | Exit dashboard mode |
 | `/models` | List installed Ollama models; the active model is marked with `►` |
 | `/model <name>` | Switch the active model for all subsequent runs (e.g. `/model 8b`). Accepts the same short aliases as `--model`. Clears conversation history. |
+| `/host <target> [api-key]` | Switch the active Ollama host without restarting. Clears conversation history. See [Host targeting](#host-targeting) below. |
 | `/ctx <tokens>` | Set the context window size for all subsequent runs (e.g. `/ctx 16384`). Accepts integers with optional commas or underscores. |
 | `/timeout <seconds>` | Set the LLM generation timeout (e.g. `/timeout 1800` for heavy analysis tasks). |
 | `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
 | `/clearmemory` | Delete the memory store file (`memory_store.json`), starting the next session with a blank memory. |
 | `/reskill` | Rebuild the skills catalog from `skill.md` files and hot-reload into the current session. |
-| `/skip-final` | Skip the final LLM synthesis call for all subsequent prompts; skill output is returned directly. Useful for pure data-collection steps (e.g. web mining) where no LLM summary is needed. |
-| `/run-final` | Re-enable the final LLM synthesis call (default state). |
+| `/finalgen <on\|off>` | Control the final LLM synthesis call. `off` returns skill output directly (useful for web mining or data-collection steps). Bare `/finalgen` shows the current state. |
+| `/sandbox <on\|off>` | Toggle the Python sandbox for `CodeExecute` skill. `on` (default) enforces the built-in allow-list; `off` removes restrictions (use with care). |
+| `/deletelogs <days>` | Delete log date-folders under `controldata/logs/` older than N days. Each folder is named `YYYY-MM-DD` and contains all runs from that day. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
+| `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. |
+
+### Host targeting
+
+`/host` accepts several forms, all equivalent in meaning:
+
+| Input | Resolves to |
+|---|---|
+| `/host local` | `http://localhost:11434` |
+| `/host MONTBLANC` | `http://MONTBLANC:11434` |
+| `/host 192.168.1.169` | `http://192.168.1.169:11434` |
+| `/host http://192.168.1.169:11434` | `http://192.168.1.169:11434` (unchanged) |
+| `/host https://api.ollama.com myapikey` | `https://api.ollama.com` with API key |
+
+Any bare hostname or IP address (no `://`) is automatically wrapped as `http://<name>:11434` — the standard Ollama default port. Full URLs are passed through unchanged, so custom ports and HTTPS cloud endpoints work too.
 
 New slash commands can be added in [code/slash_commands.py](code/slash_commands.py) by adding a handler function and registering it in `_REGISTRY` and `_DESCRIPTIONS`.
 
@@ -313,7 +332,7 @@ python .\code\system_check.py --num-ctx 4096
 
 | Path | Contents |
 |---|---|
-| `controldata/logs/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) - one file per run. |
+| `controldata/logs/YYYY-MM-DD/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) — one file per run, grouped into dated subfolders. |
 | `controldata/schedules/` | Schedule definition files (`*.json`) consumed by Scheduler and Dashboard modes. |
 | `controldata/test_prompts/` | Prompt suite JSON files used by the Test Wrapper. |
 | `controldata/test_results/` | Timestamped CSV results and analysis files produced by the Test Wrapper and Analyzer. |
