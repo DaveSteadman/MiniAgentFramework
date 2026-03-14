@@ -59,6 +59,22 @@ except ImportError:
 # MARK: CONSTANTS
 # ====================================================================================================
 _SPACE_RE = re.compile(r"\s+")
+_ISO_DATE_RE = re.compile(r"\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b")
+_MONTH_NAME_PATTERN = (
+    r"January|February|March|April|May|June|July|August|September|October|November|December"
+)
+_DAY_MONTH_YEAR_RE = re.compile(
+    rf"\b(\d{{1,2}})\s+({_MONTH_NAME_PATTERN})\s+(\d{{4}})\b",
+    re.IGNORECASE,
+)
+_MONTH_DAY_YEAR_RE = re.compile(
+    rf"\b({_MONTH_NAME_PATTERN})\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,)?\s+(\d{{4}})\b",
+    re.IGNORECASE,
+)
+_REPEATED_MONTH_YEAR_RE = re.compile(
+    rf"\b({_MONTH_NAME_PATTERN}\s+\d{{4}})(?:\s+\1)+\b",
+    re.IGNORECASE,
+)
 
 # Domains to never fetch in a research context (social/media-hosting/platform sites
 # that rarely contain mineable long-form articles and frequently pollute search results).
@@ -85,6 +101,43 @@ _TAG_RE      = re.compile(r"<[^>]+>")
 
 MAX_WORDS_CAP    = 4000
 DEFAULT_TIMEOUT  = 15
+
+
+# ----------------------------------------------------------------------------------------------------
+def _to_int(value, default: int) -> int:
+    """Safely coerce *value* to int; return *default* if conversion fails.
+
+    LLMs occasionally pass keyword strings (e.g. 'UK') for numeric parameters.
+    Using this instead of bare int() prevents hard crashes on bad model output.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+# ----------------------------------------------------------------------------------------------------
+def _normalize_ddg_query(query: str) -> str:
+    """Rewrite brittle date formats into the month/year style DDG handles more reliably.
+
+    The planner occasionally passes ISO dates (for example after resolving {today}) even
+    though the WebMine skill guidance says DDG works better with human-readable month/year
+    queries. This normalizer converts those formats defensively at runtime.
+    """
+    def _replace_iso(match: re.Match) -> str:
+        year  = int(match.group(1))
+        month = int(match.group(2))
+        try:
+            return _date(year, month, 1).strftime("%B %Y")
+        except ValueError:
+            return match.group(0)
+
+    normalized = query.strip()
+    normalized = _ISO_DATE_RE.sub(_replace_iso, normalized)
+    normalized = _DAY_MONTH_YEAR_RE.sub(lambda m: f"{m.group(2).title()} {m.group(3)}", normalized)
+    normalized = _MONTH_DAY_YEAR_RE.sub(lambda m: f"{m.group(1).title()} {m.group(2)}", normalized)
+    normalized = _REPEATED_MONTH_YEAR_RE.sub(lambda m: m.group(1), normalized)
+    return _SPACE_RE.sub(" ", normalized).strip()
 
 
 # ====================================================================================================
@@ -192,10 +245,8 @@ def _ddg_search(query: str, max_results: int, timeout: int) -> list[dict]:
     encoded    = urllib.parse.quote_plus(query.strip())
     search_url = _DDG_URL.format(q=encoded)
     delay = random.uniform(2.0, 4.0)
-    print(f"[DDG] query={repr(query)}  url={search_url}  (sleeping {delay:.1f}s)")
     time.sleep(delay)
     html_text, _ = _fetch_html(search_url, timeout=float(timeout))
-    print(f"[DDG] response size: {len(html_text)} chars")
 
     results  = []
     anchors  = list(_ANCHOR_RE.finditer(html_text))
@@ -215,7 +266,6 @@ def _ddg_search(query: str, max_results: int, timeout: int) -> list[dict]:
         except Exception:
             continue
 
-    print(f"[DDG] {len(results)} result(s) returned")
     return results
 
 
@@ -535,8 +585,8 @@ def mine_search(
     if not domain or not domain.strip():
         return "Error: domain cannot be empty."
 
-    query       = _resolve_query_tokens(query.strip())
-    max_results = max(1, min(int(max_results), 10))
+    query       = _normalize_ddg_query(_resolve_query_tokens(query.strip()))
+    max_results = max(1, min(_to_int(max_results, 5), 10))
 
     try:
         results = _ddg_search(query, max_results=max_results, timeout=DEFAULT_TIMEOUT)
@@ -547,7 +597,7 @@ def mine_search(
         results = [{"rank": 0, "title": "No results", "url": "", "snippet": f"DuckDuckGo returned no results for: {query}"}]
 
     if fetch_content:
-        content_words = max(50, min(int(content_words), MAX_WORDS_CAP))
+        content_words = max(50, min(_to_int(content_words, 600), MAX_WORDS_CAP))
         for r in results:
             if not r.get("url"):
                 continue
@@ -611,12 +661,12 @@ def mine_search_deep(
     if not domain or not domain.strip():
         return "Error: domain cannot be empty."
 
-    query                   = _resolve_query_tokens(query.strip())
-    max_results             = max(1, min(int(max_results),              20))
-    max_articles_per_result = max(1, min(int(max_articles_per_result),   5))
-    min_words               = max(100, min(int(min_words),             800))
-    content_words           = max(200, min(int(content_words), MAX_WORDS_CAP))
-    target_articles         = max(1, min(int(target_articles),          20))
+    query                   = _normalize_ddg_query(_resolve_query_tokens(query.strip()))
+    max_results             = max(1, min(_to_int(max_results,              10), 20))
+    max_articles_per_result = max(1, min(_to_int(max_articles_per_result,   2),  5))
+    min_words               = max(100, min(_to_int(min_words,             250), 800))
+    content_words           = max(200, min(_to_int(content_words,         1500), MAX_WORDS_CAP))
+    target_articles         = max(1, min(_to_int(target_articles,           5), 20))
 
     try:
         results = _ddg_search(query, max_results=max_results, timeout=DEFAULT_TIMEOUT)

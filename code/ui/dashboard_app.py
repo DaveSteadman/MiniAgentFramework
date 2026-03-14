@@ -144,6 +144,8 @@ class DashboardApp:
             else:
                 self._panels[name] = Panel(title, py, px, ph, pw)
 
+        self._panels['main'].scroll_hint = True
+
     # ----------------------------------------------------------------------------------------------------
 
     def _main_title(self) -> str:

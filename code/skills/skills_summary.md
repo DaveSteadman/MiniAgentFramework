@@ -238,7 +238,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "WebMine Skill",
       "relative_path": "code/skills/WebMine/skill.md",
-      "purpose": "Mine web content (direct URLs or DuckDuckGo searches) and save raw results as structured",
+      "purpose": "Mine web content (direct URLs or DuckDuckGo searches) and save raw results in `webresearch/01-Mine/<domain>/yyyy/mm/dd/`; for DDG use short natural-language queries with month/year recency like `\"EU news headlines March 2026\"` and never use ISO dates like `2026-03-14` in the search query.",
       "module": "code/skills/WebMine/web_mine_skill.py",
       "functions": [
         "mine_search(\"electric vehicle battery 2026\", \"CarIndustry\", max_results=5)",

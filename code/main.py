@@ -264,6 +264,10 @@ def run_chat_sequence_mode(
     Exits with code 1 if the sequence file cannot be read or is malformed.
     """
     import json as _json, sys as _sys
+    # Ensure subprocess stdout accepts full Unicode - Windows defaults to cp1252 which
+    # can't encode characters the model commonly emits (e.g. \u202f, \u2011).
+    if hasattr(_sys.stdout, "reconfigure"):
+        _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     try:
         turns_raw = _json.loads(sequence_file.read_text(encoding="utf-8"))
         if not isinstance(turns_raw, list):

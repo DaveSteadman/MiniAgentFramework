@@ -122,24 +122,52 @@ def get_date_dir(stage: str, domain: str, when: _date | None = None) -> Path:
     return get_domain_dir(stage, domain) / when.strftime("%Y") / when.strftime("%m") / when.strftime("%d")
 
 
+def ensure_date_dir(stage: str, domain: str, when: _date | None = None) -> Path:
+    """Return the yyyy/mm/dd directory, creating it if necessary."""
+    p = get_date_dir(stage, domain, when)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 # ====================================================================================================
 # MARK: SEQUENCE NUMBERING
 # ====================================================================================================
 def next_item_number(date_dir: Path) -> int:
     """Return the next available sequence number inside a date directory.
 
-    Scans all NNN-* subdirectories present, finds the highest existing sequence number,
-    and returns max + 1.  Returns 1 when the directory is empty or does not yet exist.
+    Scans all NNN-* files and subdirectories present, finds the highest existing
+    sequence number, and returns max + 1. Returns 1 when the directory is empty
+    or does not yet exist.
     """
     if not date_dir.exists():
         return 1
     max_num = 0
     for child in date_dir.iterdir():
-        if child.is_dir():
-            match = _SEQ_FOLDER_RE.match(child.name)
-            if match:
-                max_num = max(max_num, int(match.group(1)))
+        # Match NNN- prefix in both files (NNN-slug.md) and dirs (NNN-slug/).
+        match = _SEQ_FOLDER_RE.match(child.stem if child.suffix else child.name)
+        if match:
+            max_num = max(max_num, int(match.group(1)))
     return max_num + 1
+
+
+# ----------------------------------------------------------------------------------------------------
+def alloc_mine_file(stage: str, domain: str, slug: str, when: _date | None = None) -> Path:
+    """Allocate the next NNN-slug.md file path inside the date directory.
+
+    Creates the date directory tree if needed.  Returns a Path ending in .md that
+    the caller should write to.  Sequence numbering scans both existing .md files
+    and subdirectories so mine files and item-dirs share a namespace.
+    """
+    date_dir = get_date_dir(stage, domain, when)
+    date_dir.mkdir(parents=True, exist_ok=True)
+    max_num = 0
+    for child in date_dir.iterdir():
+        # Match NNN- prefix in both files (NNN-slug.md) and dirs (NNN-slug/)
+        match = _SEQ_FOLDER_RE.match(child.stem if child.suffix else child.name)
+        if match:
+            max_num = max(max_num, int(match.group(1)))
+    seq = max_num + 1
+    return date_dir / f"{seq:03d}-{_make_slug(slug)}.md"
 
 
 # ====================================================================================================

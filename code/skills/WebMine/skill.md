@@ -1,11 +1,12 @@
 # WebMine Skill
 
 ## Purpose
-Mine web content (direct URLs or DuckDuckGo searches) and save raw results as structured
-Markdown files in `webresearch/01-Mine/<domain>/yyyy/mm/dd/`.
+Mine web content (direct URLs or DuckDuckGo searches) and save raw results in `webresearch/01-Mine/<domain>/yyyy/mm/dd/`; for DDG use short natural-language queries with month/year recency like `"EU news headlines March 2026"` and never use ISO dates like `2026-03-14` in the search query.
 Does not analyse, summarise, or produce reports.
 
 **CRITICAL - DDG query rules:** Use `"topic month-name year source"` format (e.g. `"UK news March 2026 BBC"`). Never include ISO dates or day numbers in queries - `"UK news March 11 2026"` and `"BBC News 2026-03-11"` both return no results. Never use `site:` operators. A prompt date like `2026-03-11` is for folder filing only - convert it to `"March 2026"` in the query string.
+
+**Planning shortcut:** If the user does not explicitly provide a date, do not append today's date. Keep the query topical and source-oriented, for example `"EU news headlines Reuters"` or `"EU news headlines March 2026 Reuters"` when recency needs to be explicit.
 
 ## Interface
 - Module: `code/skills/WebMine/web_mine_skill.py`
@@ -147,20 +148,18 @@ When a prompt contains a date like `2026-03-11`, use that date only for the `dom
 - `web mine <topic> for <date> into the <domain> domain`
 - `search for <query> and save to the <domain> research area`
 - `search for <query> and save results to <domain>`
-- `research <query> into <domain>`
-- `research <topic> and save it to <domain>`
 
 **`mine_search_deep`** - search and mine individual articles (slower, multiple files, maximum content):
-- `deep research <query> into <domain>`
-- `deep research <topic> and save articles to <domain>`
-- `deep research <query> in the <domain> area`
+- `deep mine <query> into <domain>`
+- `deep mine <topic> and save articles to <domain>`
+- `deep mine <query> in the <domain> area`
 
 **Use this skill whenever the user asks to save, store, mine, or file web content into a named domain or research area.**
 Do NOT use WebSearch or WebExtract for these requests - those skills return content to the LLM but do not save anything to the webresearch workspace.
 
 **Choosing the right function:**
 - `mine_url` - you have a specific article URL and want to save it.
-- `mine_search` - **default for all "web mine" and "research X into Y" prompts.** Fast: one `.md` file with inline snippets per query.
+- `mine_search` - **default for all "web mine" and "search X into Y" prompts.** Fast: one `.md` file with inline snippets per query.
 - `mine_search_deep` - only when the user explicitly says **"deep web mine"**. Slower: fetches and saves each qualifying article as its own file.
 
 ## Examples

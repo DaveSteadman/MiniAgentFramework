@@ -2,7 +2,7 @@
   "tasks": [
     {
       "name": "pulse",
-      "enabled": true,
+      "enabled": false,
       "schedule": {
         "type": "interval",
         "minutes": 5

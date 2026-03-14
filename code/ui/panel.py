@@ -22,8 +22,9 @@ H  = '\u2500';  V  = '\u2502'
 class Panel:
 
     def __init__(self, title, y, x, h, w, focused=False):
-        self.title   = title
-        self.focused = focused
+        self.title       = title
+        self.focused     = focused
+        self.scroll_hint = False   # when True, show PgUp/PgDn on the bottom border
         self.y = y;  self.x = x
         self.h = max(h, 3)
         self.w = max(w, 4)
@@ -75,3 +76,8 @@ class Panel:
                 label = label[:max_title]
             col = x + (w - len(label)) // 2
             screen.put_str(y, col, label, ta)
+
+        # PgUp on top-right / PgDn on bottom-right border corners
+        if self.scroll_hint and w >= 18:
+            screen.put_str(y,         x + w - 7, ' PgUp ', ba)
+            screen.put_str(y + h - 1, x + w - 7, ' PgDn ', ba)

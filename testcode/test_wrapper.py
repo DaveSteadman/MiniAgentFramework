@@ -100,26 +100,18 @@ def invoke_framework(
     ollama_host: str | None = None,
     ollama_api_key: str | None = None,
 ) -> tuple[float, int, str, str]:
-    """Invoke code/main.py with the given prompt and return (duration, exit_code, stdout, stderr)."""
-    start_time = time.monotonic()
+    """Invoke code/main.py with the given prompt and return (duration, exit_code, stdout, stderr).
 
-    cmd = [sys.executable, str(MAIN_SCRIPT), "--user-prompt", prompt]
-    if model:
-        cmd += ["--model", model]
-    if ollama_host:
-        cmd += ["--ollama-host", ollama_host]
-    if ollama_api_key:
-        cmd += ["--ollama-api-key", ollama_api_key]
-
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=SUBPROCESS_TIMEOUT_SECONDS,
+    Routes through --chat-sequence-file (single-element array) so the output is emitted
+    in the structured [TURN 1] Agent: format, consistent with exchange mode and parseable
+    by _parse_turn_outputs.
+    """
+    return invoke_exchange(
+        [prompt],
+        model=model,
+        ollama_host=ollama_host,
+        ollama_api_key=ollama_api_key,
     )
-
-    duration = time.monotonic() - start_time
-    return duration, result.returncode, result.stdout, result.stderr
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -154,6 +146,7 @@ def invoke_exchange(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=SUBPROCESS_TIMEOUT_SECONDS * len(turn_prompts),
         )
     finally:
@@ -228,58 +221,9 @@ def _evaluate_assert(expression: str, final_output: str, exit_code: int) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _extract_final_output_from_lines(lines: list[str]) -> str:
-    final_section_index = -1
-    for index, line in enumerate(lines):
-        if "FINAL LLM EXECUTION" in line:
-            final_section_index = index
-            break
-
-    if final_section_index < 0:
-        return ""
-
-    collected_lines = []
-    for line in lines[final_section_index + 1 :]:
-        stripped = line.strip()
-        if stripped.startswith("ITERATION"):
-            break
-        if stripped.startswith("="):
-            if collected_lines:
-                break
-            continue
-        if not stripped and not collected_lines:
-            continue
-        collected_lines.append(line)
-
-    return "\n".join(item.rstrip() for item in collected_lines).strip()
-
-
-# ----------------------------------------------------------------------------------------------------
-def extract_final_output(stdout_text: str, stderr_text: str, log_file: str) -> str:
-    if log_file:
-        try:
-            log_lines = Path(log_file).read_text(encoding="utf-8").splitlines()
-            output_from_log = _extract_final_output_from_lines(log_lines)
-            if output_from_log:
-                return output_from_log.replace("\u202f", " ")
-        except Exception:
-            pass
-
-    lines = stdout_text.splitlines()
-    parsed_output = _extract_final_output_from_lines(lines)
-    if parsed_output:
-        return parsed_output.replace("\u202f", " ")
-
-    last_non_empty_stdout = ""
-    for line in reversed(lines):
-        if line.strip():
-            last_non_empty_stdout = line.strip()
-            break
-
-    if last_non_empty_stdout:
-        return last_non_empty_stdout.replace("\u202f", " ")
-
-    return stderr_text.strip().replace("\u202f", " ")
+def extract_final_output(stdout_text: str) -> str:
+    """Extract the agent response from structured [TURN 1] Agent: output."""
+    return _parse_turn_outputs(stdout_text).get(1, "").replace("\u202f", " ")
 
 
 # ====================================================================================================
@@ -394,7 +338,7 @@ def _run_single_item(
             prompt, model=model, ollama_host=ollama_host, ollama_api_key=ollama_api_key,
         )
         log_file     = extract_log_file(stdout_text=stdout)
-        final_output = extract_final_output(stdout_text=stdout, stderr_text=stderr, log_file=log_file)
+        final_output = extract_final_output(stdout_text=stdout)
         row.update({"final_output": final_output, "duration_seconds": f"{duration:.3f}",
                     "exit_code": exit_code, "log_file": log_file, "stderr": stderr.strip()})
     except subprocess.TimeoutExpired as e:

@@ -127,14 +127,31 @@ def run_dashboard_mode(
             chat_history.clear()
             chat_session.clear()
 
+        def _lock_input() -> None:
+            llm_lock.acquire(blocking=True)
+
+        def _unlock_input() -> None:
+            try:
+                llm_lock.release()
+            except RuntimeError:
+                pass
+
         dash_ctx = SlashCommandContext(
             config         = config,
             output         = _dash_output,
             clear_history  = _dash_clear_history,
             request_exit   = shutdown.set,
             session_context= chat_session,
+            lock_input     = _lock_input,
+            unlock_input   = _unlock_input,
         )
-        if handle_slash(text, dash_ctx):
+        if text.strip().startswith("/"):
+            threading.Thread(
+                target=handle_slash,
+                args=(text, dash_ctx),
+                daemon=True,
+                name="slash-dispatch",
+            ).start()
             return
 
         def _run() -> None:

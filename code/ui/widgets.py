@@ -149,13 +149,10 @@ class TextEdit:
     # ----------------------------------------------------------------------------------------------------
 
     def handle_key(self, key):
-        if self.locked:
-            return False
-
         from . import keys
 
-        if key == keys.ENTER:                   return True
-
+        # History navigation (Up/Down) is always allowed - even while locked -
+        # so the user can browse prior inputs regardless of LLM or scheduler state.
         if key == keys.K_UP:
             if self._history:
                 if self._hist_idx is None:
@@ -178,6 +175,13 @@ class TextEdit:
                     self._buf    = list(self._history[self._hist_idx])
                 self._cursor = len(self._buf)
             return False
+
+        # All other input (typing, Enter, cursor movement) is blocked while locked.
+        if self.locked:
+            return False
+
+        if key == keys.ENTER:
+            return True
 
         if key == keys.BACKSPACE:
             if self._cursor > 0:

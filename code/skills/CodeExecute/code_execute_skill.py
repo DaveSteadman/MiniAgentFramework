@@ -20,6 +20,7 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import ast
 import builtins
 import io
 import sys
@@ -113,11 +114,31 @@ def run_python_snippet(code: str) -> str:
     if not code:
         return "Error: No code provided to run_python_snippet."
 
-    # LLMs sometimes JSON-double-escape quote characters, producing literal \" or \'
+    # LLMs sometimes JSON-double-escape quote characters, producing literal " or \'
     # in the code string (e.g. f\"Error: {e}\").  That is a Python syntax error because
     # \ is treated as a line-continuation character.  Unescape them now so exec() receives
     # valid source.
     code = code.replace('\\"', '"').replace("\\'", "'")
+
+    # REPL-style auto-print: if the last statement is a bare expression (no print call),
+    # rewrite it as print(<expr>) so models that write REPL-style code don't waste a
+    # retry round on the 'no output' error.
+    try:
+        tree = ast.parse(code)
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            last = tree.body[-1]
+            # Only auto-wrap if it isn't already a print() call
+            is_print = (
+                isinstance(last.value, ast.Call)
+                and isinstance(last.value.func, ast.Name)
+                and last.value.func.id == "print"
+            )
+            if not is_print:
+                lines      = code.splitlines()
+                expr_src   = ast.get_source_segment(code, last) or lines[-1].strip()
+                code       = "\n".join(lines[: last.lineno - 1]) + ("\n" if last.lineno > 1 else "") + f"print({expr_src})"
+    except SyntaxError:
+        pass  # let exec() surface the real error below
 
     stdout_buf   = io.StringIO()
     result_slot: list[str] = []

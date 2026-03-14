@@ -213,6 +213,11 @@ def create_task(name: str, schedule: str, prompt: str) -> str:
 
 def set_task_enabled(name: str, enabled: bool) -> str:
     """Enable or disable a task without changing its schedule or prompt."""
+    # Coerce string values that some LLMs send instead of JSON booleans
+    # (e.g. "false" instead of false).  bool("false") == True, so we must
+    # handle this explicitly before using the value.
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() not in ("false", "0", "no", "off", "")
     try:
         name = _validate_name(name)
     except ValueError as exc:

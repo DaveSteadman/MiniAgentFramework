@@ -50,6 +50,8 @@ class SlashCommandContext:
     clear_history:   Callable[[], None]            # resets conversation history + session context
     request_exit:    Callable[[], None] | None = None   # optional: signals the host to shut down
     session_context: object | None = None               # SessionContext; None in non-interactive modes
+    lock_input:      Callable[[], None] | None = None   # acquire run lock (blocks until free)
+    unlock_input:    Callable[[], None] | None = None   # release run lock
 
 
 # ====================================================================================================
@@ -410,8 +412,18 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
             candidate = candidate.with_suffix(".json")
 
     if not candidate.exists():
-        ctx.output(f"Prompts file not found: {candidate}", "error")
-        return
+        # Try substring match against available files.
+        if test_prompts_dir.exists():
+            matches = sorted(f for f in test_prompts_dir.glob("*.json") if arg.lower() in f.stem.lower())
+            if matches:
+                candidate = matches[0]
+                ctx.output(f"Matched: {candidate.name}", "dim")
+            else:
+                ctx.output(f"No test file matching '{arg}' found.", "error")
+                return
+        else:
+            ctx.output(f"Prompts file not found: {candidate}", "error")
+            return
 
     wrapper = Path(__file__).resolve().parent.parent / "testcode" / "test_wrapper.py"
     cmd = [
@@ -427,6 +439,8 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
         cmd += ["--ollama-api-key", active_key]
 
     ctx.output(f"Running test suite: {candidate.name} …", "info")
+    if ctx.lock_input:
+        ctx.lock_input()
     try:
         proc = subprocess.Popen(
             cmd,
@@ -444,6 +458,9 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
             ctx.output(f"Test suite exited with code {proc.returncode}.", "error")
     except Exception as exc:
         ctx.output(f"Error running test wrapper: {exc}", "error")
+    finally:
+        if ctx.unlock_input:
+            ctx.unlock_input()
 
 
 # ----------------------------------------------------------------------------------------------------
