@@ -27,7 +27,7 @@ class RegressionTests(unittest.TestCase):
 
         plan = build_fallback_plan(user_prompt=prompt, skills_payload=self.skills_payload)
 
-        self.assertEqual([call.function for call in plan.python_calls], ["get_system_info_string", "write_text_file"])
+        self.assertEqual([call.function for call in plan.python_calls], ["get_system_info_dict", "write_text_file"])
         self.assertEqual(plan.python_calls[1].arguments["file_path"], "data/systemstats.csv")
         self.assertEqual(plan.python_calls[1].arguments["text"], "{{output_of_previous_call}}")
 

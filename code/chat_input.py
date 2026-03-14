@@ -93,7 +93,7 @@ def prompt_with_history(prompt_text: str = "You: ") -> str:
     The returned string is already stripped.  An EOFError or KeyboardInterrupt is re-raised
     so callers can handle session termination exactly as they would with plain input().
 
-    If prompt_toolkit is not installed, falls back to plain input() — history file is still
+    If prompt_toolkit is not installed, falls back to plain input() - history file is still
     updated so it is ready when prompt_toolkit becomes available.
     """
     try:

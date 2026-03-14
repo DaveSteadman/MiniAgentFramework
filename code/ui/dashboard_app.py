@@ -79,6 +79,7 @@ class DashboardApp:
         """
         self.tasks          = tasks or []
         self.last_run       = last_run or {}
+        self.run_history: list = []    # (task_name, datetime) for each run completed this session
         self.on_submit      = on_submit
         self.shutdown_event = shutdown_event
         self._llm_lock      = llm_lock
@@ -114,6 +115,9 @@ class DashboardApp:
             self._active_tab = tab_name
             if 'main' in self._panels:
                 self._panels['main'].title = self._main_title()
+
+    def record_run(self, name: str, when: datetime) -> None:
+        self.run_history.append((name, when))
 
     def stop(self) -> None:
         self._running = False
@@ -228,7 +232,8 @@ class DashboardApp:
                 # Vertical timeline
                 iy, ix, ih, iw = self._panels['timeline'].inner_rect()
                 self._timeline.draw(self._screen, iy, ix, ih, iw,
-                                    self.tasks, self.last_run, now, running=task_running)
+                                    self.tasks, self.last_run, now, running=task_running,
+                                    run_history=self.run_history)
 
                 # Main area (active tab)
                 iy, ix, ih, iw = self._panels['main'].inner_rect()

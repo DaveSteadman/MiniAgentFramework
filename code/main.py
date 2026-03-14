@@ -34,7 +34,6 @@ from pathlib import Path
 
 import ollama_client
 from modes.dashboard import run_dashboard_mode
-from ollama_client import ensure_ollama_running
 from ollama_client import format_running_model_report
 from ollama_client import get_llm_timeout
 from ollama_client import register_llm_call_logger
@@ -284,6 +283,23 @@ def run_chat_sequence_mode(
         print(f"[TURN {turn_idx}] User: {user_prompt}")
         logger.log_section_file_only(f"SEQUENCE TURN {turn_idx}")
         logger.log_file_only(f"User: {user_prompt}")
+
+        # Slash commands bypass the LLM pipeline; collect their output and emit it
+        # in the same [TURN N] Agent: format that the test wrapper expects.
+        slash_lines: list[str] = []
+        seq_ctx = SlashCommandContext(
+            config          = config,
+            output          = lambda text, level='info', _buf=slash_lines: _buf.append(text),
+            clear_history   = lambda: [history.clear(), session_ctx.clear()],
+            session_context = session_ctx,
+        )
+        if handle_slash(user_prompt, seq_ctx):
+            slash_response = "\n".join(slash_lines)
+            print(f"[TURN {turn_idx}] Agent: {slash_response}")
+            print(f"[TURN {turn_idx}] tokens=0 tps=0")
+            logger.log_file_only(f"Agent: {slash_response}")
+            history.add(user_prompt, slash_response)
+            continue
 
         final_response, p_tokens, _c, run_success, tps = orchestrate_prompt(
             user_prompt=user_prompt,
@@ -555,10 +571,15 @@ def main() -> None:
     # For remote / LAN / cloud hosts this is a connectivity check; auto-start is local-only.
     ollama_client.configure_host(args.ollama_host, args.ollama_api_key or None)
 
-    # Ensure Ollama server is ready before model discovery and LLM calls.
-    ensure_ollama_running()
     # Resolve the requested model alias/tag into an installed concrete model name.
-    resolved_model = resolve_execution_model(args.model)
+    # Connectivity is checked lazily at the first actual LLM call, so slash-command-only
+    # runs (which never call the LLM) work even when the Ollama host is unreachable.
+    # If resolution fails now, fall back to the raw alias; call_ollama_extended will
+    # surface a clear connectivity error the moment an LLM call is actually attempted.
+    try:
+        resolved_model = resolve_execution_model(args.model)
+    except Exception:
+        resolved_model = args.model
 
     # Load the skills catalog once; it is passed through config so no module re-reads it.
     skills_payload = load_skills_payload(SKILLS_SUMMARY_PATH)

@@ -69,7 +69,7 @@ python .\code\main.py --user-prompt "what version of ollama is in use"
 | `--user-prompt TEXT` | `"output the time"` | The prompt to run. |
 | `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` are resolved to the first installed model whose tag contains that string. |
 | `--num-ctx N` | `32768` | Context window size (tokens) passed to Ollama for both the planner and final LLM calls. |
-| `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address (e.g. `http://MONTBLANC:11434`) or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. |
+| `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address (e.g. `http://MONTBLANC:11434`) or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. Connectivity is checked lazily on the first LLM call, so slash commands work even when the host is unreachable. |
 | `--ollama-api-key KEY` | *(none)* | API key for authenticated hosts (Ollama Cloud). Falls back to `OLLAMA_API_KEY` env var. Applies to all modes. |
 
 **Example - specify model and context window:**
@@ -155,11 +155,23 @@ Schedule files live in `controldata/schedules/`. Each file must contain a top-le
 ```json
 {
   "tasks": [
-    { "name": "system_health_check", "enabled": true, "type": "interval", "interval_minutes": 60, "prompt": "summarize system health" },
-    { "name": "morning_web_scan",     "enabled": true, "type": "daily",    "time": "05:00",          "prompt": "summarise tech news" }
+    {
+      "name": "SystemHealth",
+      "enabled": true,
+      "schedule": { "type": "interval", "minutes": 60 },
+      "prompts": ["Summarise current system health: CPU, RAM, and disk."]
+    },
+    {
+      "name": "MorningWebScan",
+      "enabled": true,
+      "schedule": { "type": "daily", "time": "05:00" },
+      "prompts": ["Summarise today's tech news headlines."]
+    }
   ]
 }
 ```
+
+Each task file is named `task_<name>.json`. Tasks can be created, queried, and managed at runtime - see [Task Management](#task-management) below.
 
 | Option | Default | Description |
 |---|---|---|
@@ -212,11 +224,17 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/timeout <seconds>` | Set the LLM generation timeout (e.g. `/timeout 1800` for heavy analysis tasks). |
 | `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
 | `/clearmemory` | Delete the memory store file (`memory_store.json`), starting the next session with a blank memory. |
-| `/reskill` | Rebuild the skills catalog from `skill.md` files and hot-reload into the current session. |
+| `/reskill` | Rebuild the skills catalog from `skill.md` files using the LLM and hot-reload into the current session. The catalog is also rebuilt automatically (fast local path) at startup whenever any `skill.md` is newer than `skills_summary.md`. |
 | `/finalgen <on\|off>` | Control the final LLM synthesis call. `off` returns skill output directly (useful for web mining or data-collection steps). Bare `/finalgen` shows the current state. |
 | `/sandbox <on\|off>` | Toggle the Python sandbox for `CodeExecute` skill. `on` (default) enforces the built-in allow-list; `off` removes restrictions (use with care). |
 | `/deletelogs <days>` | Delete log date-folders under `controldata/logs/` older than N days. Each folder is named `YYYY-MM-DD` and contains all runs from that day. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
 | `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. |
+| `/tasks` | List all scheduled tasks with their status (on/off), schedule, and prompt preview. |
+| `/task enable <name>` | Enable a task by name. The dashboard scheduler picks up the change on its next reload cycle. |
+| `/task disable <name>` | Disable a task without deleting it. |
+| `/task add <name> <schedule> <prompt>` | Create a new task. `schedule` is either a number of minutes (e.g. `60`) or a daily wall-clock time (e.g. `08:30`). |
+| `/task delete <name>` | Permanently delete a task and remove its JSON file if it becomes empty. |
+| `/task run <name>` | Execute a task immediately, outside its normal schedule. Runs the same pipeline as the scheduler - useful for testing a task definition or triggering a one-off run. |
 
 ### Host targeting
 
@@ -230,9 +248,74 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/host http://192.168.1.169:11434` | `http://192.168.1.169:11434` (unchanged) |
 | `/host https://api.ollama.com myapikey` | `https://api.ollama.com` with API key |
 
-Any bare hostname or IP address (no `://`) is automatically wrapped as `http://<name>:11434` — the standard Ollama default port. Full URLs are passed through unchanged, so custom ports and HTTPS cloud endpoints work too.
+Any bare hostname or IP address (no `://`) is automatically wrapped as `http://<name>:11434` - the standard Ollama default port. Full URLs are passed through unchanged, so custom ports and HTTPS cloud endpoints work too.
+
+Connectivity to the host is **not** checked at switch time. The connection is verified lazily on the first LLM call made after the switch. This means `/host` always succeeds immediately, and any connectivity problem is reported precisely when an LLM call is attempted - not before. Slash commands continue to work regardless of whether the active host is reachable.
 
 New slash commands can be added in [code/slash_commands.py](code/slash_commands.py) by adding a handler function and registering it in `_REGISTRY` and `_DESCRIPTIONS`.
+
+---
+
+## Task Management
+
+Scheduled tasks can be managed in three complementary ways, depending on the context:
+
+### 1. Slash commands (operator, in-session)
+
+The `/tasks` and `/task` commands manipulate `controldata/schedules/*.json` files directly from the chat input bar or console prompt. Zero LLM involvement - changes are instant and deterministic.
+
+```
+/tasks                                          # list all tasks
+/task add HourlyMemCheck 60 Check free RAM and log to data/memlog.csv
+/task add DailyWeather 08:00 Get today's weather forecast for London
+/task enable DailyWeather
+/task disable HourlyMemCheck
+/task delete OldTask
+```
+
+The dashboard hot-reloads schedule files each poll cycle, so enable/disable/add/delete take effect within seconds without a restart.
+
+### 2. TaskManagement skill (agent, via natural language)
+
+The `TaskManagement` skill exposes the same operations as proper skill functions, so the planner can call them in response to natural-language chat prompts:
+
+| Chat prompt | Skill call |
+|---|---|
+| `"list my scheduled tasks"` | `list_tasks()` |
+| `"show me the PerformanceHeadroom task"` | `get_task("PerformanceHeadroom")` |
+| `"create a task called DailyWeather running at 8am to check the forecast"` | `create_task("DailyWeather", "08:00", "...")` |
+| `"change PerformanceHeadroom to run every 30 minutes"` | `set_task_schedule("PerformanceHeadroom", "30")` |
+| `"disable the PerformanceHeadroom task"` | `set_task_enabled("PerformanceHeadroom", False)` |
+| `"update the DailyWeather prompt to ask about London"` | `set_task_prompt("DailyWeather", "...")` |
+| `"delete the OldTask task"` | `delete_task("OldTask")` |
+
+The skills catalog (`code/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` file is newer than the summary - so newly added skills are always available to the planner without any manual step. Use `/reskill` to force an LLM-quality rebuild (better descriptions) during an active session.
+
+### 3. Direct JSON editing
+
+Each task lives in its own `controldata/schedules/task_<name>.json` file and can be edited in any text editor. The scheduler hot-reloads all `*.json` files in the schedules directory each cycle.
+
+```json
+{
+  "tasks": [
+    {
+      "name": "PerformanceHeadroom",
+      "enabled": true,
+      "schedule": { "type": "interval", "minutes": 60 },
+      "prompts": [
+        "Use SystemInfo to get free RAM and disk, then append a CSV row to data/performanceheadroom.csv."
+      ]
+    }
+  ]
+}
+```
+
+### Schedule types
+
+| Type | JSON | Meaning |
+|---|---|---|
+| Interval | `{ "type": "interval", "minutes": 60 }` | Fires every N minutes after the previous run |
+| Daily | `{ "type": "daily", "time": "08:30" }` | Fires once per calendar day at the given wall-clock time |
 
 ---
 
@@ -250,7 +333,7 @@ python .\testcode\test_wrapper.py
 | `--prompts-file PATH` | `controldata/test_prompts/default_prompts.json` | JSON file containing an array of prompt strings. |
 | `--output-dir PATH` | `controldata/test_results/` | Directory where the CSV results file is written. |
 | `--model ALIAS` | `"20b"` | Ollama model alias passed to each `main.py` subprocess invocation. |
-| `--ollama-host URL` | *(local)* | Ollama host for all subprocess invocations (e.g. `http://MONTBLANC:11434`). |
+| `--ollama-host URL` | *(local)* | Ollama host for all subprocess invocations (e.g. `http://MONTBLANC:11434`). Connectivity is checked lazily, so prompts that are pure slash commands never require Ollama to be reachable. |
 | `--ollama-api-key KEY` | *(none)* | API key forwarded to each subprocess invocation. |
 
 Each row in the CSV captures: `timestamp`, `prompt`, `final_output`, `duration_seconds`, `exit_code`, `log_file`, `stderr`.
@@ -332,7 +415,7 @@ python .\code\system_check.py --num-ctx 4096
 
 | Path | Contents |
 |---|---|
-| `controldata/logs/YYYY-MM-DD/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) — one file per run, grouped into dated subfolders. |
+| `controldata/logs/YYYY-MM-DD/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) - one file per run, grouped into dated subfolders. |
 | `controldata/schedules/` | Schedule definition files (`*.json`) consumed by Scheduler and Dashboard modes. |
 | `controldata/test_prompts/` | Prompt suite JSON files used by the Test Wrapper. |
 | `controldata/test_results/` | Timestamped CSV results and analysis files produced by the Test Wrapper and Analyzer. |

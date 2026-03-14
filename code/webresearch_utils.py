@@ -11,9 +11,9 @@
 #   Stage 3 - 03-Presentation:  Final polished outputs for sharing or reporting
 #
 # Each stage is internally partitioned by:
-#   Domain    — a topic label like "GeneralNews" or "CarIndustry"
-#   Date      — yyyy/mm/dd nested folders based on when the item was created
-#   Sequence  — zero-padded NNN-slug folder inside each date directory
+#   Domain    - a topic label like "GeneralNews" or "CarIndustry"
+#   Date      - yyyy/mm/dd nested folders based on when the item was created
+#   Sequence  - zero-padded NNN-slug folder inside each date directory
 #
 # Example directory layout:
 #   webresearch/01-Mine/GeneralNews/2026/03/07/001-ev-battery-breakthrough/source.md
@@ -74,7 +74,7 @@ _SEQ_FOLDER_RE   = re.compile(r"^(\d+)-")
 def get_webresearch_root() -> Path:
     """Return the absolute path to the webresearch/ root directory.
 
-    Cached after first call — the path cannot change within a single process lifetime.
+    Cached after first call - the path cannot change within a single process lifetime.
     """
     return get_workspace_root() / "webresearch"
 

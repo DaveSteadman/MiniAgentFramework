@@ -1,0 +1,15 @@
+{
+  "tasks": [
+    {
+      "name": "pulse",
+      "enabled": true,
+      "schedule": {
+        "type": "interval",
+        "minutes": 5
+      },
+      "prompts": [
+        "Get RAM and disk usage and append to ./data/pulse_log.csv with timestamp as the first column."
+      ]
+    }
+  ]
+}

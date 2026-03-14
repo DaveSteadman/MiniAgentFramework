@@ -8,10 +8,10 @@ RAM, memory, disk space, storage, available space, or free space - including ind
 
 ## Interface
 - Module: `code/skills/SystemInfo/system_info_skill.py`
-- Function: `get_system_info_string()`
+- Function: `get_system_info_dict()`
 
 ## Input
-- `get_system_info_string()`
+- `get_system_info_dict()`
   - No arguments.
 - Typical trigger phrases (select this skill for any of these concepts):
   - `system information`, `system info`, `system health`
@@ -24,14 +24,21 @@ RAM, memory, disk space, storage, available space, or free space - including ind
   - `show specs`, `show health`, `system stats`, `resource usage`
 
 ## Output
-- `get_system_info_string()` returns a single string, for example:
-  - `System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`
+- `get_system_info_dict()` returns a structured dict with individually addressable fields:
+  - `os` (str) - OS name, e.g. `"Windows"`
+  - `python_version` (str) - e.g. `"3.10.11"`
+  - `ollama_version` (str) - e.g. `"0.18.0"`
+  - `ram_used_gb` (float) - RAM in use in GiB, e.g. `30.80`
+  - `ram_available_gb` (float) - RAM free in GiB, e.g. `96.49`
+  - `disk_used_gb` (float) - disk used in GiB, e.g. `937.34`
+  - `disk_available_gb` (float) - disk free in GiB, e.g. `924.72`
 
 ## Example
-- `get_system_info_string()` -> `System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`
+- `get_system_info_dict()` -> `{"os": "Windows", "python_version": "3.14.2", "ollama_version": "0.17.5", "ram_used_gb": 12.34, "ram_available_gb": 19.66, "disk_used_gb": 110.25, "disk_available_gb": 401.75}`
 - Prompt intent examples:
-  - "do we have enough disk space to add a 50 GB file?" -> select this skill; the LLM reads disk_available from the output
-  - "how much RAM is available?" -> select this skill
-  - "what version of python is running?" -> select this skill
-  - "show current system info including RAM and disk usage" -> select this skill
-  - "create a file with system info in it" -> select this skill first, then pass result to FileAccess skill
+  - "do we have enough disk space to add a 50 GB file?" -> `get_system_info_dict()`, read `disk_available_gb`
+  - "how much RAM is available?" -> `get_system_info_dict()`, read `ram_available_gb`
+  - "what version of python is running?" -> `get_system_info_dict()`, read `python_version`
+  - "show current system info" -> `get_system_info_dict()`; LLM formats the dict for display
+  - "write system info to a file" -> `get_system_info_dict()` then pass result to FileAccess skill
+  - "append RAM and disk to a CSV file" -> `get_system_info_dict()`, then reference `${outputN.ram_available_gb}` and `${outputN.disk_available_gb}` in the FileAccess call

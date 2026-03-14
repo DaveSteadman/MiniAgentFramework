@@ -266,7 +266,7 @@ class TimelineWidget:
 
     _PREFIX_W = 7   # ►/space (1) + HH:MM (5) + space (1)
 
-    def draw(self, screen, y, x, h, w, tasks, last_run, now, running=False):
+    def draw(self, screen, y, x, h, w, tasks, last_run, now, running=False, run_history=None):
         from datetime import timedelta
 
         now_min = now.replace(second=0, microsecond=0)
@@ -280,7 +280,7 @@ class TimelineWidget:
             draw_row      = y + row_offset
 
             hhmm      = slot_dt.strftime("%H:%M")
-            task_name = self._task_at(tasks, last_run, slot_dt, now_min)
+            task_name = self._task_at(tasks, last_run, slot_dt, now_min, run_history)
             abbrev    = task_name[:max(0, w - self._PREFIX_W)] if task_name else ""
 
             if task_name:
@@ -346,10 +346,19 @@ class TimelineWidget:
         return min_diff
 
     @staticmethod
-    def _task_at(tasks, last_run, slot_dt, now_min):
+    def _task_at(tasks, last_run, slot_dt, now_min, run_history=None):
         """Return the name of the first task whose schedule fires at slot_dt, else ''."""
         from datetime import timedelta
 
+        # Past slots: look up what actually ran (only sessions-history entries).
+        if slot_dt < now_min:
+            if run_history:
+                for task_name, run_dt in run_history:
+                    if run_dt.replace(second=0, microsecond=0) == slot_dt:
+                        return task_name
+            return ""
+
+        # Present / future slots: derive from schedule.
         for task in tasks:
             sched = task.get("schedule", {})
             stype = sched.get("type", "")
@@ -368,12 +377,14 @@ class TimelineWidget:
                 interval_m = sched.get("minutes", 60)
                 lr         = last_run.get(name)
                 if lr is None:
-                    # Fires immediately on startup → mark at NOW
+                    # No prior run: fires immediately at NOW.
                     if slot_dt == now_min:
                         return name
                 else:
-                    next_fire = lr.replace(second=0, microsecond=0) + timedelta(minutes=interval_m)
-                    if slot_dt == next_fire:
+                    lr_min  = lr.replace(second=0, microsecond=0)
+                    elapsed = (slot_dt - lr_min).total_seconds()
+                    # Mark every future multiple of the interval from the last run.
+                    if elapsed > 0 and elapsed % (interval_m * 60) == 0:
                         return name
 
         return ""

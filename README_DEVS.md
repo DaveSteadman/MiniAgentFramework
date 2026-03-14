@@ -71,6 +71,7 @@ Before writing or editing any code in this project, read [CODE_CONVENTIONS.md](C
 - `code/skills/WebExtract/` - fetches a URL and extracts its readable prose, stripping HTML markup, navigation, and ads, ready for LLM synthesis.
 - `code/skills/WebMine/` - mines URLs or DuckDuckGo searches into persisted Markdown files in the `webresearch/01-Mine/` workspace. Supports inline article content embedding via `fetch_content=True`.
 - `code/skills/PageAssess/` - fetches a URL, classifies it as `article`, `index`, or `mixed` using text-density heuristics, and returns article-candidate links filtered by topic. No files written.
+- `code/skills/TaskManagement/` - CRUD operations on scheduled task JSON files in `controldata/schedules/`. Exposes `list_tasks()`, `get_task(name)`, `create_task(name, schedule, prompt)`, `set_task_enabled(name, enabled)`, `set_task_schedule(name, schedule)`, `set_task_prompt(name, prompt)`, and `delete_task(name)` as skill functions the planner can call from natural-language prompts. Each task is stored in its own `task_<name>.json` file; the dashboard scheduler hot-reloads changes within its next poll cycle.
 
 ### 7) Scheduler
 - `code/scheduler.py`

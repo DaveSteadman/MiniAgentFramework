@@ -79,7 +79,14 @@ DEFAULT_PLANNER_ASK = (
     "explicitly requests multiple stages in a single instruction. "
     "A prompt about researching, mining, or fetching web content means Stage 1 only. "
     "A prompt about analysing, summarising, or creating a report means Stage 2 only. "
-    "A prompt about saving, rendering, or sending a report means Stage 3 only."
+    "A prompt about saving, rendering, or sending a report means Stage 3 only. "
+    "CRITICAL RULE: when the user prompt contains task-management intent - any of the words "
+    "change, set, update, modify, create, delete, enable, disable combined with words like "
+    "task, prompt, schedule - you MUST use ONLY the TaskManagement skill and call the "
+    "appropriate function (e.g. set_task_prompt, set_task_schedule, create_task, delete_task). "
+    "Any quoted or inline text that follows 'to' or 'as' in such a prompt is the NEW VALUE "
+    "to pass as an argument - it is NOT a command to execute with other skills. "
+    "Never select DateTime, SystemInfo, FileAccess, or any other skill for task-management requests."
 )
 
 
@@ -157,7 +164,49 @@ def extract_first_json_object(text: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
+def _rebuild_skills_catalog_if_stale(skills_summary_path: Path) -> None:
+    """Rebuild skills_summary.md (no-LLM fast path) when any skill.md is newer than the summary.
+
+    This ensures the planner always sees newly added or modified skills without requiring a
+    manual /reskill command or catalog build step.
+    """
+    skills_root = skills_summary_path.parent
+
+    # If the summary doesn't exist yet, always build it.
+    if not skills_summary_path.exists():
+        needs_rebuild = True
+    else:
+        summary_mtime = skills_summary_path.stat().st_mtime
+        skill_files   = list(skills_root.rglob("skill.md"))
+        needs_rebuild = any(sf.stat().st_mtime > summary_mtime for sf in skill_files)
+
+    if not needs_rebuild:
+        return
+
+    # Import here to avoid a circular import at module load time.
+    from skills_catalog_builder import (
+        find_skill_files,
+        normalize_summary,
+        render_summary_document,
+        summarize_skill,
+    )
+
+    skill_files = find_skill_files(skills_root)
+    summaries   = [
+        normalize_summary(
+            summarize_skill(sf, use_llm=False, model_name="", num_ctx=0),
+            sf,
+        )
+        for sf in skill_files
+    ]
+    summary_text = render_summary_document(summaries, skills_summary_path)
+    skills_summary_path.parent.mkdir(parents=True, exist_ok=True)
+    skills_summary_path.write_text(summary_text, encoding="utf-8")
+
+
+# ----------------------------------------------------------------------------------------------------
 def load_skills_payload(skills_summary_path: Path) -> dict:
+    _rebuild_skills_catalog_if_stale(skills_summary_path)
     raw_text     = skills_summary_path.read_text(encoding="utf-8")
     json_segment = extract_first_json_object(raw_text)
     return json.loads(json_segment)
@@ -199,20 +248,22 @@ def build_planner_prompt(user_prompt: str, planner_ask: str, skills_payload: dic
         "}\n"
         "\n"
         "Rules:\n"
+        "- The `user_prompt` field in your JSON MUST be the COMPLETE original user prompt, copied verbatim.\n"
         "- Use only modules/functions that exist in the skills summary context.\n"
         "- Keep python_calls in execution order using integer order starting at 1.\n"
         "- Arguments must be a JSON object and must be explicit.\n"
         "- final_prompt_template should describe how outputs feed the next LLM prompt.\n"
         "\n"
         "Argument chaining - when a later call needs a value from an earlier call's output:\n"
-        "  {{output_of_first_call}}         full result object of python_call order=1\n"
-        "  {{output_of_previous_call}}      full result object of the immediately preceding call\n"
+        "  ${output1}                       full result object of python_call order=1\n"
+        "  ${output2}                       full result object of python_call order=2\n"
         "  ${output1.field}                 named field from call 1's result (e.g. ${output1.time})\n"
         "  ${output2.field}                 named field from call 2's result\n"
         "Example: DateTime returns {\"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM:SS\"}.\n"
         "  To append only the time: use \"text\": \"${output1.time}\" in the FileAccess call arguments.\n"
-        "  To append the full datetime object: use \"text\": \"{{output_of_first_call}}\".\n"
+        "  To append the full datetime object: use \"text\": \"${output1}\".\n"
         "NEVER use invented literal placeholders like 'time_placeholder' - always use the syntax above.\n"
+        "NEVER use {{double-brace}} syntax - only ${...} placeholders are supported.\n"
         "\n"
         "Skills summary context:\n"
         f"{skills_json}"
@@ -366,7 +417,7 @@ def _make_fallback_call(
 ) -> "PythonCall":
     """Return a PythonCall for the given skill fragment, handling chained-write semantics."""
     if fragment == "system_info_skill.py":
-        return PythonCall(order=order, module=module, function="get_system_info_string", arguments={})
+        return PythonCall(order=order, module=module, function="get_system_info_dict", arguments={})
     if fragment == "code_execute_skill.py":
         return PythonCall(order=order, module=module, function="run_python_snippet",
                           arguments={"code": "# LLM will supply code"})

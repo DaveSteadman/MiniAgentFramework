@@ -5,7 +5,11 @@
 #
 # Provides a callable function that the orchestration planner can select when a user prompt
 # requires information about the runtime environment:
-#   - get_system_info_string()  -- returns OS, Python version, Ollama version, RAM usage, and disk usage.
+#   - get_system_info_dict()    -- returns OS, Python/Ollama versions, RAM and disk usage as a
+#                                  structured dict for field-level chaining in skill plans.
+#
+# get_system_info_string() is an internal formatting helper (not a planner skill) used by
+# orchestration.py to inject system context into every prompt and by the FileAccess shortcut.
 #
 # This module is also imported directly by main.py to inject system info as ambient prompt context
 # on every orchestration turn, guaranteeing that any prompt touching hardware or runtime state
@@ -140,21 +144,46 @@ def _get_disk_usage_bytes() -> tuple[int, int] | tuple[None, None]:
 # ====================================================================================================
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
-def get_system_info_string() -> str:
-    os_name        = _get_os_name()
-    python_version = _get_python_version()
-    ollama_version = _get_ollama_version()
+def get_system_info_dict() -> dict:
+    """Return system information as a structured dict with individually addressable fields.
 
+    Keys and types:
+      os               (str)   - OS name, e.g. "Windows"
+      python_version   (str)   - Python version string, e.g. "3.10.11"
+      ollama_version   (str)   - Ollama version string, e.g. "0.18.0"
+      ram_used_gb      (float) - RAM in use, GiB rounded to 2 dp
+      ram_available_gb (float) - RAM free, GiB rounded to 2 dp
+      disk_used_gb     (float) - Disk used, GiB rounded to 2 dp
+      disk_available_gb(float) - Disk free, GiB rounded to 2 dp
+
+    Reference individual fields with ${outputN.ram_available_gb} etc. in the planner plan.
+    """
     ram_used_bytes, ram_available_bytes   = _get_memory_usage_bytes()
     disk_used_bytes, disk_available_bytes = _get_disk_usage_bytes()
 
-    ram_used_text       = _format_bytes(ram_used_bytes) if ram_used_bytes is not None else "unknown"
-    ram_available_text  = _format_bytes(ram_available_bytes) if ram_available_bytes is not None else "unknown"
-    disk_used_text      = _format_bytes(disk_used_bytes) if disk_used_bytes is not None else "unknown"
-    disk_available_text = _format_bytes(disk_available_bytes) if disk_available_bytes is not None else "unknown"
+    def _to_gb(b: int | None) -> float:
+        return round(b / (1024 ** 3), 2) if b is not None else 0.0
 
+    return {
+        "os":                _get_os_name(),
+        "python_version":    _get_python_version(),
+        "ollama_version":    _get_ollama_version(),
+        "ram_used_gb":       _to_gb(ram_used_bytes),
+        "ram_available_gb":  _to_gb(ram_available_bytes),
+        "disk_used_gb":      _to_gb(disk_used_bytes),
+        "disk_available_gb": _to_gb(disk_available_bytes),
+    }
+
+
+# ----------------------------------------------------------------------------------------------------
+def get_system_info_string() -> str:
+    """Format system info as a human-readable string for ambient prompt context and logging.
+
+    Internal helper - not exposed as a planner skill.  Use get_system_info_dict() in skill plans.
+    """
+    d = get_system_info_dict()
     return (
-        f"System info: os={os_name}; python={python_version}; ollama={ollama_version}; "
-        f"ram_used={ram_used_text}; ram_available={ram_available_text}; "
-        f"disk_used={disk_used_text}; disk_available={disk_available_text}"
+        f"System info: os={d['os']}; python={d['python_version']}; ollama={d['ollama_version']}; "
+        f"ram_used={d['ram_used_gb']} GiB; ram_available={d['ram_available_gb']} GiB; "
+        f"disk_used={d['disk_used_gb']} GiB; disk_available={d['disk_available_gb']} GiB"
     )

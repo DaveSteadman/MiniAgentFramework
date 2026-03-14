@@ -137,12 +137,12 @@ Single JSON payload for orchestration planning.
       ],
       "outputs": [
         "`page_type` is one of:",
-        "`\"article\"` \u2014 substantial prose content (\u2265 300 words, \u2264 4 links per 100 words)",
-        "`\"index\"` \u2014 listing/aggregation page (< 150 words, or \u2265 7 links per 100 words)",
-        "`\"mixed\"` \u2014 some content plus significant navigation (common on news section pages)",
+        "`\"article\"` - substantial prose content (\u2265 300 words, \u2264 4 links per 100 words)",
+        "`\"index\"` - listing/aggregation page (< 150 words, or \u2265 7 links per 100 words)",
+        "`\"mixed\"` - some content plus significant navigation (common on news section pages)",
         "`word_count`: prose words extracted after noise removal and deduplication",
         "`article_links`: sorted by `topic` match score when `topic` provided; otherwise page order",
-        "On failure: `{\"error\": \"description of what went wrong\"}` \u2014 never raises"
+        "On failure: `{\"error\": \"description of what went wrong\"}` - never raises"
       ]
     },
     {
@@ -151,10 +151,10 @@ Single JSON payload for orchestration planning.
       "purpose": "Provide runtime system information for prompt-context enrichment, including OS name, Python/Ollama versions, RAM usage, and disk usage.",
       "module": "code/skills/SystemInfo/system_info_skill.py",
       "functions": [
-        "get_system_info_string()"
+        "get_system_info_dict()"
       ],
       "inputs": [
-        "`get_system_info_string()`",
+        "`get_system_info_dict()`",
         "No arguments.",
         "Typical trigger phrases (select this skill for any of these concepts):",
         "`system information`, `system info`, `system health`",
@@ -167,9 +167,48 @@ Single JSON payload for orchestration planning.
         "`show specs`, `show health`, `system stats`, `resource usage`"
       ],
       "outputs": [
-        "`get_system_info_string()` returns a single string, for example:",
-        "`System info: os=Windows; python=3.14.2; ollama=0.17.5; ram_used=12.34 GiB; ram_available=19.66 GiB; disk_used=110.25 GiB; disk_available=401.75 GiB`"
+        "`get_system_info_dict()` returns a structured dict with individually addressable fields:",
+        "`os` (str) - OS name, e.g. `\"Windows\"`",
+        "`python_version` (str) - e.g. `\"3.10.11\"`",
+        "`ollama_version` (str) - e.g. `\"0.18.0\"`",
+        "`ram_used_gb` (float) - RAM in use in GiB, e.g. `30.80`",
+        "`ram_available_gb` (float) - RAM free in GiB, e.g. `96.49`",
+        "`disk_used_gb` (float) - disk used in GiB, e.g. `937.34`",
+        "`disk_available_gb` (float) - disk free in GiB, e.g. `924.72`"
       ]
+    },
+    {
+      "skill_name": "TaskManagement Skill",
+      "relative_path": "code/skills/TaskManagement/skill.md",
+      "purpose": "Create, query, update, enable, disable, and delete scheduled tasks stored as JSON files in",
+      "module": "code/skills/TaskManagement/task_management_skill.py",
+      "functions": [
+        "create_task(\"DailyWeather\", \"08:00\", \"Check the weather forecast for today and summarise it.\")",
+        "create_task(\"HourlyMemCheck\", \"60\", \"Check free RAM and log it to data/memlog.csv.\")",
+        "create_task(name, schedule, prompt)",
+        "create_task(name: str, schedule: str, prompt: str)",
+        "delete_task(\"OldTask\")",
+        "delete_task(name)",
+        "delete_task(name: str)",
+        "get_task(\"PerformanceHeadroom\")",
+        "get_task()",
+        "get_task(name)",
+        "get_task(name: str)",
+        "list_tasks()",
+        "set_task_enabled(\"DailyWeather\", True)",
+        "set_task_enabled(\"PerformanceHeadroom\", False)",
+        "set_task_enabled(name, enabled)",
+        "set_task_enabled(name: str, enabled: bool)",
+        "set_task_prompt(\"DailyWeather\", \"Get today's weather forecast and temperature for London.\")",
+        "set_task_prompt(name, prompt)",
+        "set_task_prompt(name: str, prompt: str)",
+        "set_task_schedule(\"DailyWeather\", \"07:30\")",
+        "set_task_schedule(\"HourlyMemCheck\", \"30\")",
+        "set_task_schedule(name, schedule)",
+        "set_task_schedule(name: str, schedule: str)"
+      ],
+      "inputs": [],
+      "outputs": []
     },
     {
       "skill_name": "WebExtract Skill",

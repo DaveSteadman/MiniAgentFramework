@@ -295,6 +295,7 @@ def run_dashboard_mode(
 
                 # Lock is now held - record start time and run the task.
                 last_run[name] = now
+                app.record_run(name, now)
                 app.add_log_line(f"[SCHED] Starting: {name}", ui_colors.MAGENTA)
                 app.add_chat_line(f"Sched▶ Task started: {name}", ui_colors.MAGENTA)
 

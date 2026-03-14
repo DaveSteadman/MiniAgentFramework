@@ -121,7 +121,7 @@ def validate_orchestration_iteration(
         return ValidationResult(
             passed=False, message=msg, checks_log=checks,
             planner_feedback=(
-                f"[VALIDATION FAIL — no_calls] {msg} "
+                f"[VALIDATION FAIL - no_calls] {msg} "
                 f"Produce a plan with at least one valid function call."
             ),
             failed_check="no_calls",
@@ -135,7 +135,7 @@ def validate_orchestration_iteration(
         return ValidationResult(
             passed=False, message=msg, checks_log=checks,
             planner_feedback=(
-                f"[VALIDATION FAIL — no_executions] {msg} "
+                f"[VALIDATION FAIL - no_executions] {msg} "
                 f"Check that module paths and function names exactly match the skills catalog."
             ),
             failed_check="no_executions",
@@ -153,16 +153,16 @@ def validate_orchestration_iteration(
             return ValidationResult(
                 passed=False, message=msg, checks_log=checks,
                 planner_feedback=(
-                    f"[VALIDATION FAIL — call_failed] Call {order} ({fn_name}) returned: "
+                    f"[VALIDATION FAIL - call_failed] Call {order} ({fn_name}) returned: "
                     f"'{failure_text[:200]}'. "
-                    f"Revise or remove that call — check argument values and types."
+                    f"Revise or remove that call - check argument values and types."
                 ),
                 failed_check="call_failed",
                 failed_call_order=order,
                 failed_call_function=fn_name,
                 failed_result=failure_text,
             )
-        _pass(checks, f"Call {order} ({fn_name}) — result OK.")
+        _pass(checks, f"Call {order} ({fn_name}) - result OK.")
 
     # -- Check 4: no unresolved placeholders in final prompt --------------------------------------
     if "{{" in final_prompt or "}}" in final_prompt:
@@ -171,7 +171,7 @@ def validate_orchestration_iteration(
         return ValidationResult(
             passed=False, message=msg, checks_log=checks,
             planner_feedback=(
-                f"[VALIDATION FAIL — unresolved_placeholders] {msg} "
+                f"[VALIDATION FAIL - unresolved_placeholders] {msg} "
                 f"Ensure every {{{{outputN}}}} or {{{{output_of_*_call}}}} token is satisfied "
                 f"by a preceding skill call result."
             ),
@@ -186,7 +186,7 @@ def validate_orchestration_iteration(
         return ValidationResult(
             passed=False, message=msg, checks_log=checks,
             planner_feedback=(
-                f"[VALIDATION FAIL — empty_response] {msg} "
+                f"[VALIDATION FAIL - empty_response] {msg} "
                 f"Simplify the final_prompt_template so the LLM can produce a concrete answer."
             ),
             failed_check="empty_response",
@@ -208,17 +208,16 @@ def validate_orchestration_iteration(
             _fail(checks, "Multi-skill plan has no placeholder references in downstream calls.")
             msg = (
                 "Multi-skill plan has chained calls but no argument placeholder references. "
-                "Use {{output_of_previous_call}}, {{output_of_first_call}}, or ${output1.key} "
+                "Use ${output1}, ${output1.field}, ${output2.field} etc. "
                 "to pipe outputs from earlier skill calls into later call arguments."
             )
             return ValidationResult(
                 passed=False, message=msg, checks_log=checks,
                 planner_feedback=(
-                    f"[VALIDATION FAIL — no_chain_placeholders] The plan has "
+                    f"[VALIDATION FAIL - no_chain_placeholders] The plan has "
                     f"{len(plan.python_calls)} calls but downstream calls do not reference "
-                    f"earlier outputs. Use {{{{output_of_first_call}}}}, "
-                    f"{{{{output_of_previous_call}}}}, or ${{{{output1.fieldname}}}} in the "
-                    f"arguments of calls after the first."
+                    f"earlier outputs. Use ${{output1}} (full object), ${{output1.fieldname}} "
+                    f"(named field), or ${{output2.fieldname}} for results of later calls."
                 ),
                 failed_check="no_chain_placeholders",
             )

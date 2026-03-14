@@ -458,10 +458,10 @@ def _cmd_sandbox(arg: str, ctx: SlashCommandContext) -> None:
     sub = arg.strip().lower()
     if sub == "on":
         set_sandbox_enabled(True)
-        ctx.output("Python sandbox enabled — imports restricted to the safe whitelist.", "success")
+        ctx.output("Python sandbox enabled - imports restricted to the safe whitelist.", "success")
     elif sub == "off":
         set_sandbox_enabled(False)
-        ctx.output("Python sandbox disabled — code snippets run with full Python access.", "success")
+        ctx.output("Python sandbox disabled - code snippets run with full Python access.", "success")
         ctx.output("Warning: /sandbox off allows unrestricted code execution. Re-enable with /sandbox on.", "dim")
     else:
         state = "on" if get_sandbox_enabled() else "off"
@@ -519,6 +519,231 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output(f"Error deleting {err}", "error")
 
 
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_tasks(arg: str, ctx: SlashCommandContext) -> None:
+    """List all scheduled tasks from every JSON file in the schedules directory."""
+    import json
+    from workspace_utils import get_schedules_dir
+
+    schedules_dir = get_schedules_dir()
+    if not schedules_dir.exists():
+        ctx.output("Schedules directory not found.", "error")
+        return
+
+    json_files = sorted(schedules_dir.glob("*.json"))
+    if not json_files:
+        ctx.output("No schedule files found.", "dim")
+        return
+
+    total = 0
+    for json_path in json_files:
+        try:
+            data  = json.loads(json_path.read_text(encoding="utf-8"))
+            tasks = data.get("tasks", [])
+        except Exception as exc:
+            ctx.output(f"  {json_path.name}: read error ({exc})", "error")
+            continue
+        for task in tasks:
+            name     = task.get("name", "?")
+            enabled  = task.get("enabled", True)
+            schedule = task.get("schedule", {})
+            stype    = schedule.get("type", "?")
+            if stype == "interval":
+                sched_str = f"every {schedule.get('minutes', '?')} min"
+            elif stype == "daily":
+                sched_str = f"daily @ {schedule.get('time', '?')}"
+            else:
+                sched_str = stype
+            prompts   = task.get("prompts", [])
+            status    = "on " if enabled else "off"
+            first_p   = prompts[0][:60] + "..." if prompts and len(prompts[0]) > 60 else (prompts[0] if prompts else "(no prompts)")
+            ctx.output(f"  [{status}]  {name:<28}  {sched_str:<18}  {first_p}", "item")
+            total += 1
+
+    ctx.output(f"{total} task(s) across {len(json_files)} file(s).", "info")
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _task_find(name: str) -> "tuple | None":
+    """Locate a task by name.  Returns (json_path, data, task_index) or None."""
+    import json
+    from workspace_utils import get_schedules_dir
+
+    schedules_dir = get_schedules_dir()
+    if not schedules_dir.exists():
+        return None
+
+    for json_path in sorted(schedules_dir.glob("*.json")):
+        try:
+            data  = json.loads(json_path.read_text(encoding="utf-8"))
+            tasks = data.get("tasks", [])
+        except Exception:
+            continue
+        for idx, task in enumerate(tasks):
+            if task.get("name", "").lower() == name.lower():
+                return (json_path, data, idx)
+    return None
+
+
+def _task_save(json_path: object, data: dict) -> None:
+    import json
+    json_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
+    """Subcommand dispatcher for /task <sub> [args...]."""
+    import json
+    import re
+    from workspace_utils import get_schedules_dir
+
+    parts = arg.strip().split(None, 1)
+    if not parts:
+        ctx.output("Usage: /task <enable|disable|add|delete|run> [args]  |  /tasks to list all tasks", "dim")
+        return
+
+    sub  = parts[0].lower()
+    rest = parts[1].strip() if len(parts) > 1 else ""
+
+    # ---- enable / disable ----
+    if sub in ("enable", "disable"):
+        if not rest:
+            ctx.output(f"Usage: /task {sub} <name>", "dim")
+            return
+        found = _task_find(rest)
+        if found is None:
+            ctx.output(f"Task '{rest}' not found.", "error")
+            return
+        json_path, data, idx = found
+        data["tasks"][idx]["enabled"] = (sub == "enable")
+        _task_save(json_path, data)
+        ctx.output(f"Task '{data['tasks'][idx]['name']}' {sub}d.", "success")
+        return
+
+    # ---- delete ----
+    if sub == "delete":
+        if not rest:
+            ctx.output("Usage: /task delete <name>", "dim")
+            return
+        found = _task_find(rest)
+        if found is None:
+            ctx.output(f"Task '{rest}' not found.", "error")
+            return
+        json_path, data, idx = found
+        removed_name = data["tasks"][idx]["name"]
+        data["tasks"].pop(idx)
+        if data["tasks"]:
+            _task_save(json_path, data)
+        else:
+            # Remove the file entirely when it's now empty.
+            json_path.unlink()
+        ctx.output(f"Task '{removed_name}' deleted.", "success")
+        return
+
+    # ---- add ----
+    if sub == "add":
+        # Syntax: /task add <name> <minutes | HH:MM> <prompt text...>
+        add_parts = rest.split(None, 2)
+        if len(add_parts) < 3:
+            ctx.output("Usage: /task add <name> <minutes|HH:MM> <prompt>", "dim")
+            ctx.output("  minutes  = interval schedule (e.g. 60)", "dim")
+            ctx.output("  HH:MM    = daily schedule at that wall-clock time (e.g. 08:30)", "dim")
+            return
+
+        task_name  = add_parts[0]
+        sched_arg  = add_parts[1]
+        prompt_txt = add_parts[2].strip()
+
+        # Determine schedule type.
+        if re.fullmatch(r"\d{1,2}:\d{2}", sched_arg):
+            schedule = {"type": "daily", "time": sched_arg}
+            sched_str = f"daily @ {sched_arg}"
+        else:
+            try:
+                minutes = int(sched_arg)
+            except ValueError:
+                ctx.output(f"Invalid schedule '{sched_arg}': use a number of minutes or HH:MM.", "error")
+                return
+            schedule  = {"type": "interval", "minutes": minutes}
+            sched_str = f"every {minutes} min"
+
+        # Check for duplicate name across all files.
+        if _task_find(task_name) is not None:
+            ctx.output(f"A task named '{task_name}' already exists. Delete it first or choose a different name.", "error")
+            return
+
+        schedules_dir = get_schedules_dir()
+        schedules_dir.mkdir(parents=True, exist_ok=True)
+        json_path = schedules_dir / f"task_{task_name}.json"
+
+        new_data = {
+            "tasks": [
+                {
+                    "name":     task_name,
+                    "enabled":  True,
+                    "schedule": schedule,
+                    "prompts":  [prompt_txt],
+                }
+            ]
+        }
+        _task_save(json_path, new_data)
+        ctx.output(f"Task '{task_name}' created ({sched_str}).", "success")
+        ctx.output(f"  Prompt: {prompt_txt[:80]}{'...' if len(prompt_txt) > 80 else ''}", "dim")
+        return
+
+    # ---- run ----
+    if sub == "run":
+        import subprocess
+        import sys
+        from pathlib import Path
+        from ollama_client import get_active_api_key, get_active_host
+        if not rest:
+            ctx.output("Usage: /task run <name>", "dim")
+            return
+        if _task_find(rest) is None:
+            ctx.output(f"Task '{rest}' not found.", "error")
+            return
+        main_py = Path(__file__).resolve().parent / "main.py"
+        cmd = [
+            sys.executable, str(main_py),
+            "--scheduled-item", rest,
+            "--model", ctx.config.resolved_model,
+        ]
+        active_host = get_active_host()
+        if "localhost" not in active_host and "127.0.0.1" not in active_host:
+            cmd += ["--ollama-host", active_host]
+        active_key = get_active_api_key()
+        if active_key:
+            cmd += ["--ollama-api-key", active_key]
+        ctx.output(f"Running task '{rest}' …", "info")
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+            )
+            for line in proc.stdout:
+                ctx.output(line.rstrip(), "dim")
+            proc.wait()
+            if proc.returncode == 0:
+                ctx.output(f"Task '{rest}' completed.", "success")
+            else:
+                ctx.output(f"Task '{rest}' exited with code {proc.returncode}.", "error")
+        except Exception as exc:
+            ctx.output(f"Error running task: {exc}", "error")
+        return
+
+    ctx.output(f"Unknown sub-command '{sub}'. Use: enable, disable, add, delete, run", "error")
+
+
 # ====================================================================================================
 # MARK: REGISTRY
 # ====================================================================================================
@@ -538,6 +763,8 @@ _REGISTRY: dict[str, Callable] = {
     "/deletelogs":    _cmd_deletelogs,
     "/test":          _cmd_test,
     "/recall":        _cmd_recall,
+    "/tasks":         _cmd_tasks,
+    "/task":          _cmd_task,
 }
 
 _DESCRIPTIONS: dict[str, str] = {
@@ -556,4 +783,6 @@ _DESCRIPTIONS: dict[str, str] = {
     "/deletelogs":    "<days>  Delete log date-folders older than N days (e.g. /deletelogs 10)",
     "/test":          "<prompts-file>  Run test_wrapper on a prompts file; streams results live",
     "/recall":        "Show a summary of prior skill outputs stored in this session's context",
+    "/tasks":         "List all scheduled tasks with status, schedule, and first prompt",
+    "/task":          "enable|disable|add|delete|run <name> [schedule] [prompt]  Manage scheduled tasks; /task run <name> executes a task immediately",
 }

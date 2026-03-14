@@ -291,7 +291,21 @@ def resolve_execution_model(requested_model: str) -> str:
 # ====================================================================================================
 _PLANNER_ASK = (
     "Given the user prompt, select needed skills and return python_calls JSON. "
-    "Choose the minimum required skills and provide explicit arguments for each python call."
+    "Choose the minimum required skills and provide explicit arguments for each python call. "
+    "CRITICAL RULE: one execution plan covers EXACTLY ONE pipeline stage. "
+    "Never chain mining (WebMine) with analysis (WebResearchAnalysis) or presentation "
+    "(WebResearchReport, WebResearchOutput) in the same plan unless the user prompt "
+    "explicitly requests multiple stages in a single instruction. "
+    "A prompt about researching, mining, or fetching web content means Stage 1 only. "
+    "A prompt about analysing, summarising, or creating a report means Stage 2 only. "
+    "A prompt about saving, rendering, or sending a report means Stage 3 only. "
+    "CRITICAL RULE: when the user prompt contains task-management intent - any of the words "
+    "change, set, update, modify, create, delete, enable, disable combined with words like "
+    "task, prompt, schedule - you MUST use ONLY the TaskManagement skill and call the "
+    "appropriate function (e.g. set_task_prompt, set_task_schedule, create_task, delete_task). "
+    "Any quoted or inline text that follows 'to' or 'as' in such a prompt is the NEW VALUE "
+    "to pass as an argument - it is NOT a command to execute with other skills. "
+    "Never select DateTime, SystemInfo, FileAccess, or any other skill for task-management requests."
 )
 
 

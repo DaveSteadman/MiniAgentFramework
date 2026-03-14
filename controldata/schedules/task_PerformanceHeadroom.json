@@ -1,0 +1,15 @@
+{
+  "tasks": [
+    {
+      "name": "PerformanceHeadroom",
+      "enabled": true,
+      "schedule": {
+        "type": "interval",
+        "minutes": 60
+      },
+      "prompts": [
+        "Use the SystemInfo skill to get current free RAM in GB and free disk space in GB. Then use the FileAccess skill to append a single CSV row to data/performanceheadroom.csv. The row must be: timestamp,free_ram_gb,free_disk_gb with values formatted as YYYY-MM-DD HH:MM:SS for the timestamp and two decimal places for the numbers. If the file does not yet exist, write a header row first (timestamp,free_ram_gb,free_disk_gb) then append the data row. Do not include any explanation in the file - only the CSV content."
+      ]
+    }
+  ]
+}
