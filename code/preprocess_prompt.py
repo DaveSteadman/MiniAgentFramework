@@ -1,21 +1,20 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# Standalone CLI tool for converting a raw user prompt into a structured JSON skill execution plan.
+# Standalone CLI tool that shows the tool definitions derived from the current skills catalog.
 #
-# Wraps the shared planner_engine logic so that the planning step can be run and inspected in
-# isolation, independently of the full orchestration pipeline. Useful for debugging planner output
-# or pre-generating a plan file to feed into downstream tooling.
+# Loads the skills_summary.md catalog and prints the JSON Schema tool definitions that are sent to
+# the model via /v1/chat/completions. Useful for debugging which tools are visible to the model and
+# verifying that skill signatures are parsed correctly.
 #
 # Usage:
-#   python preprocess_prompt.py --user-prompt "output the time"
-#   python preprocess_prompt.py --user-prompt "output the time" --print-only
-#   python preprocess_prompt.py --user-prompt "..." --output /path/to/plan.json
+#   python preprocess_prompt.py
+#   python preprocess_prompt.py --skills-summary /path/to/skills_summary.md
+#   python preprocess_prompt.py --output /path/to/tool_definitions.json
 #
 # Related modules:
-#   - planner_engine.py     -- shared planning logic called here
-#   - ollama_client.py      -- Ollama server management called before planning
-#   - main.py               -- uses the same planner_engine functions inline
+#   - skills_catalog_builder.py  -- catalog loading and tool definition building
+#   - orchestration.py           -- uses build_tool_definitions at runtime
 # ====================================================================================================
 
 
@@ -26,62 +25,44 @@ import argparse
 import json
 from pathlib import Path
 
-from ollama_client import ensure_ollama_running
-from planner_engine import DEFAULT_PLANNER_ASK
-from planner_engine import create_skill_execution_plan
+from skills_catalog_builder import build_tool_definitions
+from skills_catalog_builder import load_skills_payload
 
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-DEFAULT_MODEL          = "gpt-oss:20b"
-DEFAULT_NUM_CTX        = 131072
 DEFAULT_SKILLS_SUMMARY = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
-DEFAULT_OUTPUT_PLAN    = Path(__file__).resolve().parent / "skills" / "skills_plan.json"
 
 
 # ====================================================================================================
 # MARK: CLI
 # ====================================================================================================
-def parse_preprocess_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Pre-process user prompt into executable Python call plan.")
-    parser.add_argument("--user-prompt", required=True, help="Raw user prompt text to plan against.")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Show tool definitions derived from the skills catalog.")
     parser.add_argument("--skills-summary", default=str(DEFAULT_SKILLS_SUMMARY), help="Path to skills_summary.md file.")
-    parser.add_argument("--planner-ask", default=DEFAULT_PLANNER_ASK, help="Instruction for the planning LLM call.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model for planning.")
-    parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX, help="Context window for planning LLM call.")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT_PLAN), help="Path to write structured JSON plan.")
-    parser.add_argument("--print-only", action="store_true", help="Print plan JSON and skip writing output file.")
+    parser.add_argument("--output", default=None, help="Optional path to write tool definitions JSON.")
     return parser.parse_args()
 
 
 # ----------------------------------------------------------------------------------------------------
 def main() -> None:
-    args = parse_preprocess_args()
+    args = parse_args()
 
     skills_summary_path = Path(args.skills_summary).resolve()
-    output_path         = Path(args.output).resolve()
+    skills_payload = load_skills_payload(skills_summary_path)
+    tool_defs = build_tool_definitions(skills_payload)
 
-    ensure_ollama_running()
+    output_text = json.dumps(tool_defs, indent=2)
 
-    # create_skill_execution_plan returns (plan, planner_prompt_text, planner_llm_result).
-    plan, _, _ = create_skill_execution_plan(
-        user_prompt=args.user_prompt,
-        skills_summary_path=skills_summary_path,
-        planner_ask=args.planner_ask,
-        model_name=args.model,
-        num_ctx=args.num_ctx,
-    )
-
-    plan_text = json.dumps(plan.to_dict(), indent=2)
-
-    if args.print_only:
-        print(plan_text)
-        return
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(plan_text, encoding="utf-8")
-    print(f"Wrote execution plan: {output_path.as_posix()}")
+    if args.output:
+        output_path = Path(args.output).resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(output_text, encoding="utf-8")
+        print(f"Wrote {len(tool_defs)} tool definitions: {output_path.as_posix()}")
+    else:
+        print(f"# {len(tool_defs)} tool definitions from {skills_summary_path.name}\n")
+        print(output_text)
 
 
 # ----------------------------------------------------------------------------------------------------

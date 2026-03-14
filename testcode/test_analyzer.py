@@ -5,9 +5,9 @@
 #
 # Reads a test results CSV produced by test_wrapper.py, then for each row parses the associated
 # log file to extract structured information about:
-#   - Which skills the planner selected and why
-#   - Whether the LLM planner succeeded or fell back to the deterministic fallback
-#   - How many orchestration iterations were required
+#   - Which skill functions the model called during tool rounds
+#   - Whether the model used tool calls or answered directly without tools
+#   - How many tool rounds were required before a final answer
 #   - Whether the run succeeded or failed at validation
 #
 # Hard-signal failure detection (no LLM required):
@@ -34,7 +34,6 @@
 # ====================================================================================================
 import argparse
 import csv
-import json
 import re
 import sys
 from collections import Counter
@@ -81,12 +80,16 @@ ANALYSIS_FIELDS = [
     "outcome",               # PASS / FAIL / TIMEOUT / GAP
     "failure_reason",
     "iterations_used",
-    "planner_mode",          # LLM / FALLBACK / UNKNOWN
+    "planner_mode",          # TOOL_CALLS / DIRECT / UNKNOWN
     "skills_selected",       # comma-separated list
     "skills_reasons",        # pipe-separated list of reasons
     "validation_result",     # PASS / FAIL / UNKNOWN
     "final_output_preview",  # first 120 chars of final output
 ]
+
+
+# Regex to match tool call function entries in the TOOL CALL SUMMARY section
+_TOOL_FUNC_RE = re.compile(r"^([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)\(\)", re.MULTILINE)
 
 
 # ====================================================================================================
@@ -108,56 +111,38 @@ def _split_log_sections(log_text: str) -> dict[str, str]:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _extract_plan_json(sections: dict[str, str]) -> dict | None:
-    """Return the parsed plan JSON dict from the first PLAN JSON section, or None."""
+def _extract_tool_calls(sections: dict[str, str]) -> tuple[str, str]:
+    """Return (skills_selected, skills_reasons) extracted from the TOOL CALL SUMMARY section."""
     for title, body in sections.items():
-        if "PLAN JSON" in title:
-            try:
-                start = body.find("{")
-                if start >= 0:
-                    # Find the matching closing brace
-                    depth = 0
-                    for i in range(start, len(body)):
-                        if body[i] == "{":
-                            depth += 1
-                        elif body[i] == "}":
-                            depth -= 1
-                            if depth == 0:
-                                return json.loads(body[start : i + 1])
-            except (json.JSONDecodeError, ValueError):
-                pass
-    return None
+        if "TOOL CALL SUMMARY" in title:
+            matches = _TOOL_FUNC_RE.findall(body)
+            if matches:
+                return ", ".join(matches), ""
+    return "", ""
 
 
 # ----------------------------------------------------------------------------------------------------
 def _count_iterations(sections: dict[str, str]) -> int:
-    """Count how many ITERATION n sections appear in the log."""
-    count = 0
+    """Count how many distinct tool rounds appear in the log."""
+    round_numbers: set[int] = set()
     for title in sections:
-        if re.match(r"ITERATION \d+ -", title):
-            count += 1
-    # Each iteration has multiple sub-sections; count unique iteration numbers
-    iter_numbers = set()
-    for title in sections:
-        m = re.match(r"ITERATION (\d+)", title)
+        # Match "TOOL ROUND 1  [HH:MM:SS]" but not "TOOL ROUND 1 - EXECUTION FLOW  [...]"
+        m = re.match(r"TOOL ROUND (\d+)(?:\s+\[|\s*$)", title)
         if m:
-            iter_numbers.add(int(m.group(1)))
-    return len(iter_numbers) if iter_numbers else max(1, count // 4)
+            round_numbers.add(int(m.group(1)))
+    return len(round_numbers) if round_numbers else 1
 
 
 # ----------------------------------------------------------------------------------------------------
 def _detect_planner_mode(sections: dict[str, str]) -> str:
-    """Return 'LLM', 'FALLBACK', or 'UNKNOWN' based on planner TPS presence."""
-    for title, body in sections.items():
-        if "PLAN JSON" in title or "PRE-PROCESSING PLAN" in title:
-            if "Planner TPS:" in body:
-                return "LLM"
-            if "Fallback" in body or "fallback" in body:
-                return "FALLBACK"
-    # If a PLAN JSON section exists with no TPS line it's likely a fallback
+    """Return 'TOOL_CALLS' if the model used tools, 'DIRECT' if it answered without tools."""
     for title in sections:
-        if "PLAN JSON" in title:
-            return "FALLBACK"
+        # Any TOOL ROUND N section (not the EXECUTION FLOW sub-section) signals tool use.
+        if re.match(r"TOOL ROUND \d+", title) and " - EXECUTION FLOW" not in title:
+            return "TOOL_CALLS"
+    # An ORCHESTRATION RUN section with no tool rounds means the model answered directly.
+    if any("ORCHESTRATION RUN" in title for title in sections):
+        return "DIRECT"
     return "UNKNOWN"
 
 
@@ -197,11 +182,9 @@ def parse_log_file(log_path: Path) -> dict:
     result["planner_mode"]      = _detect_planner_mode(sections)
     result["validation_result"] = _extract_validation_result(sections)
 
-    plan = _extract_plan_json(sections)
-    if plan:
-        skills = plan.get("selected_skills", [])
-        result["skills_selected"] = ", ".join(s.get("skill_name", "") for s in skills)
-        result["skills_reasons"]  = " | ".join(s.get("reason", "") for s in skills)
+    skills_selected, skills_reasons = _extract_tool_calls(sections)
+    result["skills_selected"] = skills_selected
+    result["skills_reasons"]  = skills_reasons
 
     return result
 
@@ -255,18 +238,18 @@ def build_gap_report(analysis_rows: list[dict]) -> str:
     lines.append(f"GAP (admitted): {outcomes.get('GAP', 0)}")
     lines.append("")
 
-    # Planner mode breakdown
+    # Tool-calling mode breakdown
     planner_counts = Counter(r["planner_mode"] for r in analysis_rows)
-    lines.append("Planner mode breakdown:")
+    lines.append("Tool-calling mode breakdown:")
     for mode, count in planner_counts.most_common():
         lines.append(f"  {mode:<12} {count}")
     lines.append("")
 
-    # Iterations breakdown
+    # Tool rounds breakdown
     iter_counts = Counter(r["iterations_used"] for r in analysis_rows)
-    lines.append("Iterations required:")
-    for iters, count in sorted(iter_counts.items()):
-        lines.append(f"  {iters} iteration(s): {count} prompt(s)")
+    lines.append("Tool rounds used:")
+    for rounds, count in sorted(iter_counts.items()):
+        lines.append(f"  {rounds} round(s): {count} prompt(s)")
     lines.append("")
 
     # Skill coverage
@@ -307,13 +290,13 @@ def build_gap_report(analysis_rows: list[dict]) -> str:
             lines.append(f"  Preview: {row['final_output_preview']!r}")
             lines.append("")
 
-    # Fallback planner usage on non-trivial prompts
-    fallback_rows = [r for r in analysis_rows if r["planner_mode"] == "FALLBACK"]
-    if fallback_rows:
+    # Prompts where the model answered without using any tools
+    direct_rows = [r for r in analysis_rows if r["planner_mode"] == "DIRECT"]
+    if direct_rows:
         lines.append("-" * 60)
-        lines.append("PROMPTS THAT TRIGGERED PLANNER FALLBACK:")
+        lines.append("PROMPTS ANSWERED WITHOUT TOOL CALLS:")
         lines.append("-" * 60)
-        for row in fallback_rows:
+        for row in direct_rows:
             lines.append(f"  [{row['outcome']}]  {row['prompt']!r}")
         lines.append("")
 

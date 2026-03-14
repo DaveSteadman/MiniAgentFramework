@@ -28,7 +28,7 @@ Fetch a web page by URL and extract its readable prose content, stripping all HT
 - `summarize the page at ...`
 
 ## Example
-Typical chained usage - planner selects both WebSearch and WebExtract:
+Typical chained usage - model calls both WebSearch and WebExtract:
 1. WebSearch returns a list of results including URLs.
 2. `fetch_page_text("https://example.com/article", max_words=400)` → returns page prose.
 3. Final LLM synthesizes an answer from the extracted text.

@@ -40,5 +40,5 @@ RAM, memory, disk space, storage, available space, or free space - including ind
   - "how much RAM is available?" -> `get_system_info_dict()`, read `ram_available_gb`
   - "what version of python is running?" -> `get_system_info_dict()`, read `python_version`
   - "show current system info" -> `get_system_info_dict()`; LLM formats the dict for display
-  - "write system info to a file" -> `get_system_info_dict()` then pass result to FileAccess skill
-  - "append RAM and disk to a CSV file" -> `get_system_info_dict()`, then reference `${outputN.ram_available_gb}` and `${outputN.disk_available_gb}` in the FileAccess call
+  - "write system info to a file" -> call `get_system_info_dict()`, then pass the result to a FileAccess skill call
+  - "append RAM and disk to a CSV file" -> call `get_system_info_dict()`, then use the returned dict values in a FileAccess write call

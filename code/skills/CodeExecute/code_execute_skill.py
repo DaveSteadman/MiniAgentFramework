@@ -73,8 +73,9 @@ def _make_safe_import(allowed: frozenset):
         top_level = name.split(".")[0]
         if top_level not in allowed:
             raise ImportError(
-                f"Import '{name}' is not permitted in sandboxed execution. "
-                f"Allowed modules: {sorted(allowed)}"
+                f"Import '{name}' is not available. Only Python stdlib modules are permitted "
+                f"(math, itertools, collections, datetime, json, csv, re, statistics, etc.). "
+                f"Rewrite using stdlib only."
             )
         return real_import(name, *args, **kwargs)
 
@@ -98,7 +99,8 @@ def run_python_snippet(code: str) -> str:
     """Execute a Python snippet in a sandboxed environment and return captured stdout.
 
     The snippet must write its final output via print() calls.
-    Imports are restricted to a safe whitelist; os, sys, subprocess, and file I/O are blocked.
+    When sandbox is enabled (default), imports are restricted to a safe stdlib whitelist and
+    os, sys, subprocess, and file I/O are blocked. Sandbox state is toggled via /sandbox on|off.
     Execution is limited to _EXECUTION_TIMEOUT_S seconds.
 
     Args:

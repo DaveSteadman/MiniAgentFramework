@@ -16,7 +16,7 @@
 #
 # Related modules:
 #   - main.py                   -- calls configure_host(), ensure_ollama_running(), model utilities
-#   - planner_engine.py         -- uses call_ollama_extended for planner LLM calls
+#   - orchestration.py          -- uses call_llm_chat for the tool-calling pipeline
 #   - skills_catalog_builder.py -- uses call_ollama for optional LLM skill summarisation
 #   - system_check.py           -- uses model listing and call_ollama for diagnostics
 # ====================================================================================================
@@ -492,3 +492,117 @@ def call_ollama(
 ) -> str:
     """Convenience wrapper - returns the response text only. See call_ollama_extended for token counts."""
     return call_ollama_extended(model_name=model_name, prompt=prompt, host=host, num_ctx=num_ctx).response
+
+
+# ====================================================================================================
+# MARK: CHAT WITH TOOLS
+# ====================================================================================================
+@dataclass
+class ChatCallResult:
+    """Structured return from call_llm_chat, covering token usage and optional tool calls."""
+    message:           dict    # full assistant message: {"role", "content", "tool_calls"?}
+    finish_reason:     str     # "stop" | "tool_calls"
+    prompt_tokens:     int
+    completion_tokens: int
+    tokens_per_second: float
+
+    @property
+    def response(self) -> str:
+        """Text content of the assistant message. Empty when the model issued tool_calls instead."""
+        return (self.message.get("content") or "").strip()
+
+    @property
+    def tool_calls(self) -> list[dict]:
+        """Tool call objects requested by the model, or an empty list."""
+        return self.message.get("tool_calls") or []
+
+
+# ----------------------------------------------------------------------------------------------------
+def call_llm_chat(
+    model_name: str,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    host: str | None = None,
+    num_ctx: int | None = None,
+    timeout: int | None = None,
+) -> ChatCallResult:
+    """Call /v1/chat/completions (OpenAI-compatible) and return a ChatCallResult.
+
+    Supports optional tool definitions for native tool calling. Compatible with Ollama,
+    LM Studio, and any OpenAI-format server. The num_ctx value is passed in an Ollama
+    extensions 'options' block and is silently ignored by non-Ollama servers.
+    """
+    host = host or _active_host
+    ensure_ollama_running(host=host, start_if_needed=True)
+
+    if _llm_call_log_fn is not None:
+        last_user = next(
+            (m.get("content", "")[:32] for m in reversed(messages) if m.get("role") == "user"), ""
+        )
+        ctx_str  = f"{num_ctx:,}" if num_ctx is not None else "default"
+        tool_str = f" | {len(tools)} tools" if tools else ""
+        try:
+            _llm_call_log_fn(f"[LLM chat] {model_name} | ctx={ctx_str}{tool_str} | {last_user!r}")
+        except Exception:
+            pass
+
+    payload: dict = {
+        "model":    model_name,
+        "messages": messages,
+        "stream":   False,
+    }
+    if tools:
+        payload["tools"] = tools
+    if num_ctx is not None:
+        payload["options"] = {"num_ctx": num_ctx}
+
+    effective_timeout = timeout if timeout is not None else _DEFAULT_LLM_TIMEOUT
+    start_time = time.monotonic()
+
+    try:
+        body = _request_json(
+            url=f"{host.rstrip('/')}/v1/chat/completions",
+            method="POST",
+            payload=payload,
+            timeout=effective_timeout,
+        )
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="replace")
+        if error.code == 404 and "not found" in error_body.lower():
+            available_models = []
+            try:
+                available_models = list_ollama_models(host=host)
+            except Exception:
+                pass
+            if available_models:
+                raise RuntimeError(
+                    f"Model '{model_name}' not found. Installed models: {', '.join(available_models)}"
+                ) from error
+        raise RuntimeError(f"LLM chat HTTP error {error.code}: {error_body}") from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"Unable to reach server at {host}: {error.reason}") from error
+    except json.JSONDecodeError as error:
+        raise RuntimeError("LLM chat returned a non-JSON response") from error
+
+    elapsed = time.monotonic() - start_time
+
+    choices = body.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"LLM chat response has no choices: {body}")
+
+    choice        = choices[0]
+    message       = choice.get("message") or {}
+    finish_reason = choice.get("finish_reason") or "stop"
+
+    usage             = body.get("usage") or {}
+    prompt_tokens     = usage.get("prompt_tokens", 0)
+    completion_tokens = usage.get("completion_tokens", 0)
+    tps = completion_tokens / elapsed if elapsed > 0 and completion_tokens > 0 else 0.0
+
+    return ChatCallResult(
+        message=message,
+        finish_reason=finish_reason,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        tokens_per_second=tps,
+    )

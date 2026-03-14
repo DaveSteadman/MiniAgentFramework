@@ -8,7 +8,7 @@
         "minutes": 5
       },
       "prompts": [
-        "Get RAM and disk usage and append to ./data/pulse_log.csv with timestamp as the first column."
+        "append timestamp, used ram, free ram, used disk space, free disk space to sys_pulse.csv"
       ]
     }
   ]

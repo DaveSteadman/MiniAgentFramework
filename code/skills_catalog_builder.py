@@ -5,8 +5,8 @@
 #
 # Scans the skills directory recursively for skill.md files, summarises each one into a structured
 # JSON record (skill name, module path, functions, inputs, outputs), then writes the full catalog
-# as a single skills_summary.md file. The planner engine reads this summary at runtime to decide
-# which skill calls to include in an execution plan.
+# as a single skills_summary.md file. The orchestration layer uses this catalog to build
+# JSON Schema tool definitions sent to the model via /v1/chat/completions.
 #
 # Supports two summarisation modes:
 #   - LLM-assisted: sends the skill.md text to an Ollama model and parses the JSON response.
@@ -19,7 +19,7 @@
 #
 # Related modules:
 #   - ollama_client.py    -- used for optional LLM-assisted summarisation
-#   - planner_engine.py   -- consumes the skills_summary.md produced here
+#   - orchestration.py    -- calls build_tool_definitions at runtime; consumes the catalog
 # ====================================================================================================
 
 
@@ -197,6 +197,170 @@ def normalize_summary(summary: dict, skill_md_path: Path) -> dict:
             normalized[field_name] = []
 
     return normalized
+
+
+# ====================================================================================================
+# MARK: CATALOG LOADING
+# ====================================================================================================
+def extract_first_json_object(text: str) -> str:
+    """Extract the first complete JSON object from *text*, raising RuntimeError if none found."""
+    start_index = text.find("{")
+    if start_index < 0:
+        raise RuntimeError("No JSON object found in provided text")
+
+    depth     = 0
+    in_string = False
+    escaped   = False
+
+    for index in range(start_index, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start_index : index + 1]
+
+    raise RuntimeError("Failed to parse a complete JSON object from text")
+
+
+# ----------------------------------------------------------------------------------------------------
+def _rebuild_skills_catalog_if_stale(skills_summary_path: Path) -> None:
+    """Rebuild skills_summary.md when any skill.md is newer than the summary (no-LLM fast path)."""
+    skills_root = skills_summary_path.parent
+    if not skills_summary_path.exists():
+        needs_rebuild = True
+    else:
+        summary_mtime = skills_summary_path.stat().st_mtime
+        skill_files   = list(skills_root.rglob("skill.md"))
+        needs_rebuild = any(sf.stat().st_mtime > summary_mtime for sf in skill_files)
+
+    if not needs_rebuild:
+        return
+
+    skill_files  = find_skill_files(skills_root)
+    summaries    = [
+        normalize_summary(
+            summarize_skill(sf, use_llm=False, model_name="", num_ctx=0),
+            sf,
+        )
+        for sf in skill_files
+    ]
+    summary_text = render_summary_document(summaries, skills_summary_path)
+    skills_summary_path.parent.mkdir(parents=True, exist_ok=True)
+    skills_summary_path.write_text(summary_text, encoding="utf-8")
+
+
+# ----------------------------------------------------------------------------------------------------
+def load_skills_payload(skills_summary_path: Path) -> dict:
+    """Load the skills catalog JSON from *skills_summary_path*, rebuilding it if stale."""
+    _rebuild_skills_catalog_if_stale(skills_summary_path)
+    raw_text     = skills_summary_path.read_text(encoding="utf-8")
+    json_segment = extract_first_json_object(raw_text)
+    return json.loads(json_segment)
+
+
+# ====================================================================================================
+# MARK: TOOL DEFINITIONS
+# ====================================================================================================
+_CLEAN_SIG_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\(([^"<>\\]*)\)$')
+_PARAM_RE     = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*([A-Za-z_][A-Za-z0-9_\[\]| ]*))?\s*(?:=\s*\S+)?')
+
+
+def _python_type_to_json_type(ptype: str) -> str:
+    ptype_lower = ptype.lower().strip()
+    if ptype_lower in ("bool", "boolean"):
+        return "boolean"
+    if ptype_lower in ("int", "float", "number"):
+        return "number"
+    return "string"
+
+
+def _parse_tool_signature(sig: str) -> tuple[str, list[dict]] | None:
+    """Parse 'func_name(p1: type1, p2: type2)' into (name, params_list).
+
+    Returns None when the signature looks like an example call (contains quotes, <>, or backslashes).
+    """
+    m = _CLEAN_SIG_RE.match(sig.strip())
+    if not m:
+        return None
+    func_name  = m.group(1)
+    params_str = m.group(2).strip()
+
+    params: list[dict] = []
+    if params_str:
+        for part in params_str.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            pm = _PARAM_RE.match(part)
+            if not pm:
+                continue
+            pname       = pm.group(1).strip()
+            ptype       = (pm.group(2) or "str").strip()
+            has_default = "=" in part
+            params.append({"name": pname, "type": ptype, "required": not has_default})
+
+    return func_name, params
+
+
+def build_tool_definitions(skills_payload: dict) -> list[dict]:
+    """Convert the skills catalog payload into OpenAI-format JSON Schema tool definitions.
+
+    Each clean function signature (e.g. 'get_datetime_data()' or 'set_task_prompt(name: str, ...)')
+    becomes one tool entry. Example-call entries in the functions list are silently skipped.
+    Compatible with Ollama /v1/chat/completions, LM Studio, and OpenAI.
+    """
+    tools:      list[dict] = []
+    seen_names: set[str]   = set()
+
+    for skill in skills_payload.get("skills", []):
+        purpose = skill.get("purpose", "")
+        module  = skill.get("module", "")
+
+        for func_sig in skill.get("functions", []):
+            parsed = _parse_tool_signature(func_sig)
+            if parsed is None:
+                continue
+            func_name, params = parsed
+            if func_name in seen_names:
+                continue
+            seen_names.add(func_name)
+
+            properties: dict = {}
+            required:   list = []
+            for p in params:
+                properties[p["name"]] = {
+                    "type":        _python_type_to_json_type(p["type"]),
+                    "description": p["name"],
+                }
+                if p["required"]:
+                    required.append(p["name"])
+
+            tool_func: dict = {
+                "name":        func_name,
+                "description": f"{purpose}  [module: {Path(module).stem}]",
+                "parameters": {
+                    "type":       "object",
+                    "properties": properties,
+                },
+            }
+            if required:
+                tool_func["parameters"]["required"] = required
+
+            tools.append({"type": "function", "function": tool_func})
+
+    return tools
 
 
 # ----------------------------------------------------------------------------------------------------

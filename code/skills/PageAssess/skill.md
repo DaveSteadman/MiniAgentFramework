@@ -62,7 +62,7 @@ Also use it to discover article links from any page filtered by a topic.
 - `get links from <url> related to <topic>`
 - `check whether <url> has article content`
 
-## Planner decision guide
+## Decision guide
 
 | `page_type` | Recommended next action |
 |---|---|

@@ -1,20 +1,18 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# Executes the approved Python skill calls declared in an ExecutionPlan.
+# Executes individual Python skill calls requested by the LLM tool-calling pipeline.
 #
 # Loads skill modules dynamically at runtime using importlib, but only after verifying each call
 # against an allow-list derived from the skills_summary catalog. This two-step guard - allow-list
-# check then dynamic import - prevents arbitrary code execution if a malformed or adversarial plan
-# is received from the LLM planner.
+# check then dynamic import - prevents arbitrary code execution if a malformed or adversarial tool
+# call is received from the LLM.
 #
-# Also resolves template argument placeholders (e.g. {{user_prompt}}, {{output_of_previous_call}})
-# before each function call so that skill calls can chain outputs together.
+# Also resolves {{token}} placeholders in string arguments before each function call.
 #
 # Related modules:
-#   - planner_engine.py         -- provides the ExecutionPlan and PythonCall types
-#   - main.py                   -- calls execute_skill_plan_calls inside the orchestration loop
-#   - skills_catalog_builder.py -- produces the skills_summary that drives the allow-list
+#   - orchestration.py           -- calls execute_tool_call inside the tool-calling loop
+#   - skills_catalog_builder.py  -- produces the skills_summary that drives the allow-list
 # ====================================================================================================
 
 
@@ -25,30 +23,17 @@ import importlib.util
 import re
 from pathlib import Path
 
-from planner_engine import ExecutionPlan
-from planner_engine import PythonCall
 from prompt_tokens import resolve_tokens
 from workspace_utils import get_workspace_root
 from workspace_utils import normalize_module_path
 
 
 # ====================================================================================================
-# MARK: EXECUTION TYPES
-# ====================================================================================================
-class ExecutedCall(dict):
-    pass
-
-
-# ====================================================================================================
-# MARK: HELPERS
+# MARK: MODULE LOADER
 # ====================================================================================================
 # Cache of already-loaded callables: (absolute_path_str, function_name) -> callable.
 # Avoids re-executing module-level code on every skill invocation within a session.
 _callable_cache: dict[tuple[str, str], object] = {}
-
-# Pre-compiled pattern for inline ${outputN.field} placeholders embedded within larger strings.
-# Compiled at module level to avoid repeated re.compile() calls inside the hot argument-resolution loop.
-_INLINE_PLACEHOLDER_RE = re.compile(r"\$\{output\d+(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}")
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -98,164 +83,61 @@ def _build_allowlist(skills_payload: dict) -> set[tuple[str, str]]:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _build_module_stem_index(skills_payload: dict) -> dict[str, str]:
-    """Map each skill module's bare stem and folder alias to its full normalised path.
+def _build_function_to_module_index(skills_payload: dict) -> dict[str, str]:
+    """Map clean function names to full normalised module paths.
 
-    Allows the LLM planner to emit short names like 'code_execute_skill' or the folder
-    alias 'CodeExecute' instead of the full catalog path
-    'code/skills/CodeExecute/code_execute_skill'.
+    First occurrence per function name wins (avoids ambiguity when the same function
+    name appears across multiple skills).
     """
     index: dict[str, str] = {}
     for skill in skills_payload.get("skills", []):
-        full = normalize_module_path(skill.get("module", ""))
-        if full:
-            parts = full.split("/")
-            # Index by file stem (e.g. 'web_search_skill').
-            index[parts[-1]] = full
-            # Also index by the containing folder name (e.g. 'WebSearch') so the
-            # planner can emit the skill folder alias and still resolve correctly.
-            if len(parts) >= 2:
-                index[parts[-2]] = full
+        module = normalize_module_path(skill.get("module", ""))
+        if not module:
+            continue
+        for func_sig in skill.get("functions", []):
+            fname = str(func_sig).split("(")[0].strip()
+            if fname and fname not in index:
+                index[fname] = module
     return index
 
-
-# ----------------------------------------------------------------------------------------------------
-def _resolve_call_module(raw_module: str, stem_index: dict[str, str]) -> str:
-    """Return the full normalised module path for *raw_module*.
-
-    If *raw_module* normalises to a known stem, the full catalog path is returned.
-    Otherwise *raw_module* is returned as-is (already a full path).
-    """
-    norm = normalize_module_path(raw_module)
-    return stem_index.get(norm, norm)
-
-
-# ----------------------------------------------------------------------------------------------------
-def _validate_call_allowed(call: PythonCall, allowlist: set[tuple[str, str]], resolved_module: str) -> None:
-    key = (resolved_module, call.function)
-    if key not in allowlist:
-        raise RuntimeError(f"Planned call is not allow-listed by skills summary: {call.module}.{call.function}")
-
-
-# ----------------------------------------------------------------------------------------------------
-def _resolve_indexed_path(index: int, path_segments: list[str], previous_results: list[object]):
-    if index < 0 or index >= len(previous_results):
-        return None, False
-
-    value = previous_results[index]
-    for segment in path_segments:
-        if isinstance(value, dict) and segment in value:
-            value = value[segment]
-            continue
-        return None, False
-
-    return value, True
-
-
-# ----------------------------------------------------------------------------------------------------
-def _resolve_structured_reference(reference: str, previous_results: list[object]):
-    brace_match = re.match(r"^\{(\d+)\}(?:\.[A-Za-z_][A-Za-z0-9_]*)*$", reference)
-    if brace_match:
-        index = int(brace_match.group(1))
-        path_segments = [segment for segment in reference.split(".")[1:] if segment]
-        return _resolve_indexed_path(index=index, path_segments=path_segments, previous_results=previous_results)
-
-    output_match = re.match(r"^\$\{output(\d+)(?:\.[A-Za-z_][A-Za-z0-9_]*)*\}$", reference)
-    if output_match:
-        raw_index = int(output_match.group(1))
-        # `${output1...}` maps to the first prior result; `${output0...}` is also accepted.
-        index = raw_index - 1 if raw_index >= 1 else raw_index
-        inner = reference[2:-1]
-        path_segments = [segment for segment in inner.split(".")[1:] if segment]
-        return _resolve_indexed_path(index=index, path_segments=path_segments, previous_results=previous_results)
-
-    return None, False
-
-
-# ----------------------------------------------------------------------------------------------------
-def _resolve_argument_placeholders(call_arguments: dict, previous_results: list[object], user_prompt: str) -> dict:
-    resolved = {}
-
-    for key, value in call_arguments.items():
-        if not isinstance(value, str):
-            resolved[key] = value
-            continue
-
-        normalized = value.strip()
-        if normalized == "{{user_prompt}}":
-            resolved[key] = user_prompt
-            continue
-
-        if normalized == "{{output_of_first_call}}" and len(previous_results) >= 1:
-            resolved[key] = previous_results[0]
-            continue
-
-        if normalized == "{{output_of_previous_call}}" and previous_results:
-            resolved[key] = previous_results[-1]
-            continue
-
-        structured_value, resolved_structured = _resolve_structured_reference(
-            reference=normalized,
-            previous_results=previous_results,
-        )
-        if resolved_structured:
-            resolved[key] = structured_value
-            continue
-
-        # Substitute any placeholder tokens embedded within a larger string.
-        if _INLINE_PLACEHOLDER_RE.search(normalized):
-            def _substitute_inline(match: re.Match) -> str:
-                substituted, ok = _resolve_structured_reference(
-                    reference=match.group(0),
-                    previous_results=previous_results,
-                )
-                return str(substituted) if ok else match.group(0)
-
-            resolved[key] = _INLINE_PLACEHOLDER_RE.sub(_substitute_inline, normalized)
-            continue
-
-        resolved[key] = resolve_tokens(value)
-
-    return resolved
 
 
 # ====================================================================================================
 # MARK: EXECUTION
 # ====================================================================================================
-def execute_skill_plan_calls(plan: ExecutionPlan, user_prompt: str, skills_payload: dict) -> tuple[list[dict], str]:
-    allowlist    = _build_allowlist(skills_payload=skills_payload)
-    stem_index   = _build_module_stem_index(skills_payload=skills_payload)
-    call_outputs = []
-    raw_results  = []
-    latest_output = user_prompt
+def execute_tool_call(
+    function_name: str,
+    arguments: dict,
+    skills_payload: dict,
+    user_prompt: str = "",
+) -> dict:
+    """Execute one tool call and return the output record.
 
-    for call in sorted(plan.python_calls, key=lambda item: item.order):
-        # Resolve bare module stem (e.g. 'code_execute_skill') to full catalog path.
-        resolved_module = _resolve_call_module(call.module, stem_index)
+    The returned dict has keys: 'function', 'module', 'arguments', 'result'.
+    Raises RuntimeError when the function is not allow-listed or cannot be loaded.
+    """
+    allowlist = _build_allowlist(skills_payload)
+    fn_index  = _build_function_to_module_index(skills_payload)
 
-        # Enforce strict allow-list from skills_summary before any dynamic import execution.
-        _validate_call_allowed(call=call, allowlist=allowlist, resolved_module=resolved_module)
+    module_path = fn_index.get(function_name)
+    if module_path is None:
+        raise RuntimeError(f"Tool '{function_name}' not found in skills catalog")
 
-        call_arguments = _resolve_argument_placeholders(
-            call_arguments=dict(call.arguments),
-            previous_results=raw_results,
-            user_prompt=user_prompt,
-        )
+    if (module_path, function_name) not in allowlist:
+        raise RuntimeError(f"Tool '{function_name}' is not allow-listed by skills catalog")
 
-        # Dynamically import the approved skill module and invoke the selected function.
-        function_ref = _load_callable_from_module_path(module_path=resolved_module, function_name=call.function)
-        result       = function_ref(**call_arguments)
+    # Resolve any {{token}} placeholders in string arguments (e.g. {{today}}).
+    resolved_args = {
+        k: (resolve_tokens(v) if isinstance(v, str) else v)
+        for k, v in arguments.items()
+    }
 
-        call_outputs.append(
-            {
-                "order": call.order,
-                "module": call.module,
-                "function": call.function,
-                "arguments": call_arguments,
-                "result": result,
-            }
-        )
-        raw_results.append(result)
-        latest_output = str(result)
+    fn     = _load_callable_from_module_path(module_path, function_name)
+    result = fn(**resolved_args)
 
-    return call_outputs, latest_output
+    return {
+        "function":  function_name,
+        "module":    module_path,
+        "arguments": resolved_args,
+        "result":    result,
+    }

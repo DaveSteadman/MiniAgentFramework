@@ -9,7 +9,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "CodeExecute Skill",
       "relative_path": "code/skills/CodeExecute/skill.md",
-      "purpose": "Execute a Python code snippet in a sandboxed environment and return the captured stdout as a string - use when the user requests computed or generated data (sequences, tables, calculations) that no other skill can produce.",
+      "purpose": "Execute a Python code snippet in a sandboxed environment and return the captured stdout as a string - use when the user requests computed or generated data (sequences, tables, calculations) that no other skill can produce. Only Python stdlib modules are available (math, itertools, collections, datetime, json, csv, re, statistics, etc.) - third-party packages such as numpy, pandas, sympy, and scipy are not available; always write self-contained stdlib code.",
       "module": "code/skills/CodeExecute/code_execute_skill.py",
       "functions": [
         "run_python_snippet(code: str)",
@@ -21,8 +21,9 @@ Single JSON payload for orchestration planning.
         "`run_python_snippet(code: str)`",
         "`code`: a complete, self-contained Python snippet.",
         "The snippet must use print() to emit all output - the return value of the last",
-        "Imports are restricted to a safe whitelist: math, itertools, collections, csv, io,",
-        "os, sys, subprocess, open, eval, exec, and file I/O are blocked.",
+        "Imports are restricted to a safe stdlib whitelist when sandbox is enabled (default): math, itertools, collections, csv, io,",
+        "os, sys, subprocess, open, eval, exec, and file I/O are blocked when sandbox is enabled.",
+        "Sandbox state can be toggled at runtime with `/sandbox on|off`.",
         "Execution timeout: 15 seconds."
       ],
       "outputs": [

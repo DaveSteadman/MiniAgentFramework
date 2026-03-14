@@ -151,8 +151,11 @@ def append_text_file(file_path: str, text: str) -> str:
     except ValueError as err:
         return f"Error: {err}"
     target_path.parent.mkdir(parents=True, exist_ok=True)
+    text_to_write = str(text).replace("\\n", "\n")  # unescape literal \n from model output
+    if not text_to_write.endswith("\n"):
+        text_to_write += "\n"
     with target_path.open("a", encoding="utf-8") as output_file:
-        output_file.write(str(text))
+        output_file.write(text_to_write)
     return f"Appended {target_path.relative_to(WORKSPACE_ROOT).as_posix()}"
 
 

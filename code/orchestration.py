@@ -8,20 +8,14 @@
 #   ConversationHistory     -- rolling window of user/assistant turn pairs
 #   SessionContext          -- per-session skill-output cache for cross-turn injection
 #   resolve_execution_model -- model alias → installed Ollama model name
-#   orchestrate_prompt      -- full planner → skill → LLM → validate pipeline
-#
-# The build_* helpers are internal to orchestrate_prompt but kept module-level so
-# preprocess_prompt.py and tests can reach them if needed.
+#   orchestrate_prompt      -- tool-calling pipeline: messages → skills → synthesized response
 #
 # Related modules:
 #   - main.py                    -- creates config, dispatches modes
 #   - modes/dashboard.py         -- run_dashboard_mode
-#   - modes/chat.py (future)     -- run_chat_mode
-#   - modes/scheduler.py (future)-- run_scheduler_mode
-#   - planner_engine.py          -- create_skill_execution_plan
-#   - skill_executor.py          -- execute_skill_plan_calls
-#   - orchestration_validation.py-- validate_orchestration_iteration
-#   - ollama_client.py           -- call_ollama_extended, list_ollama_models
+#   - skill_executor.py          -- execute_tool_call (executes individual skill calls)
+#   - skills_catalog_builder.py  -- build_tool_definitions (generates JSON Schema tool specs)
+#   - ollama_client.py           -- call_llm_chat (/v1/chat/completions with tools support)
 # ====================================================================================================
 
 
@@ -32,17 +26,16 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from ollama_client import call_ollama_extended
+from ollama_client import call_llm_chat
 from ollama_client import list_ollama_models
 from ollama_client import resolve_model_name
-from orchestration_validation import validate_orchestration_iteration
-from planner_engine import create_skill_execution_plan
 from prompt_tokens import resolve_tokens
 from runtime_logger import SessionLogger
-from skill_executor import execute_skill_plan_calls
+from skill_executor import execute_tool_call
 from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
 from skills.SystemInfo.system_info_skill import get_system_info_string
+from skills_catalog_builder import build_tool_definitions
 
 
 # ====================================================================================================
@@ -285,219 +278,53 @@ def resolve_execution_model(requested_model: str) -> str:
 
     return resolved
 
-
 # ====================================================================================================
-# MARK: PROMPT BUILDING HELPERS
+# MARK: LOG FORMATTING
 # ====================================================================================================
-_PLANNER_ASK = (
-    "Given the user prompt, select needed skills and return python_calls JSON. "
-    "Choose the minimum required skills and provide explicit arguments for each python call. "
-    "CRITICAL RULE: one execution plan covers EXACTLY ONE pipeline stage. "
-    "Never chain mining (WebMine) with analysis (WebResearchAnalysis) or presentation "
-    "(WebResearchReport, WebResearchOutput) in the same plan unless the user prompt "
-    "explicitly requests multiple stages in a single instruction. "
-    "A prompt about researching, mining, or fetching web content means Stage 1 only. "
-    "A prompt about analysing, summarising, or creating a report means Stage 2 only. "
-    "A prompt about saving, rendering, or sending a report means Stage 3 only. "
-    "CRITICAL RULE: when the user prompt contains task-management intent - any of the words "
-    "change, set, update, modify, create, delete, enable, disable combined with words like "
-    "task, prompt, schedule - you MUST use ONLY the TaskManagement skill and call the "
-    "appropriate function (e.g. set_task_prompt, set_task_schedule, create_task, delete_task). "
-    "Any quoted or inline text that follows 'to' or 'as' in such a prompt is the NEW VALUE "
-    "to pass as an argument - it is NOT a command to execute with other skills. "
-    "Never select DateTime, SystemInfo, FileAccess, or any other skill for task-management requests."
-)
-
-
-def build_prompt_context(
-    user_prompt: str,
-    plan,
-    python_call_outputs: list[dict],
-    final_prompt: str,
-    recalled_memories: str,
-) -> dict:
-    return {
-        "original_user_prompt": user_prompt,
-        "recalled_memories":    recalled_memories,
-        "selected_skills":      [item.__dict__ for item in plan.selected_skills],
-        "python_call_outputs":  python_call_outputs,
-        "final_prompt_template": plan.final_prompt_template,
-        "final_prompt":         final_prompt,
-    }
-
-
-# ====================================================================================================
-# MARK: LOG FORMATTING HELPERS
-# ====================================================================================================
-def _format_plan_summary(plan, model_name: str) -> str:
-    """Return a compact one-screen summary of the planner's decided execution plan."""
-    lines: list[str] = []
-    lines.append(f"Model : {model_name}")
-
-    if plan.selected_skills:
-        skill_names = [s.skill_name for s in plan.selected_skills]
-        lines.append(f"Skills: {', '.join(skill_names)}")
-    else:
-        lines.append("Skills: (none selected)")
-
-    if plan.python_calls:
-        lines.append("")
-        for call in sorted(plan.python_calls, key=lambda c: c.order):
-            module_short = Path(call.module).stem
-            lines.append(f"  [{call.order}] {module_short}.{call.function}()")
-            for arg_name, arg_val in (call.arguments or {}).items():
-                val_str = repr(arg_val)
-                if len(val_str) > 120:
-                    val_str = val_str[:117] + "..."
-                lines.append(f"       {arg_name} = {val_str}")
-    else:
-        lines.append("(no Python calls planned - LLM will answer directly)")
-
-    if plan.final_prompt_template:
-        tmpl = plan.final_prompt_template.strip()
-        if len(tmpl) > 140:
-            tmpl = tmpl[:137] + "..."
-        lines.append(f"\nTemplate: {tmpl}")
-
-    return "\n".join(lines)
-
-
-def _format_skill_flow(python_call_outputs: list[dict]) -> str:
-    """Return a compact structural summary of executed skill calls and their results."""
-    if not python_call_outputs:
-        return "(no skill calls were executed)"
+def _format_tool_outputs(tool_outputs: list[dict]) -> str:
+    """Return a compact structural summary of executed tool calls and their results."""
+    if not tool_outputs:
+        return "(no tool calls executed)"
 
     lines: list[str] = []
-    for output in python_call_outputs:
-        order    = output.get("order", "?")
+    for output in tool_outputs:
         module   = Path(output.get("module", "")).stem
         function = output.get("function", "?")
         args     = output.get("arguments", {}) or {}
         result   = output.get("result")
 
-        lines.append(f"[{order}] {module}.{function}()")
-
-        for arg_name, arg_val in args.items():
-            val_str = repr(arg_val)
-            if len(val_str) > 120:
-                val_str = val_str[:117] + "..."
-            lines.append(f"     {arg_name} = {val_str}")
+        lines.append(f"{module}.{function}()")
+        for k, v in args.items():
+            v_str = repr(v)
+            if len(v_str) > 120:
+                v_str = v_str[:117] + "..."
+            lines.append(f"  {k} = {v_str}")
 
         if result is None:
-            lines.append("     → None")
-        elif isinstance(result, dict):
-            keys = list(result.keys())
-            lines.append(f"     → dict  [{', '.join(str(k) for k in keys)}]")
-            for k, v in result.items():
-                v_str = str(v).replace("\n", " ")
-                if len(v_str) > 110:
-                    v_str = v_str[:107] + "..."
-                lines.append(f"          {k}: {v_str!r}")
-        elif isinstance(result, list):
-            lines.append(f"     → list  len={len(result)}")
-            if result:
-                first_str = str(result[0]).replace("\n", " ")
-                if len(first_str) > 110:
-                    first_str = first_str[:107] + "..."
-                lines.append(f"          [0]: {first_str!r}")
+            lines.append("  -> None")
         elif isinstance(result, str):
             result_stripped = result.strip()
             preview_lines   = result_stripped.splitlines()[:4]
             total_lines     = result_stripped.count("\n") + 1
-            lines.append(f"     → str  {len(result)} chars / {total_lines} lines")
+            lines.append(f"  -> str  {len(result)} chars / {total_lines} lines")
             for pl in preview_lines:
                 if len(pl) > 110:
                     pl = pl[:107] + "..."
-                lines.append(f"     {pl}")
+                lines.append(f"  {pl}")
             if total_lines > 4:
-                lines.append(f"     ... ({total_lines - 4} more lines)")
+                lines.append(f"  ... ({total_lines - 4} more lines)")
+        elif isinstance(result, dict):
+            keys = list(result.keys())
+            lines.append(f"  -> dict  [{', '.join(str(k) for k in keys)}]")
+        elif isinstance(result, list):
+            lines.append(f"  -> list  len={len(result)}")
         else:
-            val_str = str(result)
-            if len(val_str) > 110:
-                val_str = val_str[:107] + "..."
-            lines.append(f"     → {type(result).__name__}: {val_str}")
+            v_str = str(result)[:110]
+            lines.append(f"  -> {type(result).__name__}: {v_str}")
 
         lines.append("")
 
     return "\n".join(lines)
-
-
-def _ordinal(n: int) -> str:
-    """Return the English ordinal word for small integers (1→'first', 2→'second', …)."""
-    _WORDS = {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth",
-              6: "sixth", 7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth"}
-    return _WORDS.get(n, str(n))
-
-
-def build_final_llm_prompt(
-    user_prompt: str,
-    plan,
-    python_call_outputs: list[dict],
-    fallback_prompt: str,
-    recalled_memories: str,
-    ambient_system_info: str = "",
-    conversation_history: list[dict] | None = None,
-    prior_skill_context: str = "",
-) -> str:
-    call_outputs_json = json.dumps(python_call_outputs, indent=2)
-    template_text     = (plan.final_prompt_template or "").strip()
-
-    output_of_first_call = python_call_outputs[0]["result"] if python_call_outputs else ""
-    output_of_last_call  = python_call_outputs[-1]["result"] if python_call_outputs else fallback_prompt
-
-    if template_text:
-        template_text = template_text.replace("{user_prompt}",             user_prompt)
-        template_text = template_text.replace("{system_info}",             str(output_of_first_call))
-        template_text = template_text.replace("{output_of_first_call}",    str(output_of_first_call))
-        template_text = template_text.replace("{output_of_previous_call}", str(output_of_last_call))
-        # Substitute {{outputN}} and {{output_of_Nth_call}} shorthand that the planner often emits.
-        for idx, call_out in enumerate(python_call_outputs, start=1):
-            val = str(call_out.get("result", ""))
-            template_text = template_text.replace(f"{{{{output{idx}}}}}",              val)
-            template_text = template_text.replace(f"{{{{output_of_{idx}_call}}}}",      val)
-            template_text = template_text.replace(f"{{{{output_of_call_{idx}}}}}",      val)
-            template_text = template_text.replace(f"{{{{output_of_{_ordinal(idx)}_call}}}}", val)
-
-    history_section = ""
-    if conversation_history:
-        lines = [
-            f"{'User' if t['role'] == 'user' else 'Assistant'}: {t['content']}"
-            for t in conversation_history
-        ]
-        history_section = "Conversation history (most recent last):\n" + "\n".join(lines) + "\n\n"
-
-    system_context_section = ""
-    if ambient_system_info:
-        system_context_section = (
-            "Runtime system context (always available):\n"
-            f"{ambient_system_info}\n\n"
-        )
-
-    prior_context_section = f"{prior_skill_context}\n\n" if prior_skill_context else ""
-
-    return (
-        "You are answering exactly one user question.\n"
-        "Prioritize the user question over all other text.\n"
-        "Answer directly and concisely without generic assistant filler.\n"
-        "Never claim a tool action succeeded unless the Python skill outputs explicitly show success.\n"
-        "Do not call any tools or functions. Respond with plain text only.\n"
-        "\n"
-        f"{history_section}"
-        f"User question:\n{user_prompt}\n"
-        "\n"
-        f"{system_context_section}"
-        f"{prior_context_section}"
-        "Python skill outputs (current turn, authoritative):\n"
-        f"{call_outputs_json}\n"
-        "\n"
-        "Relevant recalled memories (if any):\n"
-        f"{recalled_memories}\n"
-        "\n"
-        "Planner template (optional guidance):\n"
-        f"{template_text or 'N/A'}\n"
-        "\n"
-        "Return only the direct answer to the user question."
-    )
 
 
 # ====================================================================================================
@@ -511,12 +338,14 @@ def orchestrate_prompt(
     session_context: "SessionContext | None" = None,
     quiet: bool = False,
 ) -> tuple[str, int, int, bool, float]:
-    """Run the full planner -> skill -> LLM -> validate pipeline for one prompt.
+    """Run the tool-calling pipeline for one prompt.
+
+    Sends the user message to /v1/chat/completions with JSON Schema tool definitions
+    derived from the skills catalog. The model selects and calls tools; each result is
+    fed back into the message thread until the model produces a plain-text final answer.
 
     Returns (final_response, prompt_tokens, completion_tokens, run_success, tokens_per_second).
-
-    When quiet=True, verbose orchestration stages are written to the log file only -
-    the behaviour used in chat/dashboard/scheduler modes to keep output clean.
+    When quiet=True, verbose stages are written to the log file only.
     """
     def _log(msg: str = "") -> None:
         logger.log_file_only(msg) if quiet else logger.log(msg)
@@ -524,7 +353,6 @@ def orchestrate_prompt(
     def _log_section(title: str) -> None:
         logger.log_section_file_only(title) if quiet else logger.log_section(title)
 
-    # Always write to file only - used for verbose/bulk content that clutters stdout/console.
     def _log_file_only(msg: str = "") -> None:
         logger.log_file_only(msg)
 
@@ -533,13 +361,16 @@ def orchestrate_prompt(
 
     user_prompt = resolve_tokens(user_prompt)
 
+    _log_section("ORCHESTRATION RUN")
+    _log(f"Model:          {config.resolved_model}")
+    _log(f"Context window: {config.num_ctx:,} tokens")
+    _log(f"Max rounds:     {config.max_iterations}")
+
+    # -- Memory --
     _log_file_only("[progress] Storing prompt memories...")
     memory_store_result = store_prompt_memories(user_prompt=user_prompt)
     _log_file_only("[progress] Recalling relevant memories...")
     recalled_memories   = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
-    planner_user_prompt = user_prompt
-    if recalled_memories.startswith("Relevant memories:"):
-        planner_user_prompt = f"{user_prompt}\n\nRecalled memory context:\n{recalled_memories}"
 
     _log_section("MEMORY")
     _log(memory_store_result)
@@ -549,140 +380,159 @@ def orchestrate_prompt(
     _log_section("AMBIENT SYSTEM INFO")
     _log(ambient_system_info)
 
-    planner_feedback    = ""
-    run_success         = False
-    prompt_tokens       = 0
-    completion_tokens   = 0
-    final_response      = ""
-    final_tps           = 0.0
-    python_call_outputs: list[dict] = []
+    # -- Build tool definitions from the skills catalog --
+    tool_defs = build_tool_definitions(config.skills_payload)
+    _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
+
+    # -- Build system message --
+    system_parts = [
+        "You are a helpful AI assistant with access to tools.",
+        "Use tools when they are the appropriate way to answer the user's request - "
+        "for real-time data, file operations, task management, computations, and web research.",
+        "After using tools, synthesize the results into a clear, direct answer.",
+        "Never claim a tool action succeeded unless the tool output explicitly confirms it.",
+        "Do not add explanatory preamble - respond with direct answers only.",
+        "The current runtime system info (RAM, disk, OS, etc.) is already provided below - "
+        "do not call get_system_info_dict unless the user explicitly asks to refresh it.",
+    ]
+    if ambient_system_info:
+        system_parts.append(f"\nRuntime system context:\n{ambient_system_info}")
+    if recalled_memories and recalled_memories.strip():
+        system_parts.append(f"\nRelevant memories:\n{recalled_memories}")
+
     _prior_inject = session_context.as_inject_block() if session_context else ""
+    if _prior_inject:
+        system_parts.append(f"\nPrior session context:\n{_prior_inject}")
 
-    for iteration in range(1, config.max_iterations + 1):
-        _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN")
+    system_message = "\n".join(system_parts)
 
-        planner_ask = _PLANNER_ASK
-        if planner_feedback:
-            planner_ask = f"{_PLANNER_ASK} Previous iteration feedback: {planner_feedback}"
+    # -- Build initial messages list --
+    messages: list[dict] = [{"role": "system", "content": system_message}]
+    if conversation_history:
+        messages.extend(conversation_history)
+    messages.append({"role": "user", "content": user_prompt})
 
-        plan, planner_prompt, planner_llm_result = create_skill_execution_plan(
-            user_prompt=planner_user_prompt,
-            skills_summary_path=_SKILLS_SUMMARY_PATH,
-            planner_ask=planner_ask,
-            model_name=config.resolved_model,
-            num_ctx=config.num_ctx,
-            skills_payload=config.skills_payload,
-        )
-        _log_file_only(f"[progress] Iteration {iteration}: planner complete.")
+    # -- Tool calling loop --
+    tool_outputs:      list[dict] = []
+    prompt_tokens:     int        = 0
+    completion_tokens: int        = 0
+    final_tps:         float      = 0.0
+    run_success:       bool       = False
+    final_response:    str        = ""
 
-        _log_section(f"ITERATION {iteration} - SKILL PLAN")
-        _log(_format_plan_summary(plan, config.resolved_model))
-
-        # Full planner prompt - file only. Replace the static skills catalog block with a
-        # path reference so the log contains only the dynamic, actionable parts.
-        _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN (verbose)")
-        _skills_marker = "Skills summary context:\n"
-        _marker_pos = planner_prompt.find(_skills_marker)
-        if _marker_pos != -1:
-            _logged_prompt = (
-                planner_prompt[:_marker_pos + len(_skills_marker)]
-                + f"[see {_SKILLS_SUMMARY_PATH}]"
-            )
-        else:
-            _logged_prompt = planner_prompt
-        _log_file_only(_logged_prompt)
-        _log_section_file_only(f"ITERATION {iteration} - PRE-PROCESSING PLAN JSON (verbose)")
-        _log_file_only(json.dumps(plan.to_dict(), indent=2))
-
-        if planner_llm_result is not None:
-            _log(f"Planner TPS: {planner_llm_result.tokens_per_second:.1f} tok/s"
-                 f"  ({planner_llm_result.completion_tokens} tokens)")
-
-        _log_section(f"ITERATION {iteration} - SKILL EXECUTION FLOW")
-        _log_file_only(f"[progress] Iteration {iteration}: executing {len(plan.python_calls)} skill call(s)...")
-        with logger.tee_stdout():
-            python_call_outputs, last_call_output = execute_skill_plan_calls(
-                plan=plan,
-                user_prompt=user_prompt,
-                skills_payload=config.skills_payload,
-            )
-        _log_file_only(f"[progress] Iteration {iteration}: skill execution complete.")
-        _log(_format_skill_flow(python_call_outputs))
-
-        # Full outputs JSON (may contain large text/HTML payloads) - file only.
-        _log_section_file_only(f"ITERATION {iteration} - PYTHON CALL OUTPUTS (verbose)")
-        _log_file_only(json.dumps(python_call_outputs, indent=2))
-
-        final_prompt = build_final_llm_prompt(
-            user_prompt=user_prompt,
-            plan=plan,
-            python_call_outputs=python_call_outputs,
-            fallback_prompt=last_call_output,
-            recalled_memories=recalled_memories,
-            ambient_system_info=ambient_system_info,
-            conversation_history=conversation_history,
-            prior_skill_context=_prior_inject,
-        )
-
-        prompt_context = build_prompt_context(
-            user_prompt=user_prompt,
-            plan=plan,
-            python_call_outputs=python_call_outputs,
-            final_prompt=final_prompt,
-            recalled_memories=recalled_memories,
-        )
-
-        _log_section_file_only(f"ITERATION {iteration} - PROMPT CONTEXT JSON (verbose)")
-        _log_file_only(json.dumps(prompt_context, indent=2))
-
-        _log_section(f"ITERATION {iteration} - FINAL LLM EXECUTION")
-
-        if config.skip_final_llm:
-            _log("[skip-final] Final LLM call skipped - returning skill output directly.")
-            final_response    = last_call_output if isinstance(last_call_output, str) else str(last_call_output)
-            run_success       = True
-            break
+    for round_num in range(1, config.max_iterations + 1):
+        _log_section(f"TOOL ROUND {round_num}")
+        _log_file_only(f"[progress] Round {round_num}: calling model...")
 
         try:
-            result            = call_ollama_extended(model_name=config.resolved_model, prompt=final_prompt, num_ctx=config.num_ctx)
-            final_response    = result.response.strip()
-            prompt_tokens     = result.prompt_tokens
-            completion_tokens = result.completion_tokens
-            final_tps         = result.tokens_per_second
+            result = call_llm_chat(
+                model_name=config.resolved_model,
+                messages=messages,
+                tools=tool_defs if tool_defs else None,
+                num_ctx=config.num_ctx,
+            )
         except Exception as error:
-            final_response   = ""
-            planner_feedback = f"Final LLM execution failed: {error}"
-            _log(planner_feedback)
-            _log("Execution did not satisfy validation checks, retrying...")
-            continue
-
-        _log(final_response)
-        _log(f"Final LLM TPS: {final_tps:.1f} tok/s  ({completion_tokens} tokens)")
-
-        validation = validate_orchestration_iteration(
-            plan=plan,
-            python_call_outputs=python_call_outputs,
-            final_prompt=final_prompt,
-            final_response=final_response,
-        )
-
-        _log_section(f"ITERATION {iteration} - VALIDATION")
-        for check_line in validation.checks_log:
-            _log(check_line)
-
-        if validation.passed:
-            run_success = True
-            _log("Orchestration succeeded.")
+            _log(f"[error] LLM call failed in round {round_num}: {error}")
+            final_response = f"(LLM call failed: {error})"
             break
 
-        planner_feedback = validation.planner_feedback
-        _log("Execution did not satisfy validation checks, retrying...")
+        prompt_tokens     += result.prompt_tokens
+        completion_tokens += result.completion_tokens
+        final_tps          = result.tokens_per_second
 
-    if session_context is not None and run_success and python_call_outputs:
+        _log(f"Round {round_num} TPS: {final_tps:.1f} tok/s  ({result.completion_tokens} tokens)")
+
+        if not result.tool_calls:
+            # Model answered directly - this is the final response.
+            final_response = result.response
+            run_success    = bool(final_response)
+            _log(final_response)
+            _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
+            break
+
+        # -- Execute each requested tool call --
+        _log(f"Round {round_num}: model requested {len(result.tool_calls)} tool call(s).")
+        _log_file_only("[progress] Executing tool calls...")
+
+        messages.append({
+            "role":       "assistant",
+            "content":    result.response or "",
+            "tool_calls": result.tool_calls,
+        })
+
+        round_outputs: list[dict] = []
+        for tc in result.tool_calls:
+            tc_id     = tc.get("id", "")
+            tc_func   = tc.get("function", {})
+            func_name = tc_func.get("name", "")
+            raw_args  = tc_func.get("arguments", "{}")
+
+            try:
+                arguments = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+            except json.JSONDecodeError:
+                arguments = {}
+
+            arg_preview = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
+            _log(f"  -> {func_name}({arg_preview})")
+
+            try:
+                output         = execute_tool_call(func_name, arguments, config.skills_payload, user_prompt)
+                result_content = output["result"]
+                if not isinstance(result_content, str):
+                    result_content = json.dumps(result_content, default=str)
+            except Exception as exc:
+                result_content = f"Error executing {func_name}: {exc}"
+                output = {"function": func_name, "module": "", "arguments": arguments, "result": result_content}
+
+            _log(f"     {str(result_content)[:120]}")
+            round_outputs.append(output)
+            tool_outputs.append(output)
+            messages.append({
+                "role":         "tool",
+                "tool_call_id": tc_id,
+                "name":         func_name,
+                "content":      result_content,
+            })
+
+        _log_section_file_only(f"TOOL ROUND {round_num} - EXECUTION FLOW")
+        _log_file_only(_format_tool_outputs(round_outputs))
+
+        if config.skip_final_llm:
+            _log("[skip-final] skip_final_llm set - returning last tool output directly.")
+            last           = round_outputs[-1]["result"] if round_outputs else ""
+            final_response = last if isinstance(last, str) else json.dumps(last, default=str)
+            run_success    = True
+            break
+
+    else:
+        # Exhausted all rounds without a plain-text answer - request a final synthesis.
+        _log("[warn] Max tool rounds exhausted - requesting final synthesis.")
+        try:
+            result             = call_llm_chat(
+                model_name=config.resolved_model,
+                messages=messages,
+                tools=None,
+                num_ctx=config.num_ctx,
+            )
+            final_response     = result.response
+            prompt_tokens     += result.prompt_tokens
+            completion_tokens += result.completion_tokens
+            final_tps          = result.tokens_per_second
+            run_success        = bool(final_response)
+            _log_section("FINAL RESPONSE")
+            _log(final_response)
+        except Exception as error:
+            final_response = f"(synthesis failed: {error})"
+
+    _log_section_file_only("TOOL CALL SUMMARY")
+    _log_file_only(_format_tool_outputs(tool_outputs))
+    _log(f"Total: {prompt_tokens:,} prompt tokens | {completion_tokens:,} completion tokens")
+
+    if session_context is not None and run_success and tool_outputs:
         session_context.add_turn(
             user_prompt=user_prompt,
             assistant_response=final_response,
-            skill_outputs=python_call_outputs,
+            skill_outputs=tool_outputs,
         )
 
     return final_response, prompt_tokens, completion_tokens, run_success, final_tps

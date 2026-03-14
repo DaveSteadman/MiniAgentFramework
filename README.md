@@ -68,7 +68,7 @@ python .\code\main.py --user-prompt "what version of ollama is in use"
 |---|---|---|
 | `--user-prompt TEXT` | `"output the time"` | The prompt to run. |
 | `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` are resolved to the first installed model whose tag contains that string. |
-| `--num-ctx N` | `32768` | Context window size (tokens) passed to Ollama for both the planner and final LLM calls. |
+| `--num-ctx N` | `131072` | Context window size (tokens) passed to Ollama for all LLM calls. |
 | `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address (e.g. `http://MONTBLANC:11434`) or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. Connectivity is checked lazily on the first LLM call, so slash commands work even when the host is unreachable. |
 | `--ollama-api-key KEY` | *(none)* | API key for authenticated hosts (Ollama Cloud). Falls back to `OLLAMA_API_KEY` env var. Applies to all modes. |
 
@@ -92,10 +92,10 @@ python .\code\main.py --chat
 Each turn runs the full orchestration pipeline. The console shows one compact status line per turn:
 
 ```
-[Turn 1 | 1,204 / 32,768 ctx tokens (3.7%) | 42.3 tok/s | gemma3:20b]
+[Turn 1 | 1,204 / 131,072 ctx tokens (0.9%) | 42.3 tok/s | gemma3:20b]
 ```
 
-Verbose orchestration detail (planner prompts, plan JSON, skill outputs, validation) is written to the log file only, keeping the console readable.
+Verbose orchestration detail (tool rounds, tool outputs, and final synthesis) is written to the log file only, keeping the console readable.
 
 Conversation history is passed as context for each subsequent turn, capped at the last 10 turns to prevent context overflow.
 
@@ -107,7 +107,7 @@ Slash commands (see [Slash Commands](#slash-commands) below) are available at th
 |---|---|---|
 | `--chat` | off | Activates chat mode. |
 | `--model ALIAS` | `"20b"` | Same alias resolution as single-shot mode. |
-| `--num-ctx N` | `32768` | Context window for every turn in the session. |
+| `--num-ctx N` | `131072` | Context window for every turn in the session. |
 
 **Example - chat with a smaller context window:**
 ```powershell
@@ -130,7 +130,7 @@ Loads all `*.json` files under `controldata/schedules/`, finds the first task wh
 |---|---|---|
 | `--scheduled-item NAME` | *(required)* | Name of the task to run. |
 | `--model ALIAS` | `"20b"` | Ollama model alias or tag. |
-| `--num-ctx N` | `32768` | Context window size. |
+| `--num-ctx N` | `131072` | Context window size. |
 
 **Example:**
 ```powershell
@@ -176,7 +176,7 @@ Each task file is named `task_<name>.json`. Tasks can be created, queried, and m
 | Option | Default | Description |
 |---|---|---|
 | `--model ALIAS` | `"20b"` | Ollama model used for all scheduled task calls. |
-| `--num-ctx N` | `32768` | Context window for scheduled task calls. |
+| `--num-ctx N` | `131072` | Context window for scheduled task calls. |
 
 ---
 
@@ -202,7 +202,7 @@ Slash commands (see [Slash Commands](#slash-commands) below) are available in th
 | Option | Default | Description |
 |---|---|---|
 | `--model ALIAS` | `"20b"` | Model used for chat prompts in the dashboard. |
-| `--num-ctx N` | `32768` | Context window for dashboard chat calls. |
+| `--num-ctx N` | `131072` | Context window for dashboard chat calls. |
 
 
 ---
@@ -277,7 +277,7 @@ The dashboard hot-reloads schedule files each poll cycle, so enable/disable/add/
 
 ### 2. TaskManagement skill (agent, via natural language)
 
-The `TaskManagement` skill exposes the same operations as proper skill functions, so the planner can call them in response to natural-language chat prompts:
+The `TaskManagement` skill exposes the same operations as proper skill functions, so the model can call them in response to natural-language chat prompts:
 
 | Chat prompt | Skill call |
 |---|---|
@@ -289,7 +289,7 @@ The `TaskManagement` skill exposes the same operations as proper skill functions
 | `"update the DailyWeather prompt to ask about London"` | `set_task_prompt("DailyWeather", "...")` |
 | `"delete the OldTask task"` | `delete_task("OldTask")` |
 
-The skills catalog (`code/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` file is newer than the summary - so newly added skills are always available to the planner without any manual step. Use `/reskill` to force an LLM-quality rebuild (better descriptions) during an active session.
+The skills catalog (`code/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` is newer than the summary - so newly added skills are always available to the model without any manual step. Use `/reskill` to force an LLM-quality rebuild (better descriptions) during an active session.
 
 ### 3. Direct JSON editing
 
@@ -367,8 +367,8 @@ Produces two files alongside the source CSV:
 
 | File | Contents |
 |---|---|
-| `<name>_analysis.csv` | Per-prompt row with: outcome, failure reason, skills selected, planner mode, iteration count, validation result. |
-| `<name>_gaps.txt` | Summary report: pass rate, planner mode breakdown, iteration histogram, skill usage frequency, failing prompts, capability gap signals. |
+| `<name>_analysis.csv` | Per-prompt row with: outcome, failure reason, tools called, tool-calling mode, round count, validation result. |
+| `<name>_gaps.txt` | Summary report: pass rate, tool-calling mode breakdown, tool round histogram, skill usage frequency, failing prompts, capability gap signals. |
 
 Outcome labels:
 
@@ -383,20 +383,17 @@ Outcome labels:
 
 ## Other Utilities
 
-### Generate plan only (no execution)
-Useful for inspecting what the planner would choose without running skills or the final LLM:
+### Inspect tool definitions
+Useful for debugging which tools are visible to the model and verifying that skill signatures are parsed correctly:
 ```powershell
-python .\code\preprocess_prompt.py --user-prompt "output the time" --print-only
+python .\code\preprocess_prompt.py
+python .\code\preprocess_prompt.py --output tool_definitions.json
 ```
 
 | Option | Default | Description |
 |---|---|---|
-| `--user-prompt TEXT` | *(required)* | Raw prompt to plan against. |
-| `--model ALIAS` | `"gpt-oss:20b"` | Ollama model for the planner call. |
-| `--num-ctx N` | `32768` | Context window for the planner call. |
-| `--planner-ask TEXT` | built-in instruction | Override the planning instruction sent to the LLM. |
-| `--output PATH` | `code/skills/skills_plan.json` | File path to write the plan JSON. |
-| `--print-only` | off | Print plan JSON to stdout and skip writing the output file. |
+| `--skills-summary PATH` | `code/skills/skills_summary.md` | Path to the skills catalog file. |
+| `--output PATH` | *(stdout)* | Optional path to write the JSON Schema tool definitions. Omit to print to stdout. |
 
 ### Monitor Ollama memory usage
 Samples Ollama process RSS before and during model inference to characterise memory requirements:
@@ -420,4 +417,4 @@ python .\code\system_check.py --num-ctx 4096
 | `controldata/test_prompts/` | Prompt suite JSON files used by the Test Wrapper. |
 | `controldata/test_results/` | Timestamped CSV results and analysis files produced by the Test Wrapper and Analyzer. |
 
-Each log file contains full evidence for its run: resolved model, memory recall, skill outputs, planner JSON, final prompt, LLM response, and per-call token throughput.
+Each log file contains full evidence for its run: resolved model, memory recall, tool rounds, tool call outputs, final LLM response, and per-call token throughput.

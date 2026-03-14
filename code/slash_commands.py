@@ -282,8 +282,8 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
     from skills_catalog_builder import (
         find_skill_files, summarize_skill, normalize_summary,
         render_summary_document, DEFAULT_SKILLS_ROOT, DEFAULT_OUTPUT_FILE,
+        load_skills_payload,
     )
-    from planner_engine import load_skills_payload
 
     skills_root = DEFAULT_SKILLS_ROOT
     output_path = DEFAULT_OUTPUT_FILE

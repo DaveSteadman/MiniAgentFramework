@@ -15,7 +15,7 @@
 #   - orchestration.py     -- OrchestratorConfig, ConversationHistory, orchestrate_prompt, ...
 #   - modes/dashboard.py   -- run_dashboard_mode
 #   - ollama_client.py     -- Ollama server management and LLM calls
-#   - planner_engine.py    -- structured plan construction and skills catalog loading
+#   - skills_catalog_builder.py -- load_skills_payload, tool definitions
 #   - scheduler.py         -- load_schedules_dir, is_task_due, llm_lock
 #   - runtime_logger.py    -- SessionLogger, create_log_file_path
 # ====================================================================================================
@@ -42,7 +42,7 @@ from orchestration import OrchestratorConfig
 from orchestration import SessionContext
 from orchestration import orchestrate_prompt
 from orchestration import resolve_execution_model
-from planner_engine import load_skills_payload
+from skills_catalog_builder import load_skills_payload
 from runtime_logger import create_log_file_path
 from runtime_logger import SessionLogger
 from scheduler import initial_last_run, is_task_due
@@ -160,7 +160,7 @@ def run_chat_mode(
 ) -> None:
     """Interactive multi-turn chat loop. Each turn runs the full orchestration pipeline.
 
-    Verbose orchestration detail (planner prompts, plan JSON, skill outputs, validation)
+    Verbose orchestration detail (tool rounds, tool outputs, tool call summary)
     is written to the log file only.  The console shows one brief status line with context-
     token usage and the LLM response per turn.
 
@@ -574,7 +574,7 @@ def main() -> None:
     # Resolve the requested model alias/tag into an installed concrete model name.
     # Connectivity is checked lazily at the first actual LLM call, so slash-command-only
     # runs (which never call the LLM) work even when the Ollama host is unreachable.
-    # If resolution fails now, fall back to the raw alias; call_ollama_extended will
+    # If resolution fails now, fall back to the raw alias; call_llm_chat will
     # surface a clear connectivity error the moment an LLM call is actually attempted.
     try:
         resolved_model = resolve_execution_model(args.model)
