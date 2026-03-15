@@ -1,7 +1,7 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# WebMine skill for MiniAgentFramework.
+# KoreMine skill for MiniAgentFramework.
 #
 # Gen3 web mining skill - fetches single URLs or runs DuckDuckGo searches, formats the
 # retrieved content as structured Markdown, and writes files into the 01-Mine stage of the
@@ -102,6 +102,65 @@ _TAG_RE      = re.compile(r"<[^>]+>")
 MAX_WORDS_CAP    = 4000
 DEFAULT_TIMEOUT  = 15
 
+PLANNER_TOOLS = [
+    {
+        "name": "kore_mine.search",
+        "function": "mine_search",
+        "description": (
+            "Run a DuckDuckGo search for a research topic and save the raw results into the "
+            "KoreMine 01-Mine stage. Default tool for KoreMine tasks."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query using human-readable month/year phrasing."},
+                "domain": {"type": "string", "description": "Research domain label used for saved output folders."},
+                "max_results": {"type": "number", "description": "Number of search results to collect; default 5."},
+                "fetch_content": {"type": "boolean", "description": "Whether to fetch and save article body previews for each result."},
+                "content_words": {"type": "number", "description": "Approximate word limit for each fetched result body."},
+            },
+            "required": ["query", "domain"],
+        },
+    },
+    {
+        "name": "kore_mine.search_deep",
+        "function": "mine_search_deep",
+        "description": (
+            "Run a deeper KoreMine search that follows result pages and saves individual articles. "
+            "Use when the user explicitly asks for deep mining or broader article collection."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query using human-readable month/year phrasing."},
+                "domain": {"type": "string", "description": "Research domain label used for saved output folders."},
+                "max_results": {"type": "number", "description": "Maximum top-level search results to inspect."},
+                "max_articles_per_result": {"type": "number", "description": "Maximum child articles to follow from each index page."},
+                "min_words": {"type": "number", "description": "Minimum prose threshold used to distinguish article pages from index pages."},
+                "content_words": {"type": "number", "description": "Approximate word limit for each saved article body."},
+                "target_articles": {"type": "number", "description": "Stop once this many articles have been saved."},
+            },
+            "required": ["query", "domain"],
+        },
+    },
+    {
+        "name": "kore_mine.url",
+        "function": "mine_url",
+        "description": "Fetch a single URL and save its extracted content into the KoreMine 01-Mine stage.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Full article URL to fetch and mine."},
+                "domain": {"type": "string", "description": "Research domain label used for saved output folders."},
+                "slug": {"type": "string", "description": "Optional filename slug override."},
+                "max_words": {"type": "number", "description": "Approximate word limit for extracted body text."},
+            },
+            "required": ["url", "domain"],
+        },
+    },
+]
+PRIMARY_PLANNER_TOOL = "kore_mine.search"
+
 
 # ----------------------------------------------------------------------------------------------------
 def _to_int(value, default: int) -> int:
@@ -121,7 +180,7 @@ def _normalize_ddg_query(query: str) -> str:
     """Rewrite brittle date formats into the month/year style DDG handles more reliably.
 
     The planner occasionally passes ISO dates (for example after resolving {today}) even
-    though the WebMine skill guidance says DDG works better with human-readable month/year
+    though the KoreMine skill guidance says DDG works better with human-readable month/year
     queries. This normalizer converts those formats defensively at runtime.
     """
     def _replace_iso(match: re.Match) -> str:
@@ -416,14 +475,33 @@ def _extract_index_links_bs4(html_text: str, base_url: str, max_links: int = 8) 
     return results
 
 
+def _is_index_page(word_count: int, candidate_links: list, min_words: int = 250) -> bool:
+    """Return True when the page looks like a section/listing page rather than an article.
+
+    Three independent signals, any one is sufficient:
+      1. Thin page          -- word_count < min_words
+      2. Link-dense         -- 8+ article-candidate links extracted from main content
+      3. Low words-per-link -- 3+ links AND fewer than 50 extracted words per link;
+                               catches 4-6-card listing pages that fall under signal 2
+    """
+    link_count = len(candidate_links)
+    if word_count < min_words:
+        return True
+    if link_count >= 8:
+        return True
+    if link_count >= 3 and (word_count / link_count) < 50:
+        return True
+    return False
+
+
+# ----------------------------------------------------------------------------------------------------
 def _fetch_content_preview(url: str, max_words: int = 200) -> tuple[int, str, list[dict]]:
     """Fetch url and return (word_count, prose_preview, article_links).
 
     Returns (0, '', []) on any error.
 
-    Classification heuristic (mirrors PageAssess thresholds):
-      - word_count < 250                              → index
-      - len(article_links) >= 8 AND word_count < 500  → index (link-dense section page)
+    Classification delegates to _is_index_page():
+      - thin page, link-dense, or low words-per-link ratio  → index
     Otherwise the page is treated as an article; prose_preview is returned and
     article_links will be empty.
 
@@ -444,8 +522,8 @@ def _fetch_content_preview(url: str, max_words: int = 200) -> tuple[int, str, li
         else:
             article_links = _extract_index_links_stdlib(html_text, final_url, max_links=15)
 
-        # Classify: thin pages or link-dense section pages are treated as indexes.
-        is_index = word_count < 250 or (len(article_links) >= 8 and word_count < 500)
+        # Classify using shared heuristic (thin / link-dense / low words-per-link).
+        is_index = _is_index_page(word_count, article_links, min_words=250)
 
         if not is_index:
             preview = " ".join(words[:max_words])
@@ -723,13 +801,13 @@ def mine_search_deep(
 
         word_count = len(body.split())
 
-        # Classify using the same dual heuristic as _fetch_content_preview.
+        # Classify using shared heuristic (thin / link-dense / low words-per-link).
         if _BS4_AVAILABLE:
             candidate_links = _extract_index_links_bs4(html_text, final_url, max_links=15)
         else:
             candidate_links = _extract_index_links_stdlib(html_text, final_url, max_links=15)
 
-        is_index = word_count < min_words or (len(candidate_links) >= 8 and word_count < 500)
+        is_index = _is_index_page(word_count, candidate_links, min_words)
 
         if not is_index:
             if not _is_topically_relevant(title, body, query):
@@ -762,10 +840,7 @@ def mine_search_deep(
                     else:
                         child_links = _extract_index_links_stdlib(child_html, child_final_url, max_links=15)
 
-                    child_is_index = (
-                        child_word_count < min_words
-                        or (len(child_links) >= 8 and child_word_count < 500)
-                    )
+                    child_is_index = _is_index_page(child_word_count, child_links, min_words)
 
                     if not child_is_index:
                         if not _is_topically_relevant(child_title, child_body, query):

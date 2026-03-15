@@ -23,6 +23,7 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,11 +57,13 @@ class OrchestratorConfig:
     Fields are intentionally mutable so slash commands (/model, /ctx) can update them
     at runtime without rebuilding the object.
     """
-    resolved_model:  str
-    num_ctx:         int
-    max_iterations:  int
-    skills_payload:  dict
-    skip_final_llm:  bool = False   # /skip-final sets True; /run-final resets to False
+    resolved_model:      str
+    num_ctx:              int
+    max_iterations:       int
+    skills_payload:       dict
+    skills_summary_path:  Path | None = None   # set to enable auto-reload on catalog change
+    _catalog_mtime:       float       = 0.0    # last-seen mtime of skills_summary.md
+    skip_final_llm:       bool        = False  # /skip-final sets True; /run-final resets to False
 
 
 # ====================================================================================================
@@ -198,12 +201,13 @@ class SessionContext:
 
     def _compact_output(self, output: dict) -> dict:
         """Distil a raw skill output dict to a compact, token-efficient summary."""
+        tool_name = output.get("tool", "")
         module   = Path(output.get("module", "")).stem
         function = output.get("function", "?")
         args     = output.get("arguments", {}) or {}
         result   = output.get("result")
 
-        entry: dict = {"skill": f"{module}.{function}"}
+        entry: dict = {"skill": tool_name or f"{module}.{function}"}
         for key in ("query", "url", "path", "file_path", "domain", "topic"):
             if key in args:
                 entry[key] = str(args[key])[:200]
@@ -279,6 +283,53 @@ def resolve_execution_model(requested_model: str) -> str:
     return resolved
 
 # ====================================================================================================
+# MARK: ROUTING HELPERS
+# ====================================================================================================
+def _build_keyword_routing_rules(skills_payload: dict) -> str:
+    """Build explicit routing rules from skills that have a trigger_keyword field.
+
+    Also handles the legacy catalog format where skill_name is 'Trigger keyword: X'.
+    Returns a formatted string suitable for inclusion in the system prompt,
+    or an empty string when no keyword-routed skills are present.
+    """
+    rules: list[str] = []
+    for skill in skills_payload.get("skills", []):
+        # Prefer the dedicated field; fall back to the legacy mangled skill_name.
+        kw = skill.get("trigger_keyword", "").strip()
+        if not kw:
+            sname = skill.get("skill_name", "")
+            if re.search(r"trigger keyword", sname, re.IGNORECASE):
+                parts = sname.split(":", 1)
+                if len(parts) == 2:
+                    kw = parts[1].strip()
+        if not kw:
+            continue
+
+        primary = str(skill.get("primary_tool", "")).strip()
+        if not primary:
+            planner_tools = skill.get("planner_tools", [])
+            if planner_tools:
+                primary = str(planner_tools[0].get("name", "")).strip()
+        if not primary:
+            funcs = skill.get("functions", [])
+            primary = next(
+                (f.split("(")[0].strip() for f in funcs if "(" in f and not f.startswith("list_")),
+                None,
+            )
+        if primary:
+            rules.append(
+                f'  - Prompt contains "{kw}": '
+                f"call `{primary}` with parameters parsed from the prompt. "
+                f"Do NOT use web search or any other tool instead."
+            )
+
+    if not rules:
+        return ""
+    header = "Keyword routing (follow these rules before choosing any other tool):"
+    return header + "\n" + "\n".join(rules)
+
+
+# ====================================================================================================
 # MARK: LOG FORMATTING
 # ====================================================================================================
 def _format_tool_outputs(tool_outputs: list[dict]) -> str:
@@ -288,12 +339,14 @@ def _format_tool_outputs(tool_outputs: list[dict]) -> str:
 
     lines: list[str] = []
     for output in tool_outputs:
+        tool_name = output.get("tool", "")
         module   = Path(output.get("module", "")).stem
         function = output.get("function", "?")
         args     = output.get("arguments", {}) or {}
         result   = output.get("result")
 
-        lines.append(f"{module}.{function}()")
+        heading = f"{tool_name} -> {module}.{function}()" if tool_name else f"{module}.{function}()"
+        lines.append(heading)
         for k, v in args.items():
             v_str = repr(v)
             if len(v_str) > 120:
@@ -359,7 +412,17 @@ def orchestrate_prompt(
     def _log_section_file_only(title: str) -> None:
         logger.log_section_file_only(title)
 
+    from skills_catalog_builder import load_skills_payload
+
     user_prompt = resolve_tokens(user_prompt)
+
+    # -- Auto-reload catalog if skills_summary.md has been updated since last load --
+    if config.skills_summary_path and config.skills_summary_path.exists():
+        current_mtime = config.skills_summary_path.stat().st_mtime
+        if current_mtime != config._catalog_mtime:
+            config.skills_payload  = load_skills_payload(config.skills_summary_path)
+            config._catalog_mtime  = current_mtime
+            logger.log_file_only("[catalog] skills catalog reloaded (file changed on disk)")
 
     _log_section("ORCHESTRATION RUN")
     _log(f"Model:          {config.resolved_model}")
@@ -403,6 +466,10 @@ def orchestrate_prompt(
     _prior_inject = session_context.as_inject_block() if session_context else ""
     if _prior_inject:
         system_parts.append(f"\nPrior session context:\n{_prior_inject}")
+
+    _routing_rules = _build_keyword_routing_rules(config.skills_payload)
+    if _routing_rules:
+        system_parts.append(f"\n{_routing_rules}")
 
     system_message = "\n".join(system_parts)
 

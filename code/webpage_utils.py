@@ -17,14 +17,14 @@
 #
 #   fetch_html(url, timeout=15)         -> (html_text: str, final_url: str)
 #   dedup_paragraphs(paragraphs)        -> list[str]
-#   extract_content(html_text)          -> (page_title: str, body_text: str)
+#   extract_content(html_text)          -> (page_title: str, body_text: str)  -- structured Markdown
 #   truncate_to_words(text, max_words)  -> str
 #
 # Related modules:
 #   code/workspace_utils.py              -- workspace root path management
 #   code/webresearch_utils.py            -- three-stage research workspace management
 #   code/skills/WebExtract/              -- uses fetch_html, extract_content, truncate_to_words
-#   code/skills/WebMine/                 -- uses fetch_html, extract_content, truncate_to_words
+#   code/skills/KoreMine/                -- uses fetch_html, extract_content, truncate_to_words
 #   code/skills/PageAssess/              -- uses fetch_html
 #   code/skills/WebSearch/               -- uses fetch_html
 # ====================================================================================================
@@ -87,6 +87,16 @@ NOISE_HINTS = frozenset({
 # Minimum words per extracted paragraph; shorter runs are treated as boilerplate.
 MIN_PARA_WORDS = 15
 
+# Markdown prefix for each HTML heading level.
+_HEADING_PREFIX = {
+    "h1": "# ",
+    "h2": "## ",
+    "h3": "### ",
+    "h4": "#### ",
+    "h5": "##### ",
+    "h6": "###### ",
+}
+
 _DEFAULT_TIMEOUT = 15
 
 
@@ -143,10 +153,11 @@ class _FallbackExtractor(HTMLParser):
 
     def __init__(self) -> None:
         super().__init__()
-        self._skip_depth = 0
-        self._in_body    = False
-        self._buf:        list[str] = []
-        self._paragraphs: list[str] = []
+        self._skip_depth  = 0
+        self._in_body     = False
+        self._heading_tag: str | None = None
+        self._buf:         list[str]  = []
+        self._paragraphs:  list[str]  = []
 
     def handle_starttag(self, tag: str, attrs) -> None:  # type: ignore[override]
         if tag == "body":
@@ -155,12 +166,16 @@ class _FallbackExtractor(HTMLParser):
             self._skip_depth += 1
         elif tag in BLOCK_TAGS:
             self._flush()
+            if tag in _HEADING_PREFIX:
+                self._heading_tag = tag
 
     def handle_endtag(self, tag: str) -> None:  # type: ignore[override]
         if tag in SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
         elif tag in BLOCK_TAGS:
             self._flush()
+            if tag in _HEADING_PREFIX:
+                self._heading_tag = None
 
     def handle_data(self, data: str) -> None:
         if self._skip_depth > 0 or not self._in_body:
@@ -171,9 +186,15 @@ class _FallbackExtractor(HTMLParser):
 
     def _flush(self) -> None:
         text = " ".join(self._buf).strip()
-        if len(text.split()) >= MIN_PARA_WORDS:
-            self._paragraphs.append(text)
         self._buf = []
+        if not text:
+            return
+        if self._heading_tag:
+            # Headings: emit if at least 2 words (avoids single-word nav labels).
+            if len(text.split()) >= 2:
+                self._paragraphs.append(_HEADING_PREFIX[self._heading_tag] + text)
+        elif len(text.split()) >= MIN_PARA_WORDS:
+            self._paragraphs.append(text)
 
     def get_text(self) -> str:
         self._flush()
@@ -211,13 +232,37 @@ def _prune_noise_bs4(soup) -> None:
             tag.decompose()
 
 
-def _extract_paragraphs_bs4(container) -> str:
-    paragraphs = []
-    for p in container.find_all("p"):
-        text = _SPACE_RE.sub(" ", p.get_text(" ", strip=True)).strip()
-        if len(text.split()) >= MIN_PARA_WORDS:
-            paragraphs.append(text)
-    return "\n\n".join(dedup_paragraphs(paragraphs))
+def _extract_structured_bs4(container) -> str:
+    """Walk headings and paragraphs in document order, emitting Markdown headings.
+
+    Each <h1>-<h6> becomes a Markdown heading; each <p> becomes a paragraph if it
+    meets MIN_PARA_WORDS.  Walking in document order preserves the heading-then-body
+    structure of multi-article pages so distinct topics are never merged.
+    """
+    _HEADING_NAMES = list(_HEADING_PREFIX.keys())
+    items:  list[str] = []
+    seen:   set[str]  = set()
+
+    for el in container.find_all(_HEADING_NAMES + ["p"]):
+        tag  = el.name
+        text = _SPACE_RE.sub(" ", el.get_text(" ", strip=True)).strip()
+        if not text:
+            continue
+        key = text.lower()[:80]
+        if key in seen:
+            continue
+        seen.add(key)
+        if tag in _HEADING_PREFIX:
+            # Only emit headings with 2-25 words to skip single nav labels and
+            # multi-sentence mis-tagged blocks.
+            wc = len(text.split())
+            if 2 <= wc <= 25:
+                items.append(_HEADING_PREFIX[tag] + text)
+        else:
+            if len(text.split()) >= MIN_PARA_WORDS:
+                items.append(text)
+
+    return "\n\n".join(items)
 
 
 def _extract_with_bs4(html_text: str) -> tuple[str, str]:
@@ -230,14 +275,16 @@ def _extract_with_bs4(html_text: str) -> tuple[str, str]:
         container = soup.select_one(selector)
         if container:
             _prune_noise_bs4(container)
-            body = _extract_paragraphs_bs4(container)
+            body = _extract_structured_bs4(container)
             if len(body.split()) >= 60:
                 return title, body
 
-    # Fall back to full-page paragraph scan.
+    # Fall back to full-page structured scan.
     _prune_noise_bs4(soup)
-    body = _extract_paragraphs_bs4(soup)
-    return title, body or _SPACE_RE.sub(" ", soup.get_text(separator=" ", strip=True)).strip()
+    body = _extract_structured_bs4(soup)
+    if not body:
+        body = _SPACE_RE.sub(" ", soup.get_text(separator="\n\n", strip=True)).strip()
+    return title, body
 
 
 def _extract_with_stdlib(html_text: str) -> tuple[str, str]:

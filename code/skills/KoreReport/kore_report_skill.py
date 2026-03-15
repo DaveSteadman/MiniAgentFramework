@@ -1,7 +1,7 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# WebResearchReport skill for MiniAgentFramework.
+# KoreReport skill for MiniAgentFramework.
 #
 # Reads analysis files from the 02-Analysis research stage, converts them to a styled
 # standalone HTML report, and saves the result to the 03-Presentation research stage.
@@ -25,7 +25,7 @@
 #
 # Related modules:
 #   - webresearch_utils.py               -- path management for all research stages
-#   - skills/WebResearchAnalysis/        -- produces the 02-Analysis content consumed here
+#   - skills/KoreAnalysis/           -- produces the 02-Analysis content consumed here
 #   - skills/WebResearchOutput/          -- consumes 03-Presentation reports for dispatch
 # ====================================================================================================
 
@@ -52,6 +52,27 @@ from webresearch_utils import (
 # MARK: CONSTANTS
 # ====================================================================================================
 _SPACE_RE = re.compile(r"\s+")
+
+PLANNER_TOOLS = [
+    {
+        "name": "kore_report.save_html_report",
+        "function": "save_html_report",
+        "description": (
+            "Read a saved KoreAnalysis analysis.md file and render it to a polished HTML report "
+            "saved in the 03-Presentation stage. Use this for KoreReport tasks."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Research domain label that matches the prior KoreMine and KoreAnalysis runs."},
+                "date": {"type": "string", "description": "Report date as YYYY-MM-DD, today, yesterday, or empty for today."},
+                "template": {"type": "string", "description": "Report template name; currently default or dark."},
+            },
+            "required": ["domain"],
+        },
+    },
+]
+PRIMARY_PLANNER_TOOL = "kore_report.save_html_report"
 
 
 # ====================================================================================================
@@ -496,7 +517,7 @@ def save_html_report(domain: str, date: str = "", template: str = "default") -> 
     Returns "Saved: <path>  (N words)" on success.
     Returns a descriptive "Error: ..." string on failure - never raises.
 
-    Prerequisite: run WebResearchAnalysis.create_daily_summary first to produce analysis.md.
+    Prerequisite: run KoreAnalysis.create_daily_summary first to produce analysis.md.
     """
     if not domain or not domain.strip():
         return "Error: domain cannot be empty."
@@ -511,7 +532,7 @@ def save_html_report(domain: str, date: str = "", template: str = "default") -> 
         date_label = when.strftime("%Y/%m/%d")
         return (
             f"Error: no analysis.md found under 02-Analysis/{domain}/{date_label}/\n"
-            f"Run WebResearchAnalysis.create_daily_summary first."
+            f"Run KoreAnalysis.create_daily_summary first."
         )
 
     try:
@@ -552,7 +573,7 @@ def get_analysis_text(domain: str, date: str = "") -> str:
         date_label = when.strftime("%Y/%m/%d")
         return (
             f"No analysis found for {domain}/{date_label}. "
-            f"Run WebResearchAnalysis.create_daily_summary first."
+            f"Run KoreAnalysis.create_daily_summary first."
         )
 
     try:

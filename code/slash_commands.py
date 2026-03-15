@@ -91,11 +91,7 @@ def handle(text: str, ctx: SlashCommandContext) -> bool:
 # near-zero when only a subset of commands are ever invoked in a given session.
 # ====================================================================================================
 
-# Well-known Ollama host aliases resolved by the /host command.
-_HOST_ALIASES: dict[str, str] = {
-    "local":     "http://localhost:11434",
-    "localhost":  "http://localhost:11434",
-}
+
 
 
 def _cmd_help(arg: str, ctx: SlashCommandContext) -> None:
@@ -138,7 +134,7 @@ def _cmd_model(arg: str, ctx: SlashCommandContext) -> None:
         )
         return
 
-    from ollama_client import list_ollama_models, resolve_model_name
+    from ollama_client import list_ollama_models, register_session_config, resolve_model_name
     try:
         available = list_ollama_models()
         if not available:
@@ -155,6 +151,7 @@ def _cmd_model(arg: str, ctx: SlashCommandContext) -> None:
 
         old = ctx.config.resolved_model
         ctx.config.resolved_model = resolved
+        register_session_config(resolved, ctx.config.num_ctx)
         ctx.clear_history()
         ctx.output(f"Model switched: {old} \u2192 {resolved}", "success")
         ctx.output("(conversation history cleared)", "dim")
@@ -181,6 +178,8 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
         return
     old = ctx.config.num_ctx
     ctx.config.num_ctx = value
+    from ollama_client import register_session_config
+    register_session_config(ctx.config.resolved_model, value)
     ctx.output(f"Context size changed: {old:,} \u2192 {value:,}", "success")
 
 
@@ -356,29 +355,24 @@ def _cmd_host(arg: str, ctx: SlashCommandContext) -> None:
         )
         return
 
-    parts     = arg.split(None, 1)
-    raw       = parts[0].strip()
-    api_key   = parts[1].strip() if len(parts) > 1 else None
-
-    # Resolve well-known aliases first, then treat bare hostnames / IPs
-    # (anything without a scheme) as Ollama servers on the default port.
-    url = _HOST_ALIASES.get(raw.lower(), raw)
-    if "://" not in url:
-        url = f"http://{url}:11434"
+    parts   = arg.split(None, 1)
+    raw     = parts[0].strip()
+    api_key = parts[1].strip() if len(parts) > 1 else None
 
     old_host = get_active_host()
 
     try:
-        configure_host(url, api_key)
-        models = list_ollama_models()
+        configure_host(raw, api_key)
+        new_host = get_active_host()
+        models   = list_ollama_models()
         ctx.clear_history()
-        ctx.output(f"Host switched: {old_host} \u2192 {url}", "success")
+        ctx.output(f"Host switched: {old_host} \u2192 {new_host}", "success")
         if models:
             ctx.output(f"  {len(models)} model(s): {', '.join(models)}", "item")
         ctx.output("(conversation history cleared)", "dim")
     except Exception as exc:
         configure_host(old_host)
-        ctx.output(f"Cannot reach '{url}': {exc}", "error")
+        ctx.output(f"Cannot reach '{raw}': {exc}", "error")
         ctx.output(f"Still using: {old_host}", "dim")
 
 
@@ -728,7 +722,7 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
             return
         main_py = Path(__file__).resolve().parent / "main.py"
         cmd = [
-            sys.executable, str(main_py),
+            sys.executable, "-X", "utf8", str(main_py),
             "--scheduled-item", rest,
             "--model", ctx.config.resolved_model,
         ]
@@ -746,6 +740,7 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
                 stderr=subprocess.STDOUT,
                 text=True,
                 encoding="utf-8",
+                errors="replace",
             )
             for line in proc.stdout:
                 ctx.output(line.rstrip(), "dim")

@@ -41,7 +41,7 @@ from pathlib import Path
 
 from chat_input import append_to_history as _append_chat_history
 from chat_input import load_history as _load_chat_history
-from ollama_client import get_active_host, get_llm_timeout, get_ollama_ps_rows
+from ollama_client import get_active_host, get_active_num_ctx, get_llm_timeout, get_ollama_ps_rows
 from orchestration import ConversationHistory
 from orchestration import OrchestratorConfig
 from orchestration import SessionContext
@@ -215,7 +215,7 @@ def run_dashboard_mode(
                 rows = get_ollama_ps_rows()
                 if rows:
                     w_name = max((len(r.get('name', '')) for r in rows), default=10)
-                    lines  = [f"  host: {get_active_host()}"]
+                    lines  = [f"  host: {get_active_host()}  |  ctx: {get_active_num_ctx():,}"]
                     lines.append(f"  {'NAME':<{w_name}}  {'SIZE':<12}  {'PROCESSOR':<12}  UNTIL")
                     for row in rows:
                         n = (row.get('name')      or '').ljust(w_name)

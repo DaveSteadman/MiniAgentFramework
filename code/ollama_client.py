@@ -46,6 +46,11 @@ _DEFAULT_LLM_TIMEOUT: int = 300   # seconds; updated at runtime by /timeout slas
 _active_host:    str        = DEFAULT_OLLAMA_HOST
 _active_api_key: str | None = None
 
+# Active session model and context window - set once at startup via register_session_config().
+# Skills use get_active_model() / get_active_num_ctx() instead of accepting these as parameters.
+_active_model:   str = ""
+_active_num_ctx: int = 131072
+
 
 def get_llm_timeout() -> int:
     """Return the current default LLM generation timeout in seconds."""
@@ -72,9 +77,54 @@ def register_llm_call_logger(fn) -> None:
     _llm_call_log_fn = fn
 
 
+# ----------------------------------------------------------------------------------------------------
+def log_to_session(message: str) -> None:
+    """Write a message to the active session log sink (if one is registered).
+
+    Skills and other non-UI code should use this instead of print() so that output
+    is routed to the log file rather than stdout, which would corrupt the TUI.
+    If no logger has been registered the message is silently discarded.
+    """
+    if _llm_call_log_fn is not None:
+        try:
+            _llm_call_log_fn(message)
+        except Exception:
+            pass
+
+
+# ----------------------------------------------------------------------------------------------------
+def register_session_config(model: str, num_ctx: int) -> None:
+    """Register the active session model and context window.
+
+    Called once at startup (and again whenever /model or /ctx changes them) so that
+    thick skills can read the ambient values without needing them passed as parameters.
+    """
+    global _active_model, _active_num_ctx
+    _active_model   = model
+    _active_num_ctx = num_ctx
+
+
+def get_active_model() -> str:
+    """Return the currently active session model name."""
+    return _active_model
+
+
+def get_active_num_ctx() -> int:
+    """Return the currently active session context window in tokens."""
+    return _active_num_ctx
+
+
 # ====================================================================================================
 # MARK: CONFIGURATION
 # ====================================================================================================
+
+# Well-known host aliases accepted by configure_host() and the --ollama-host CLI flag.
+HOST_ALIASES: dict[str, str] = {
+    "local":      DEFAULT_OLLAMA_HOST,
+    "localhost":  DEFAULT_OLLAMA_HOST,
+}
+
+
 def configure_host(host: str, api_key: str | None = None) -> None:
     """Set the active Ollama host and optional API key for all subsequent LLM calls.
 
@@ -82,10 +132,16 @@ def configure_host(host: str, api_key: str | None = None) -> None:
     - LAN machine:            http://<ip>:11434       - no API key needed.
     - Ollama Cloud:           https://api.ollama.com  - requires an API key.
 
+    Accepts well-known aliases ('local', 'localhost') and bare hostnames/IPs;
+    bare values (no '://') are expanded to http://<host>:11434 automatically.
+
     Stored as module-level state; mirrors the pattern used by set_llm_timeout().
     """
     global _active_host, _active_api_key
-    _active_host    = host.rstrip("/")
+    resolved = HOST_ALIASES.get(host.strip().lower(), host.strip())
+    if "://" not in resolved:
+        resolved = f"http://{resolved}:11434"
+    _active_host    = resolved.rstrip("/")
     _active_api_key = api_key or None
 
 

@@ -585,15 +585,22 @@ def main() -> None:
     except Exception:
         resolved_model = args.model
 
-    # Load the skills catalog once; it is passed through config so no module re-reads it.
+    # Load the skills catalog once; auto-reload on every prompt detects changes without /reskill.
     skills_payload = load_skills_payload(SKILLS_SUMMARY_PATH)
+    catalog_mtime  = SKILLS_SUMMARY_PATH.stat().st_mtime if SKILLS_SUMMARY_PATH.exists() else 0.0
 
     config = OrchestratorConfig(
         resolved_model=resolved_model,
         num_ctx=args.num_ctx,
         max_iterations=MAX_ITERATIONS,
         skills_payload=skills_payload,
+        skills_summary_path=SKILLS_SUMMARY_PATH,
+        _catalog_mtime=catalog_mtime,
     )
+
+    # Publish model and context to ollama_client so thick skills read the same values
+    # as the orchestrator without needing them passed as parameters.
+    ollama_client.register_session_config(resolved_model, args.num_ctx)
 
     logger.log_section("SYSTEM STATUS")
     logger.log(f"Ollama host:     {ollama_client.get_active_host()}")

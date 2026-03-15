@@ -20,8 +20,8 @@
 # Related modules:
 #   - orchestration.py              -- calls resolve_tokens on the user prompt
 #   - skill_executor.py             -- calls resolve_tokens on string skill arguments
-#   - skills/WebMine/...             -- imports resolve_tokens as _resolve_query_tokens
-#   - skills/WebResearchAnalysis/.. -- imports parse_flexible_date as _parse_date
+#   - skills/KoreMine/...             -- imports resolve_tokens as _resolve_query_tokens
+#   - skills/KoreAnalysis/           -- imports parse_flexible_date as _parse_date
 #   - skills/WebResearchOutput/...  -- imports parse_flexible_date as _parse_date
 # ====================================================================================================
 

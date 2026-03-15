@@ -66,7 +66,7 @@ Also use it to discover article links from any page filtered by a topic.
 
 | `page_type` | Recommended next action |
 |---|---|
-| `"article"` | Call `mine_url` (WebMine) directly - the page has substantial content worth saving |
+| `"article"` | Call `mine_url` (KoreMine) directly - the page has substantial content worth saving |
 | `"index"` | Do NOT mine the page itself; use `article_links` to get individual article URLs, then call `mine_url` on those |
 | `"mixed"` | Try `mine_url`; if `word_count < 200` also use `article_links` to follow linked articles |
 
@@ -88,5 +88,5 @@ Returns `page_type="article"`, high `word_count`, short `article_links` list.
   and known noise containers are pruned before link extraction.
 - Topic filtering is pure token overlap - short or very common words may over-match.
 - This skill does NOT write any files to disk.
-- To persist content, pass URLs from `article_links` to `mine_url` (WebMine skill).
+- To persist content, pass URLs from `article_links` to `mine_url` (KoreMine skill).
 - Uses `beautifulsoup4` for high-quality extraction; falls back to stdlib `html.parser` if unavailable.

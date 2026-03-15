@@ -5,7 +5,7 @@
 #
 # Dispatches rendered reports from the 03-Presentation research stage to external
 # destinations.  This skill handles the mechanics of delivery only - HTML rendering
-# and template styling are handled entirely by WebResearchReport.
+# and template styling are handled entirely by KoreReport.
 #
 # Supported destinations:
 #   Email   -- send_report_email()   -- SMTP STARTTLS delivery to a configured mailing list
@@ -32,7 +32,7 @@
 # Related modules:
 #   - webresearch_utils.py               -- path management for all research stages
 #   - workspace_utils.py                 -- provides get_controldata_dir()
-#   - skills/WebResearchReport/          -- produces the 03-Presentation HTML consumed here
+#   - skills/KoreReport/                 -- produces the 03-Presentation HTML consumed here
 # ====================================================================================================
 
 
@@ -57,6 +57,37 @@ from workspace_utils import get_controldata_dir
 # MARK: CONSTANTS
 # ====================================================================================================
 _EMAIL_CONFIG_PATH = get_controldata_dir() / "email_config.json"
+
+PLANNER_TOOLS = [
+    {
+        "name": "web_research_output.send_report_email",
+        "function": "send_report_email",
+        "description": "Send a saved KoreReport HTML report by email to a configured mailing list.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Research domain label used by the report."},
+                "date": {"type": "string", "description": "Report date as YYYY-MM-DD, today, yesterday, or empty for today."},
+                "list_name": {"type": "string", "description": "Configured mailing list key in controldata/email_config.json."},
+                "subject": {"type": "string", "description": "Optional email subject line override."},
+            },
+            "required": ["domain"],
+        },
+    },
+    {
+        "name": "web_research_output.list_reports",
+        "function": "list_reports",
+        "description": "List available rendered HTML reports in the 03-Presentation stage for a domain.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Research domain label used by the report."},
+                "max_days": {"type": "number", "description": "Maximum number of dated report entries to return."},
+            },
+            "required": ["domain"],
+        },
+    },
+]
 
 
 
@@ -128,7 +159,7 @@ def send_report_email(
 ) -> str:
     """Send the HTML report for domain/date to a configured mailing list.
 
-    Reads report.html from 03-Presentation (produced by WebResearchReport.save_html_report)
+    Reads report.html from 03-Presentation (produced by KoreReport.save_html_report)
     and delivers it as an HTML email via SMTP STARTTLS.
 
     Parameters
@@ -144,7 +175,7 @@ def send_report_email(
     Prerequisites:
       - controldata/email_config.json must exist and be configured
       - The environment variable named by smtp_password_env must be set
-      - WebResearchReport.save_html_report must have been run first
+      - KoreReport.save_html_report must have been run first
     """
     if not domain or not domain.strip():
         return "Error: domain cannot be empty."
@@ -159,7 +190,7 @@ def send_report_email(
         date_label = when.strftime("%Y/%m/%d")
         return (
             f"Error: no report.html found under 03-Presentation/{domain}/{date_label}/\n"
-            f"Run WebResearchReport.save_html_report first."
+            f"Run KoreReport.save_html_report first."
         )
 
     try:

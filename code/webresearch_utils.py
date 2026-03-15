@@ -36,7 +36,7 @@
 #
 # Related modules:
 #   - workspace_utils.py                       -- provides get_workspace_root()
-#   - skills/WebMine/web_mine_skill.py          -- primary consumer of this module
+#   - skills/KoreMine/kore_mine_skill.py         -- primary consumer of this module
 # ====================================================================================================
 
 

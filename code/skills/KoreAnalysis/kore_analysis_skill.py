@@ -1,7 +1,7 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# WebResearchAnalysis skill for MiniAgentFramework.
+# KoreAnalysis skill for MiniAgentFramework.
 #
 # Reads mined content from the 01-Mine stage and produces structured daily intelligence
 # summaries using an LLM call made directly from this skill.  Persists the analysis
@@ -14,7 +14,7 @@
 # string, not a bulk research report.  The same pattern is used by skills_catalog_builder.py.
 #
 # Primary public functions:
-#   create_daily_summary(domain, date="", topic="", model="20b", num_ctx=131072)
+#   create_daily_summary(domain, date="", topic="")
 #     -> Reads all mined .md files for domain/date, calls LLM to produce a structured
 #        Markdown analysis, saves it to 02-Analysis, returns "Saved: <path>"
 #
@@ -30,7 +30,7 @@
 # Related modules:
 #   - webresearch_utils.py               -- path management for all three research stages
 #   - ollama_client.py                   -- LLM call and model resolution
-#   - skills/WebMine/                    -- produces the 01-Mine content consumed here
+#   - skills/KoreMine/                   -- produces the 01-Mine content consumed here
 #   - skills/WebResearchOutput/          -- consumes 02-Analysis content produced here
 # ====================================================================================================
 
@@ -50,16 +50,34 @@ from webresearch_utils import (
     get_date_dir,
     ensure_date_dir,
 )
-from ollama_client import call_ollama_extended, list_ollama_models, resolve_model_name
+from ollama_client import call_ollama_extended, get_active_model, get_active_num_ctx, log_to_session
 
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-_DEFAULT_MODEL   = "20b"
-_DEFAULT_NUM_CTX = 131072
-
 _SPACE_RE = re.compile(r"\s+")
+
+PLANNER_TOOLS = [
+    {
+        "name": "kore_analysis.create_daily_summary",
+        "function": "create_daily_summary",
+        "description": (
+            "Read already-mined KoreMine content from the 01-Mine stage and produce a saved daily "
+            "analysis in the 02-Analysis stage. Use this directly for KoreAnalysis tasks."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Research domain label that matches the prior KoreMine run."},
+                "date": {"type": "string", "description": "Analysis date as YYYY-MM-DD, today, yesterday, or empty for today."},
+                "topic": {"type": "string", "description": "Optional framing guidance for the analysis output."},
+            },
+            "required": ["domain"],
+        },
+    },
+]
+PRIMARY_PLANNER_TOOL = "kore_analysis.create_daily_summary"
 
 
 # ====================================================================================================
@@ -119,16 +137,19 @@ def _build_analysis_prompt(domain: str, when: _date, topic: str, articles: list[
         f"Produce a structured daily research report in Markdown with exactly these "
         f"four sections:\n\n"
         f"## Executive Summary\n"
-        f"3 to 5 bullet-point takeaways covering the most important findings.\n\n"
+        f"5 to 8 bullet-point takeaways covering the most important findings. "
+        f"Each bullet should be a complete, informative sentence.\n\n"
         f"## Main Stories\n"
-        f"One subsection (### heading) per distinct story or theme found across "
-        f"the documents. 3–5 sentences per subsection. End each with a "
-        f"**Source:** line giving the article or search title.\n\n"
+        f"One subsection (### heading) per distinct story or theme found across the documents. "
+        f"For each subsection write 3–4 substantial paragraphs totalling at least 200 words, "
+        f"covering background context, the key facts reported, and implications or significance. "
+        f"End each subsection with a **Source:** line giving the article or search title.\n\n"
         f"## Notable Data Points\n"
         f"Bullet list of specific figures, product names, dates, or direct quotes "
         f"worth noting.\n\n"
         f"## Overall Assessment\n"
-        f"2–3 sentences summarising the day's landscape and any notable trends.\n\n"
+        f"4 to 6 sentences summarising the day's landscape, notable trends, and any "
+        f"recurring themes across stories.\n\n"
         f"Do NOT add any preamble, greeting, or commentary outside these four "
         f"sections. Output only valid Markdown.\n\n"
         f"---\n\n"
@@ -148,21 +169,6 @@ def _build_analysis_prompt(domain: str, when: _date, topic: str, articles: list[
 
 
 # ====================================================================================================
-# MARK: MODEL RESOLUTION
-# ====================================================================================================
-def _safe_resolve_model(model_alias: str) -> str:
-    """Resolve a short model alias (e.g. "120b") to a full installed model name.
-
-    Falls back to the original string if Ollama is unreachable or the alias is unresolvable.
-    """
-    try:
-        available = list_ollama_models()
-        resolved  = resolve_model_name(model_alias, available)
-        return resolved or model_alias
-    except Exception:
-        return model_alias
-
-
 # ====================================================================================================
 # MARK: ANALYSIS FILE LOCATOR
 # ====================================================================================================
@@ -205,21 +211,20 @@ def _iter_date_dirs(stage: str, domain: str, max_days: int) -> list[tuple[_date,
 # ====================================================================================================
 def create_daily_summary(
     domain: str,
-    date: str = "",
-    topic: str = "",
-    model: str = _DEFAULT_MODEL,
-    num_ctx: int = _DEFAULT_NUM_CTX,
+    date:   str = "",
+    topic:  str = "",
 ) -> str:
     """Read all mined content for a domain+date, call the LLM to produce a structured
     intelligence briefing, and save it to the 02-Analysis stage.
+
+    Uses the ambient session model and context window registered by the orchestrator
+    (via ollama_client.register_session_config) - no model or num_ctx parameters needed.
 
     Parameters
     ----------
     domain  : research domain label (must match what was used when mining)
     date    : YYYY-MM-DD, "today", "yesterday", or "" (defaults to today)
     topic   : optional context hint for the analyst (e.g. "AI hardware releases")
-    model   : Ollama model alias or name, default "20b"
-    num_ctx : LLM context window in tokens, default 131072
 
     Returns "Saved: <path>  (N articles, N words)" on success.
     Returns a descriptive "Error: ..." string on failure - never raises.
@@ -233,23 +238,30 @@ def create_daily_summary(
         return f"Error: invalid date {date!r}. Use YYYY-MM-DD, 'today', or 'yesterday'."
 
     content_files = _find_content_files(domain.strip(), when)
+    date_label    = when.strftime("%Y/%m/%d")
+    mine_dir      = f"01-Mine/{domain.strip()}/{date_label}/"
+    log_to_session(f"[KoreAnalysis] scanning {mine_dir} -> {len(content_files)} file(s) found")
+    if content_files:
+        for cf in content_files:
+            log_to_session(f"[KoreAnalysis]   input: {cf}")
     if not content_files:
-        date_label = when.strftime("%Y/%m/%d")
         return f"No mined content found in 01-Mine/{domain}/{date_label}/"
 
     articles = _read_articles(content_files)
     if not articles:
         return "Error: could not read any article content."
 
-    prompt   = _build_analysis_prompt(domain.strip(), when, topic, articles)
-    resolved = _safe_resolve_model(str(model))
+    model   = get_active_model()
+    num_ctx = get_active_num_ctx()
+
+    prompt = _build_analysis_prompt(domain.strip(), when, topic, articles)
 
     prompt_words = len(prompt.split())
-    print(f"[Analysis] {len(articles)} document(s), ~{prompt_words:,} words in prompt (~{int(prompt_words * 1.3):,} tokens est.), ctx={int(num_ctx):,}")
+    log_to_session(f"[Analysis] {len(articles)} document(s), ~{prompt_words:,} words in prompt (~{int(prompt_words * 1.3):,} tokens est.), ctx={num_ctx:,}")
 
     try:
-        result         = call_ollama_extended(model_name=resolved, prompt=prompt, num_ctx=int(num_ctx))
-        analysis_body  = result.response.strip()
+        result        = call_ollama_extended(model_name=model, prompt=prompt, num_ctx=num_ctx)
+        analysis_body = result.response.strip()
     except Exception as exc:
         return f"Error: LLM call failed: {exc}"
 
@@ -263,7 +275,7 @@ def create_daily_summary(
         "",
         f"**Generated:** {now}",
         f"**Documents analysed:** {len(articles)}",
-        f"**Model:** {resolved}",
+        f"**Model:** {model}",
     ])
     if topic.strip():
         header += f"\n**Topic context:** {topic.strip()}"
@@ -274,6 +286,7 @@ def create_daily_summary(
     try:
         date_dir    = ensure_date_dir(STAGE_ANALYSIS, domain.strip(), when)
         output_path = date_dir / "analysis.md"
+        log_to_session(f"[KoreAnalysis] output: {output_path}")
         output_path.write_text(full_document, encoding="utf-8")
     except Exception as exc:
         return f"Error: failed to save analysis: {exc}"

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Dispatches rendered HTML reports from the `03-Presentation` research stage to external destinations. This skill handles **delivery mechanics only** - HTML rendering and template styling are handled entirely by **WebResearchReport**.
+Dispatches rendered HTML reports from the `03-Presentation` research stage to external destinations. This skill handles **delivery mechanics only** - HTML rendering and template styling are handled entirely by **KoreReport**.
 
 Supported destinations:
 - **Email** - SMTP STARTTLS to a configured mailing list (`send_report_email`)
@@ -19,7 +19,7 @@ Planned future destinations:
           (Analysis)      (Report)           (this skill)
 ```
 
-**Prerequisite**: Run `WebResearchReport.save_html_report` first to produce `report.html` in `03-Presentation`.
+**Prerequisite**: Run `KoreReport.save_html_report` first to produce `report.html` in `03-Presentation`.
 
 ---
 

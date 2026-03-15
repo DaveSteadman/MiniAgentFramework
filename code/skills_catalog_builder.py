@@ -27,12 +27,15 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import argparse
+import importlib.util
 import json
 import re
 from pathlib import Path
 
 from ollama_client import call_ollama
 from ollama_client import ensure_ollama_running
+from workspace_utils import get_workspace_root
+from workspace_utils import normalize_module_path
 
 
 # ====================================================================================================
@@ -42,6 +45,89 @@ SKILLS_SCHEMA_VERSION = "1.0"
 DEFAULT_SKILLS_ROOT   = Path(__file__).resolve().parent / "skills"
 DEFAULT_OUTPUT_FILE   = DEFAULT_SKILLS_ROOT / "skills_summary.md"
 DEFAULT_SUMMARY_MODEL = "gpt-oss:20b"
+
+
+def _workspace_abspath(module_path: str) -> Path:
+    workspace_root = get_workspace_root()
+    candidate = str(module_path).strip()
+    if not candidate.endswith(".py"):
+        candidate = f"{candidate}.py"
+    return (workspace_root / candidate).resolve()
+
+
+def _load_module_from_path(module_path: str):
+    absolute_module_path = _workspace_abspath(module_path)
+    if not absolute_module_path.exists():
+        return None
+
+    dynamic_module_name = f"catalog_skill_{absolute_module_path.stem}_{abs(hash(str(absolute_module_path)))}"
+    spec = importlib.util.spec_from_file_location(dynamic_module_name, absolute_module_path)
+    if spec is None or spec.loader is None:
+        return None
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _normalize_planner_tool_entry(entry: dict, module_path: str, skill_name: str) -> dict:
+    normalized = dict(entry)
+    tool_name = str(normalized.get("name", "")).strip()
+    function_name = str(normalized.get("function", "")).strip()
+    if not tool_name or not function_name:
+        raise ValueError(f"{skill_name}: planner tool entries require both 'name' and 'function'")
+
+    normalized["name"] = tool_name
+    normalized["function"] = function_name
+    normalized["module"] = normalize_module_path(module_path)
+    normalized["description"] = str(normalized.get("description", "")).strip()
+
+    parameters = normalized.get("parameters") or {"type": "object", "properties": {}}
+    if not isinstance(parameters, dict):
+        raise ValueError(f"{skill_name}: planner tool '{tool_name}' parameters must be an object schema")
+    parameters.setdefault("type", "object")
+    parameters.setdefault("properties", {})
+    if not isinstance(parameters["properties"], dict):
+        raise ValueError(f"{skill_name}: planner tool '{tool_name}' properties must be a dict")
+    normalized["parameters"] = parameters
+    return normalized
+
+
+def _load_planner_tools(module_path: str, skill_name: str) -> tuple[list[dict], str]:
+    if not module_path:
+        return [], ""
+
+    module = _load_module_from_path(module_path)
+    if module is None:
+        return [], ""
+
+    raw_tools = getattr(module, "PLANNER_TOOLS", None)
+    if not isinstance(raw_tools, list):
+        return [], str(getattr(module, "PRIMARY_PLANNER_TOOL", "") or "").strip()
+
+    planner_tools = [
+        _normalize_planner_tool_entry(entry, module_path=module_path, skill_name=skill_name)
+        for entry in raw_tools
+        if isinstance(entry, dict)
+    ]
+    primary_tool = str(getattr(module, "PRIMARY_PLANNER_TOOL", "") or "").strip()
+    return planner_tools, primary_tool
+
+
+def _existing_callable_signatures(functions: list[str], module_path: str) -> list[str]:
+    if not module_path:
+        return functions
+
+    module = _load_module_from_path(module_path)
+    if module is None:
+        return functions
+
+    filtered: list[str] = []
+    for function_sig in functions:
+        func_name = str(function_sig).split("(", 1)[0].strip()
+        if func_name and hasattr(module, func_name):
+            filtered.append(function_sig)
+    return filtered
 
 
 # ====================================================================================================
@@ -111,7 +197,8 @@ def summarize_with_llm(skill_md_path: Path, model_name: str, num_ctx: int) -> di
 
 # ----------------------------------------------------------------------------------------------------
 def summarize_locally(skill_md_path: Path) -> dict:
-    skill_text = skill_md_path.read_text(encoding="utf-8")
+    # utf-8-sig strips the BOM if present, otherwise behaves like utf-8.
+    skill_text = skill_md_path.read_text(encoding="utf-8-sig")
     lines      = [line.strip() for line in skill_text.splitlines() if line.strip()]
 
     # Use the first Markdown heading as the skill title, falling back to the parent directory name.
@@ -134,8 +221,15 @@ def summarize_locally(skill_md_path: Path) -> dict:
         if heading_match:
             module = heading_match.group(1)
 
+    # Extract trigger keyword from '## Trigger keyword: X' heading if present.
+    trigger_keyword = ""
+    trigger_match = re.search(r"##\s+Trigger keyword:\s*(.+)", skill_text, re.IGNORECASE)
+    if trigger_match:
+        trigger_keyword = trigger_match.group(1).strip()
+
     # Collect all backtick-quoted function signatures (e.g. `func_name(args)`).
     functions = re.findall(r"`([A-Za-z_][A-Za-z0-9_]*\([^`]*\))`", skill_text)
+    functions = sorted(set(_existing_callable_signatures(functions, module)))
 
     # Extract bullet-point items from the Input and Output sections.
     input_section = re.findall(r"## Input(.*?)(##|$)", skill_text, re.DOTALL | re.IGNORECASE)
@@ -149,28 +243,46 @@ def summarize_locally(skill_md_path: Path) -> dict:
     if output_section:
         output_lines = [line.strip(" -") for line in output_section[0][0].splitlines() if line.strip().startswith("-")]
 
+    planner_tools, primary_tool = _load_planner_tools(module_path=module, skill_name=title)
+
     return {
-        "skill_name": title,
-        "relative_path": skill_md_path.as_posix(),
-        "purpose": purpose,
-        "module": module,
-        "functions": sorted(set(functions)),
-        "inputs": input_lines,
-        "outputs": output_lines,
+        "skill_name":      title,
+        "relative_path":   skill_md_path.as_posix(),
+        "purpose":         purpose,
+        "module":          module,
+        "trigger_keyword": trigger_keyword,
+        "functions":       functions,
+        "planner_tools":   planner_tools,
+        "primary_tool":    primary_tool,
+        "inputs":          input_lines,
+        "outputs":         output_lines,
     }
 
 
 # ----------------------------------------------------------------------------------------------------
 def summarize_skill(skill_md_path: Path, use_llm: bool, model_name: str, num_ctx: int) -> dict:
+    summary: dict | None = None
     if use_llm:
         try:
             llm_summary = summarize_with_llm(skill_md_path=skill_md_path, model_name=model_name, num_ctx=num_ctx)
             if isinstance(llm_summary, dict):
-                return llm_summary
+                summary = llm_summary
         except Exception:
             pass
 
-    return summarize_locally(skill_md_path=skill_md_path)
+    if summary is None:
+        summary = summarize_locally(skill_md_path=skill_md_path)
+
+    module_path = str(summary.get("module", "")).strip()
+    skill_name = str(summary.get("skill_name", skill_md_path.parent.name))
+    planner_tools, primary_tool = _load_planner_tools(module_path=module_path, skill_name=skill_name)
+    if planner_tools:
+        summary["planner_tools"] = planner_tools
+    summary.setdefault("planner_tools", [])
+    if primary_tool:
+        summary["primary_tool"] = primary_tool
+    summary.setdefault("primary_tool", "")
+    return summary
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -187,6 +299,8 @@ def normalize_summary(summary: dict, skill_md_path: Path) -> dict:
     normalized = dict(summary)
     normalized["relative_path"] = to_workspace_relative_path(skill_md_path)
 
+    normalized.setdefault("trigger_keyword", "")
+    normalized.setdefault("primary_tool", "")
     for field_name in ["functions", "inputs", "outputs"]:
         field_value = normalized.get(field_name, [])
         if isinstance(field_value, list):
@@ -195,6 +309,12 @@ def normalize_summary(summary: dict, skill_md_path: Path) -> dict:
             normalized[field_name] = [field_value.strip()]
         else:
             normalized[field_name] = []
+
+    planner_tools = normalized.get("planner_tools", [])
+    if isinstance(planner_tools, list):
+        normalized["planner_tools"] = [tool for tool in planner_tools if isinstance(tool, dict)]
+    else:
+        normalized["planner_tools"] = []
 
     return normalized
 
@@ -243,7 +363,27 @@ def _rebuild_skills_catalog_if_stale(skills_summary_path: Path) -> None:
     else:
         summary_mtime = skills_summary_path.stat().st_mtime
         skill_files   = list(skills_root.rglob("skill.md"))
-        needs_rebuild = any(sf.stat().st_mtime > summary_mtime for sf in skill_files)
+        needs_rebuild = False
+        for sf in skill_files:
+            if sf.stat().st_mtime > summary_mtime:
+                needs_rebuild = True
+                break
+            try:
+                skill_text = sf.read_text(encoding="utf-8-sig")
+            except Exception:
+                continue
+            module_match = re.search(r"-\s*Module:\s*`([^`]+)`", skill_text)
+            if not module_match:
+                module_match = re.search(r"##\s+Module\s*\n+`([^`]+)`", skill_text)
+            if not module_match:
+                continue
+            try:
+                module_path = _workspace_abspath(module_match.group(1))
+            except Exception:
+                continue
+            if module_path.exists() and module_path.stat().st_mtime > summary_mtime:
+                needs_rebuild = True
+                break
 
     if not needs_rebuild:
         return
@@ -273,7 +413,9 @@ def load_skills_payload(skills_summary_path: Path) -> dict:
 # ====================================================================================================
 # MARK: TOOL DEFINITIONS
 # ====================================================================================================
-_CLEAN_SIG_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\(([^"<>\\]*)\)$')
+# _CLEAN_SIG_RE: rejects signatures containing <placeholders> or \n-style escape sequences.
+# Quoted string defaults (date="") are allowed; see the positional-string guard in the parser.
+_CLEAN_SIG_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\(([^<>\\]*)\)$')
 _PARAM_RE     = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*([A-Za-z_][A-Za-z0-9_\[\]| ]*))?\s*(?:=\s*\S+)?')
 
 
@@ -289,9 +431,14 @@ def _python_type_to_json_type(ptype: str) -> str:
 def _parse_tool_signature(sig: str) -> tuple[str, list[dict]] | None:
     """Parse 'func_name(p1: type1, p2: type2)' into (name, params_list).
 
-    Returns None when the signature looks like an example call (contains quotes, <>, or backslashes).
+    Returns None when the signature looks like an example call (contains <>, backslashes,
+    or has a quoted string as the first positional argument).
     """
-    m = _CLEAN_SIG_RE.match(sig.strip())
+    sig = sig.strip()
+    # Reject example calls whose first argument is a string literal: func("...", ...)
+    if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s*\(\s*["\']', sig):
+        return None
+    m = _CLEAN_SIG_RE.match(sig)
     if not m:
         return None
     func_name  = m.group(1)
@@ -325,8 +472,34 @@ def build_tool_definitions(skills_payload: dict) -> list[dict]:
     seen_names: set[str]   = set()
 
     for skill in skills_payload.get("skills", []):
-        purpose = skill.get("purpose", "")
-        module  = skill.get("module", "")
+        purpose         = skill.get("purpose", "")
+        trigger_kw      = skill.get("trigger_keyword", "").strip()
+        description     = f"Triggered by keyword '{trigger_kw}'. {purpose}" if trigger_kw else purpose
+        planner_tools   = skill.get("planner_tools", [])
+
+        if planner_tools:
+            for planner_tool in planner_tools:
+                tool_name = str(planner_tool.get("name", "")).strip()
+                if not tool_name:
+                    continue
+                if tool_name in seen_names:
+                    raise RuntimeError(f"Duplicate planner tool name in skills catalog: {tool_name}")
+                seen_names.add(tool_name)
+
+                tool_description = str(planner_tool.get("description", "")).strip() or description
+                tool_parameters = dict(planner_tool.get("parameters") or {"type": "object", "properties": {}})
+                tool_parameters.setdefault("type", "object")
+                tool_parameters.setdefault("properties", {})
+
+                tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": tool_description,
+                        "parameters": tool_parameters,
+                    },
+                })
+            continue
 
         for func_sig in skill.get("functions", []):
             parsed = _parse_tool_signature(func_sig)
@@ -349,7 +522,7 @@ def build_tool_definitions(skills_payload: dict) -> list[dict]:
 
             tool_func: dict = {
                 "name":        func_name,
-                "description": f"{purpose}  [module: {Path(module).stem}]",
+                "description": description,
                 "parameters": {
                     "type":       "object",
                     "properties": properties,

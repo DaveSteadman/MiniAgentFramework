@@ -20,8 +20,6 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import importlib.util
-import re
-from pathlib import Path
 
 from prompt_tokens import resolve_tokens
 from workspace_utils import get_workspace_root
@@ -71,33 +69,47 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
 
 
 # ----------------------------------------------------------------------------------------------------
-def _build_allowlist(skills_payload: dict) -> set[tuple[str, str]]:
+def _build_allowlist(skills_payload: dict) -> set[tuple[str, str, str]]:
     allowlist = set()
     for skill in skills_payload.get("skills", []):
         module = normalize_module_path(skill.get("module", ""))
-        for function_name in skill.get("functions", []):
-            normalized = str(function_name).split("(")[0].strip()
-            if module and normalized:
-                allowlist.add((module, normalized))
+        planner_tools = skill.get("planner_tools", [])
+        if planner_tools:
+            for planner_tool in planner_tools:
+                tool_name = str(planner_tool.get("name", "")).strip()
+                function_name = str(planner_tool.get("function", "")).strip()
+                if module and tool_name and function_name:
+                    allowlist.add((tool_name, module, function_name))
+            continue
+
+        for function_sig in skill.get("functions", []):
+            function_name = str(function_sig).split("(")[0].strip()
+            if module and function_name:
+                allowlist.add((function_name, module, function_name))
     return allowlist
 
 
 # ----------------------------------------------------------------------------------------------------
-def _build_function_to_module_index(skills_payload: dict) -> dict[str, str]:
-    """Map clean function names to full normalised module paths.
-
-    First occurrence per function name wins (avoids ambiguity when the same function
-    name appears across multiple skills).
-    """
-    index: dict[str, str] = {}
+def _build_tool_index(skills_payload: dict) -> dict[str, tuple[str, str]]:
+    """Map planner tool names to (module_path, function_name)."""
+    index: dict[str, tuple[str, str]] = {}
     for skill in skills_payload.get("skills", []):
         module = normalize_module_path(skill.get("module", ""))
         if not module:
             continue
-        for func_sig in skill.get("functions", []):
-            fname = str(func_sig).split("(")[0].strip()
-            if fname and fname not in index:
-                index[fname] = module
+        planner_tools = skill.get("planner_tools", [])
+        if planner_tools:
+            for planner_tool in planner_tools:
+                tool_name = str(planner_tool.get("name", "")).strip()
+                function_name = str(planner_tool.get("function", "")).strip()
+                if tool_name and function_name:
+                    index[tool_name] = (module, function_name)
+            continue
+
+        for function_sig in skill.get("functions", []):
+            function_name = str(function_sig).split("(")[0].strip()
+            if function_name:
+                index[function_name] = (module, function_name)
     return index
 
 
@@ -106,7 +118,7 @@ def _build_function_to_module_index(skills_payload: dict) -> dict[str, str]:
 # MARK: EXECUTION
 # ====================================================================================================
 def execute_tool_call(
-    function_name: str,
+    tool_name: str,
     arguments: dict,
     skills_payload: dict,
     user_prompt: str = "",
@@ -117,14 +129,15 @@ def execute_tool_call(
     Raises RuntimeError when the function is not allow-listed or cannot be loaded.
     """
     allowlist = _build_allowlist(skills_payload)
-    fn_index  = _build_function_to_module_index(skills_payload)
+    tool_index = _build_tool_index(skills_payload)
 
-    module_path = fn_index.get(function_name)
-    if module_path is None:
-        raise RuntimeError(f"Tool '{function_name}' not found in skills catalog")
+    resolved = tool_index.get(tool_name)
+    if resolved is None:
+        raise RuntimeError(f"Tool '{tool_name}' not found in skills catalog")
+    module_path, function_name = resolved
 
-    if (module_path, function_name) not in allowlist:
-        raise RuntimeError(f"Tool '{function_name}' is not allow-listed by skills catalog")
+    if (tool_name, module_path, function_name) not in allowlist:
+        raise RuntimeError(f"Tool '{tool_name}' is not allow-listed by skills catalog")
 
     # Resolve any {{token}} placeholders in string arguments (e.g. {{today}}).
     resolved_args = {
@@ -136,6 +149,7 @@ def execute_tool_call(
     result = fn(**resolved_args)
 
     return {
+        "tool":      tool_name,
         "function":  function_name,
         "module":    module_path,
         "arguments": resolved_args,
