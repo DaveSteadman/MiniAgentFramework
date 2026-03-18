@@ -66,11 +66,12 @@ Single JSON payload for orchestration planning.
         "execute_file_instruction(\"read file ./data/content.txt\")",
         "execute_file_instruction(\"write hello world to file x.txt\")",
         "execute_file_instruction(user_prompt: str)",
-        "find_files(\"analysis\")",
-        "find_files(\"pulse\", \"data\")",
-        "find_files(keyword: str, search_root: str = \"\")",
-        "find_folders(\"2026-03\")",
-        "find_folders(keyword: str, search_root: str = \"\")",
+        "find_files([\"analysis\"])",
+        "find_files([\"pulse\"], \"data\")",
+        "find_files([\"test\", \"2026\"])",
+        "find_files(keywords: list[str], search_root: str = \"\")",
+        "find_folders([\"2026-03\"])",
+        "find_folders(keywords: list[str], search_root: str = \"\")",
         "list_data_files()",
         "read_text_file(file_path: str, max_chars: int = 8000)",
         "write_text_file(file_path: str, text: str)"
@@ -79,13 +80,16 @@ Single JSON payload for orchestration planning.
         {
           "name": "find_files",
           "function": "find_files",
-          "description": "Search the workspace for files whose name contains a keyword fragment. Returns a list of matching relative paths. Use this when you know part of a filename but not the exact path.",
+          "description": "Search the workspace for files whose name contains all of the given keyword fragments. Returns a list of matching relative paths. Use this when you know part of a filename but not the exact path.",
           "parameters": {
             "type": "object",
             "properties": {
-              "keyword": {
-                "type": "string",
-                "description": "Case-insensitive fragment to match against file names."
+              "keywords": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "One or more case-insensitive fragments that must ALL appear in the file name."
               },
               "search_root": {
                 "type": "string",
@@ -93,7 +97,7 @@ Single JSON payload for orchestration planning.
               }
             },
             "required": [
-              "keyword"
+              "keywords"
             ]
           },
           "module": "code/skills/FileAccess/file_access_skill"
@@ -101,13 +105,16 @@ Single JSON payload for orchestration planning.
         {
           "name": "find_folders",
           "function": "find_folders",
-          "description": "Search the workspace for folders whose name contains a keyword fragment. Returns a list of matching relative paths. Use this when you need to locate a directory by partial name.",
+          "description": "Search the workspace for folders whose name contains all of the given keyword fragments. Returns a list of matching relative paths. Use this when you need to locate a directory by partial name.",
           "parameters": {
             "type": "object",
             "properties": {
-              "keyword": {
-                "type": "string",
-                "description": "Case-insensitive fragment to match against folder names."
+              "keywords": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "One or more case-insensitive fragments that must ALL appear in the folder name."
               },
               "search_root": {
                 "type": "string",
@@ -115,7 +122,7 @@ Single JSON payload for orchestration planning.
               }
             },
             "required": [
-              "keyword"
+              "keywords"
             ]
           },
           "module": "code/skills/FileAccess/file_access_skill"
@@ -126,7 +133,7 @@ Single JSON payload for orchestration planning.
         "`file_path`: target file path.",
         "`text`: content to write or append.",
         "`user_prompt`: natural-language instruction for command parsing.",
-        "`keyword`: case-insensitive name fragment for find operations.",
+        "`keywords`: list of one or more case-insensitive name fragments for find operations - ALL must appear in the name.",
         "`search_root`: optional workspace-relative directory to restrict find searches.",
         "Typical trigger phrases:",
         "`create file <name>`",
@@ -141,8 +148,8 @@ Single JSON payload for orchestration planning.
         "Returns status messages for write/append/list operations.",
         "Writing a SystemInfo string to a `.csv` file converts it to `key,value` CSV rows automatically.",
         "Returns file content for read operations.",
-        "`find_files` returns a newline-separated list of workspace-relative file paths whose names contain the keyword, or a \"not found\" message.",
-        "`find_folders` returns a newline-separated list of workspace-relative folder paths whose names contain the keyword, or a \"not found\" message.",
+        "`find_files` returns a newline-separated list of workspace-relative file paths whose names contain ALL keywords, or a \"not found\" message.",
+        "`find_folders` returns a newline-separated list of workspace-relative folder paths whose names contain ALL keywords, or a \"not found\" message.",
         "Returns parse guidance when instruction intent/path cannot be resolved."
       ]
     },
