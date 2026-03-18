@@ -297,6 +297,49 @@ Single JSON payload for orchestration planning.
         "On error: a single-entry list with `rank=0` and `snippet` describing the failure.",
         "`search_web_text(...)` returns a plain-text formatted string suitable for direct LLM consumption:"
       ]
+    },
+    {
+      "skill_name": "Wikipedia Skill",
+      "relative_path": "code/skills/Wikipedia/skill.md",
+      "purpose": "Look up a topic on Wikipedia and return a plain-text article summary. Use this when the LLM needs factual reference data about a person, place, concept, event, or technology - any time it would benefit from an authoritative definition or background.",
+      "module": "code/skills/Wikipedia/wikipedia_skill.py",
+      "trigger_keyword": "",
+      "functions": [
+        "lookup_wikipedia(\"Eiffel Tower\")",
+        "lookup_wikipedia(\"Marie Curie\")",
+        "lookup_wikipedia(\"Python programming language\")",
+        "lookup_wikipedia(\"quantum entanglement\")",
+        "lookup_wikipedia(topic: str, timeout: int = 15)"
+      ],
+      "planner_tools": [
+        {
+          "name": "lookup_wikipedia",
+          "function": "lookup_wikipedia",
+          "description": "Look up a topic on Wikipedia and return a plain-text article summary. Use this when you need factual reference data about a person, place, concept, event, or technology. Returns the article extract, or 'No Wikipedia data found' when nothing is available.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "topic": {
+                "type": "string",
+                "description": "The subject to look up - e.g. 'Python programming language', 'Eiffel Tower', 'quantum entanglement'."
+              }
+            },
+            "required": [
+              "topic"
+            ]
+          },
+          "module": "code/skills/Wikipedia/wikipedia_skill"
+        }
+      ],
+      "primary_tool": "lookup_wikipedia",
+      "inputs": [
+        "`topic`: the subject to look up (required). Can be a name, term, acronym, or short phrase.",
+        "`timeout`: network timeout in seconds (optional, default 15)."
+      ],
+      "outputs": [
+        "Returns a plain-text block starting with `Wikipedia - <article title>` followed by the article extract (up to 400 words).",
+        "Returns `No Wikipedia data found for '<topic>'` when no matching article exists or no useful extract is available."
+      ]
     }
   ]
 }

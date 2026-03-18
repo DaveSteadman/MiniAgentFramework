@@ -20,6 +20,7 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import importlib.util
+import sys
 
 from prompt_tokens import resolve_tokens
 from workspace_utils import get_workspace_root
@@ -51,14 +52,21 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
     if cache_key in _callable_cache:
         return _callable_cache[cache_key]
 
-    # Generate a unique module name to avoid collisions when the same path is loaded multiple times.
+    # Generate a stable canonical module name so that if slash_commands.py (or any other
+    # importer) has already loaded this file via the normal import system, both references
+    # share the same module object and module-level state (e.g. _sandbox_enabled).
     dynamic_module_name = f"skill_module_{absolute_module_path.stem}_{abs(hash(str(absolute_module_path)))}"
-    spec                = importlib.util.spec_from_file_location(dynamic_module_name, absolute_module_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load module spec for: {module_path}")
 
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Re-use an already-registered module rather than exec_module-ing a second copy.
+    if dynamic_module_name in sys.modules:
+        module = sys.modules[dynamic_module_name]
+    else:
+        spec   = importlib.util.spec_from_file_location(dynamic_module_name, absolute_module_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Unable to load module spec for: {module_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[dynamic_module_name] = module
+        spec.loader.exec_module(module)
 
     if not hasattr(module, function_name):
         raise RuntimeError(f"Function '{function_name}' not found in module '{module_path}'")

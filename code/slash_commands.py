@@ -467,10 +467,36 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_sandbox(arg: str, ctx: SlashCommandContext) -> None:
-    try:
-        from skills.CodeExecute.code_execute_skill import get_sandbox_enabled, set_sandbox_enabled
-    except ImportError:
-        ctx.output("CodeExecute skill not available.", "error")
+    import sys
+    from pathlib import Path
+    from workspace_utils import get_workspace_root
+
+    # Locate the canonical module name used by skill_executor so we toggle the same
+    # module instance that runs tool calls, rather than a freshly imported duplicate.
+    skill_path  = (get_workspace_root() / "code/skills/CodeExecute/code_execute_skill.py").resolve()
+    canon_name  = f"skill_module_code_execute_skill_{abs(hash(str(skill_path)))}"
+    skill_mod   = sys.modules.get(canon_name)
+
+    # Fall back to a direct import when skill_executor hasn't loaded it yet (e.g. first use
+    # before any tool call ran).  After this import the module IS the authoritative copy,
+    # but skill_executor will pick up the same object via sys.modules on its first load.
+    if skill_mod is None:
+        try:
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location(canon_name, skill_path)
+            if spec is None or spec.loader is None:
+                raise ImportError("Cannot load spec")
+            skill_mod = _ilu.module_from_spec(spec)
+            sys.modules[canon_name] = skill_mod
+            spec.loader.exec_module(skill_mod)
+        except Exception:
+            ctx.output("CodeExecute skill not available.", "error")
+            return
+
+    get_sandbox_enabled = getattr(skill_mod, "get_sandbox_enabled", None)
+    set_sandbox_enabled = getattr(skill_mod, "set_sandbox_enabled", None)
+    if not callable(get_sandbox_enabled) or not callable(set_sandbox_enabled):
+        ctx.output("CodeExecute skill does not expose sandbox control functions.", "error")
         return
 
     sub = arg.strip().lower()
