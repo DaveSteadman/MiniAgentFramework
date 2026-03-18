@@ -57,253 +57,94 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "FileAccess Skill",
       "relative_path": "code/skills/FileAccess/skill.md",
-      "purpose": "Provide safe workspace-constrained file access for write, append, read, and listing operations.",
+      "purpose": "Provide safe workspace-constrained file access for write, append, read, listing, and name-based search operations.",
       "module": "code/skills/FileAccess/file_access_skill.py",
       "trigger_keyword": "",
       "functions": [
         "append_text_file(file_path: str, text: str)",
         "execute_file_instruction(\"append done to file ./data/content.txt\")",
-        "execute_file_instruction(\"create file abc.csv and write header1,header2 into it\")",
         "execute_file_instruction(\"read file ./data/content.txt\")",
         "execute_file_instruction(\"write hello world to file x.txt\")",
-        "execute_file_instruction(\"write the system information to ./data/<name>.csv\")",
         "execute_file_instruction(user_prompt: str)",
+        "find_files(\"analysis\")",
+        "find_files(\"pulse\", \"data\")",
+        "find_files(keyword: str, search_root: str = \"\")",
+        "find_folders(\"2026-03\")",
+        "find_folders(keyword: str, search_root: str = \"\")",
         "list_data_files()",
         "read_text_file(file_path: str, max_chars: int = 8000)",
         "write_text_file(file_path: str, text: str)"
       ],
-      "planner_tools": [],
-      "primary_tool": "",
+      "planner_tools": [
+        {
+          "name": "find_files",
+          "function": "find_files",
+          "description": "Search the workspace for files whose name contains a keyword fragment. Returns a list of matching relative paths. Use this when you know part of a filename but not the exact path.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "keyword": {
+                "type": "string",
+                "description": "Case-insensitive fragment to match against file names."
+              },
+              "search_root": {
+                "type": "string",
+                "description": "Optional workspace-relative directory to restrict the search (e.g. 'data' or 'controldata'). Leave empty to search the whole workspace."
+              }
+            },
+            "required": [
+              "keyword"
+            ]
+          },
+          "module": "code/skills/FileAccess/file_access_skill"
+        },
+        {
+          "name": "find_folders",
+          "function": "find_folders",
+          "description": "Search the workspace for folders whose name contains a keyword fragment. Returns a list of matching relative paths. Use this when you need to locate a directory by partial name.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "keyword": {
+                "type": "string",
+                "description": "Case-insensitive fragment to match against folder names."
+              },
+              "search_root": {
+                "type": "string",
+                "description": "Optional workspace-relative directory to restrict the search. Leave empty to search the whole workspace."
+              }
+            },
+            "required": [
+              "keyword"
+            ]
+          },
+          "module": "code/skills/FileAccess/file_access_skill"
+        }
+      ],
+      "primary_tool": "find_files",
       "inputs": [
         "`file_path`: target file path.",
         "`text`: content to write or append.",
         "`user_prompt`: natural-language instruction for command parsing.",
+        "`keyword`: case-insensitive name fragment for find operations.",
+        "`search_root`: optional workspace-relative directory to restrict find searches.",
         "Typical trigger phrases:",
         "`create file <name>`",
         "`write ... to file <path>`",
         "`append ... to file <path>`",
         "`read file <path>`",
-        "`write the system information to <path>.csv`",
-        "`write ... in CSV format`"
+        "`find file named <keyword>`",
+        "`find folder named <keyword>`",
+        "`find files containing <keyword> in <folder>`"
       ],
       "outputs": [
         "Returns status messages for write/append/list operations.",
         "Writing a SystemInfo string to a `.csv` file converts it to `key,value` CSV rows automatically.",
         "Returns file content for read operations.",
+        "`find_files` returns a newline-separated list of workspace-relative file paths whose names contain the keyword, or a \"not found\" message.",
+        "`find_folders` returns a newline-separated list of workspace-relative folder paths whose names contain the keyword, or a \"not found\" message.",
         "Returns parse guidance when instruction intent/path cannot be resolved."
       ]
-    },
-    {
-      "skill_name": "KoreAnalysis Skill",
-      "relative_path": "code/skills/KoreAnalysis/skill.md",
-      "purpose": "Read already-mined content from `01-Mine` and produce a structured daily intelligence summary saved to `02-Analysis`.",
-      "module": "code/skills/KoreAnalysis/kore_analysis_skill.py",
-      "trigger_keyword": "KoreAnalysis",
-      "functions": [
-        "create_daily_summary(domain, date=\"\", topic=\"\")"
-      ],
-      "planner_tools": [
-        {
-          "name": "kore_analysis.create_daily_summary",
-          "function": "create_daily_summary",
-          "description": "Read already-mined KoreMine content from the 01-Mine stage and produce a saved daily analysis in the 02-Analysis stage. Use this directly for KoreAnalysis tasks.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "domain": {
-                "type": "string",
-                "description": "Research domain label that matches the prior KoreMine run."
-              },
-              "date": {
-                "type": "string",
-                "description": "Analysis date as YYYY-MM-DD, today, yesterday, or empty for today."
-              },
-              "topic": {
-                "type": "string",
-                "description": "Optional framing guidance for the analysis output."
-              }
-            },
-            "required": [
-              "domain"
-            ]
-          },
-          "module": "code/skills/KoreAnalysis/kore_analysis_skill"
-        }
-      ],
-      "primary_tool": "kore_analysis.create_daily_summary",
-      "inputs": [],
-      "outputs": []
-    },
-    {
-      "skill_name": "KoreMine Skill",
-      "relative_path": "code/skills/KoreMine/skill.md",
-      "purpose": "Mine web content (direct URLs or DuckDuckGo searches) and save raw results in `webresearch/01-Mine/<domain>/yyyy/mm/dd/`. Does not analyse, summarise, or produce reports.",
-      "module": "code/skills/KoreMine/kore_mine_skill.py",
-      "trigger_keyword": "KoreMine",
-      "functions": [
-        "mine_search(query, domain, max_results=5, fetch_content=True, content_words=600)",
-        "mine_search_deep(\"UK politics March 2026\", \"GeneralNews\", target_articles=8)",
-        "mine_search_deep(query, domain, max_results=10, max_articles_per_result=2, min_words=250, content_words=1500, target_articles=5)",
-        "mine_url(url, domain, slug=None, max_words=1200)"
-      ],
-      "planner_tools": [
-        {
-          "name": "kore_mine.search",
-          "function": "mine_search",
-          "description": "Run a DuckDuckGo search for a research topic and save the raw results into the KoreMine 01-Mine stage. Default tool for KoreMine tasks.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "query": {
-                "type": "string",
-                "description": "Search query using human-readable month/year phrasing."
-              },
-              "domain": {
-                "type": "string",
-                "description": "Research domain label used for saved output folders."
-              },
-              "max_results": {
-                "type": "number",
-                "description": "Number of search results to collect; default 5."
-              },
-              "fetch_content": {
-                "type": "boolean",
-                "description": "Whether to fetch and save article body previews for each result."
-              },
-              "content_words": {
-                "type": "number",
-                "description": "Approximate word limit for each fetched result body."
-              }
-            },
-            "required": [
-              "query",
-              "domain"
-            ]
-          },
-          "module": "code/skills/KoreMine/kore_mine_skill"
-        },
-        {
-          "name": "kore_mine.search_deep",
-          "function": "mine_search_deep",
-          "description": "Run a deeper KoreMine search that follows result pages and saves individual articles. Use when the user explicitly asks for deep mining or broader article collection.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "query": {
-                "type": "string",
-                "description": "Search query using human-readable month/year phrasing."
-              },
-              "domain": {
-                "type": "string",
-                "description": "Research domain label used for saved output folders."
-              },
-              "max_results": {
-                "type": "number",
-                "description": "Maximum top-level search results to inspect."
-              },
-              "max_articles_per_result": {
-                "type": "number",
-                "description": "Maximum child articles to follow from each index page."
-              },
-              "min_words": {
-                "type": "number",
-                "description": "Minimum prose threshold used to distinguish article pages from index pages."
-              },
-              "content_words": {
-                "type": "number",
-                "description": "Approximate word limit for each saved article body."
-              },
-              "target_articles": {
-                "type": "number",
-                "description": "Stop once this many articles have been saved."
-              }
-            },
-            "required": [
-              "query",
-              "domain"
-            ]
-          },
-          "module": "code/skills/KoreMine/kore_mine_skill"
-        },
-        {
-          "name": "kore_mine.url",
-          "function": "mine_url",
-          "description": "Fetch a single URL and save its extracted content into the KoreMine 01-Mine stage.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "url": {
-                "type": "string",
-                "description": "Full article URL to fetch and mine."
-              },
-              "domain": {
-                "type": "string",
-                "description": "Research domain label used for saved output folders."
-              },
-              "slug": {
-                "type": "string",
-                "description": "Optional filename slug override."
-              },
-              "max_words": {
-                "type": "number",
-                "description": "Approximate word limit for extracted body text."
-              }
-            },
-            "required": [
-              "url",
-              "domain"
-            ]
-          },
-          "module": "code/skills/KoreMine/kore_mine_skill"
-        }
-      ],
-      "primary_tool": "kore_mine.search",
-      "inputs": [],
-      "outputs": []
-    },
-    {
-      "skill_name": "KoreReport Skill",
-      "relative_path": "code/skills/KoreReport/skill.md",
-      "purpose": "Read an `analysis.md` produced by KoreAnalysis and render it as a polished, self-contained HTML report saved to `03-Presentation`. All templating and Markdown-to-HTML conversion is handled internally.",
-      "module": "code/skills/KoreReport/kore_report_skill.py",
-      "trigger_keyword": "KoreReport",
-      "functions": [
-        "get_analysis_text(domain, date=\"\")",
-        "get_report_html(domain, date=\"\")",
-        "list_reports(domain, max_days=7)",
-        "save_html_report(domain, date=\"\", template=\"default\")"
-      ],
-      "planner_tools": [
-        {
-          "name": "kore_report.save_html_report",
-          "function": "save_html_report",
-          "description": "Read a saved KoreAnalysis analysis.md file and render it to a polished HTML report saved in the 03-Presentation stage. Use this for KoreReport tasks.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "domain": {
-                "type": "string",
-                "description": "Research domain label that matches the prior KoreMine and KoreAnalysis runs."
-              },
-              "date": {
-                "type": "string",
-                "description": "Report date as YYYY-MM-DD, today, yesterday, or empty for today."
-              },
-              "template": {
-                "type": "string",
-                "description": "Report template name; currently default or dark."
-              }
-            },
-            "required": [
-              "domain"
-            ]
-          },
-          "module": "code/skills/KoreReport/kore_report_skill"
-        }
-      ],
-      "primary_tool": "kore_report.save_html_report",
-      "inputs": [],
-      "outputs": []
     },
     {
       "skill_name": "Memory Skill",
@@ -342,35 +183,6 @@ Single JSON payload for orchestration planning.
         "`store_prompt_memories(...)` returns a status string - e.g. \"Stored 1 new memory fact(s).\" or \"Updated 1 existing memory fact(s).\"",
         "`recall_relevant_memories(...)` returns a formatted, ranked memory recall string with categories.",
         "`get_memory_store_text()` returns the full pretty-printed JSON of the memory store."
-      ]
-    },
-    {
-      "skill_name": "PageAssess Skill",
-      "relative_path": "code/skills/PageAssess/skill.md",
-      "purpose": "Fetch a URL, classify whether it is an article page or an index/listing page, and return a",
-      "module": "code/skills/PageAssess/page_assess_skill.py",
-      "trigger_keyword": "",
-      "functions": [
-        "assess_page(...)",
-        "assess_page(url, topic, max_links)",
-        "assess_page(url: str, topic: str = \"\", max_links: int = 10)"
-      ],
-      "planner_tools": [],
-      "primary_tool": "",
-      "inputs": [
-        "`assess_page(url, topic, max_links)`",
-        "`url`: full HTTP/HTTPS URL to assess (required)",
-        "`topic`: optional topic string to filter and rank returned links by word-overlap relevance",
-        "`max_links`: maximum article-candidate links to return, 1\u201320, default 10"
-      ],
-      "outputs": [
-        "`page_type` is one of:",
-        "`\"article\"` - substantial prose content (\u2265 300 words, \u2264 4 links per 100 words)",
-        "`\"index\"` - listing/aggregation page (< 150 words, or \u2265 7 links per 100 words)",
-        "`\"mixed\"` - some content plus significant navigation (common on news section pages)",
-        "`word_count`: prose words extracted after noise removal and deduplication",
-        "`article_links`: sorted by `topic` match score when `topic` provided; otherwise page order",
-        "On failure: `{\"error\": \"description of what went wrong\"}` - never raises"
       ]
     },
     {
@@ -440,101 +252,6 @@ Single JSON payload for orchestration planning.
         "set_task_schedule(name: str, schedule: str)"
       ],
       "planner_tools": [],
-      "primary_tool": "",
-      "inputs": [],
-      "outputs": []
-    },
-    {
-      "skill_name": "WebExtract Skill",
-      "relative_path": "code/skills/WebExtract/skill.md",
-      "purpose": "Fetch a web page by URL and extract its readable prose content, stripping all HTML markup, navigation, scripts, advertisements, and other non-content noise. Returns clean text ready for LLM synthesis or summarization.",
-      "module": "code/skills/WebExtract/web_extract_skill.py",
-      "trigger_keyword": "",
-      "functions": [
-        "fetch_page_text(\"https://example.com/article\", max_words=400)",
-        "fetch_page_text(...)",
-        "fetch_page_text(url, max_words, timeout_seconds)",
-        "fetch_page_text(url: str, max_words: int = 400, timeout_seconds: int = 15)"
-      ],
-      "planner_tools": [],
-      "primary_tool": "",
-      "inputs": [
-        "`fetch_page_text(url, max_words, timeout_seconds)`",
-        "`url`: full HTTP/HTTPS URL to fetch (required)",
-        "`max_words`: maximum words of body text to return, 50\u2013800, default 400",
-        "`timeout_seconds`: network timeout, 5\u201360, default 15"
-      ],
-      "outputs": [
-        "`fetch_page_text(...)` returns a plain string containing:",
-        "The readable prose text extracted from the page body, up to `max_words` words.",
-        "`...[truncated]` appended if the content was cut.",
-        "A descriptive error string starting with `\"Error:\"` if the fetch or extraction failed."
-      ]
-    },
-    {
-      "skill_name": "WebResearchOutput Skill",
-      "relative_path": "code/skills/WebResearchOutput/skill.md",
-      "purpose": "Dispatches rendered HTML reports from the `03-Presentation` research stage to external destinations. This skill handles **delivery mechanics only** - HTML rendering and template styling are handled entirely by **KoreReport**.",
-      "module": "code/skills/WebResearchOutput/web_research_output_skill.py",
-      "trigger_keyword": "",
-      "functions": [
-        "list_reports(domain, max_days=7)",
-        "send_report_email(domain, date=\"\", list_name=\"default\", subject=\"\")"
-      ],
-      "planner_tools": [
-        {
-          "name": "web_research_output.send_report_email",
-          "function": "send_report_email",
-          "description": "Send a saved KoreReport HTML report by email to a configured mailing list.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "domain": {
-                "type": "string",
-                "description": "Research domain label used by the report."
-              },
-              "date": {
-                "type": "string",
-                "description": "Report date as YYYY-MM-DD, today, yesterday, or empty for today."
-              },
-              "list_name": {
-                "type": "string",
-                "description": "Configured mailing list key in controldata/email_config.json."
-              },
-              "subject": {
-                "type": "string",
-                "description": "Optional email subject line override."
-              }
-            },
-            "required": [
-              "domain"
-            ]
-          },
-          "module": "code/skills/WebResearchOutput/web_research_output_skill"
-        },
-        {
-          "name": "web_research_output.list_reports",
-          "function": "list_reports",
-          "description": "List available rendered HTML reports in the 03-Presentation stage for a domain.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "domain": {
-                "type": "string",
-                "description": "Research domain label used by the report."
-              },
-              "max_days": {
-                "type": "number",
-                "description": "Maximum number of dated report entries to return."
-              }
-            },
-            "required": [
-              "domain"
-            ]
-          },
-          "module": "code/skills/WebResearchOutput/web_research_output_skill"
-        }
-      ],
       "primary_tool": "",
       "inputs": [],
       "outputs": []

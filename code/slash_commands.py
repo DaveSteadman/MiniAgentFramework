@@ -259,6 +259,13 @@ def _cmd_finalgen(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _cmd_newchat(arg: str, ctx: SlashCommandContext) -> None:
+    ctx.clear_history()
+    ctx.output("Conversation history cleared - starting a new chat.", "success")
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _cmd_clearmemory(arg: str, ctx: SlashCommandContext) -> None:
     from pathlib import Path
     store_path = Path(__file__).resolve().parent / "skills" / "Memory" / "memory_store.json"
@@ -486,10 +493,11 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
     import shutil
     from datetime import date
     from datetime import timedelta
+    from workspace_utils import get_chatsessions_dir
     from workspace_utils import get_logs_dir
 
     if not arg.strip():
-        ctx.output("Usage: /deletelogs <days>  |  delete log date-folders older than N days", "dim")
+        ctx.output("Usage: /deletelogs <days>  |  delete log and chatsession date-folders older than N days", "dim")
         return
 
     try:
@@ -502,30 +510,32 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output("Days must be at least 1.", "error")
         return
 
-    log_dir    = get_logs_dir()
-    cutoff     = date.today() - timedelta(days=days)
-    date_re    = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-    deleted    = []
-    errors     = []
+    cutoff  = date.today() - timedelta(days=days)
+    date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    deleted = []
+    errors  = []
 
-    for folder in sorted(log_dir.iterdir()):
-        if not folder.is_dir() or not date_re.match(folder.name):
+    for base_dir in (get_logs_dir(), get_chatsessions_dir()):
+        if not base_dir.exists():
             continue
-        try:
-            folder_date = date.fromisoformat(folder.name)
-        except ValueError:
-            continue
-        if folder_date < cutoff:
+        for folder in sorted(base_dir.iterdir()):
+            if not folder.is_dir() or not date_re.match(folder.name):
+                continue
             try:
-                shutil.rmtree(folder)
-                deleted.append(folder.name)
-            except Exception as exc:
-                errors.append(f"{folder.name}: {exc}")
+                folder_date = date.fromisoformat(folder.name)
+            except ValueError:
+                continue
+            if folder_date < cutoff:
+                try:
+                    shutil.rmtree(folder)
+                    deleted.append(f"{base_dir.name}/{folder.name}")
+                except Exception as exc:
+                    errors.append(f"{base_dir.name}/{folder.name}: {exc}")
 
     if deleted:
-        ctx.output(f"Deleted {len(deleted)} log folder(s): {', '.join(deleted)}", "success")
+        ctx.output(f"Deleted {len(deleted)} date-folder(s): {', '.join(deleted)}", "success")
     else:
-        ctx.output(f"No log date-folders older than {days} day(s) found.", "dim")
+        ctx.output(f"No date-folders older than {days} day(s) found.", "dim")
     for err in errors:
         ctx.output(f"Error deleting {err}", "error")
 
@@ -769,6 +779,7 @@ _REGISTRY: dict[str, Callable] = {
     "/timeout":       _cmd_timeout,
     "/stopmodel":     _cmd_stopmodel,
     "/clearmemory":   _cmd_clearmemory,
+    "/newchat":       _cmd_newchat,
     "/reskill":       _cmd_reskills,
     "/finalgen":      _cmd_finalgen,
     "/sandbox":       _cmd_sandbox,
@@ -789,10 +800,11 @@ _DESCRIPTIONS: dict[str, str] = {
     "/timeout":       "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
     "/stopmodel":     "[name]  Unload a running model from VRAM (defaults to active model)",
     "/clearmemory":   "Delete the memory store file, starting with a blank memory next session",
+    "/newchat":       "Clear conversation history and session context, starting a fresh chat",
     "/reskill":       "Rebuild the skills catalog from skill.md files and hot-reload into session",
     "/finalgen":      "<on|off>  Enable/disable final LLM synthesis of skill output (default: on)",
     "/sandbox":       "<on|off>  Enable/disable Python code execution sandbox (import whitelist + blocked builtins)",
-    "/deletelogs":    "<days>  Delete log date-folders older than N days (e.g. /deletelogs 10)",
+    "/deletelogs":    "<days>  Delete log and chatsession date-folders older than N days (e.g. /deletelogs 10)",
     "/test":          "<prompts-file>  Run test_wrapper on a prompts file; streams results live",
     "/recall":        "Show a summary of prior skill outputs stored in this session's context",
     "/tasks":         "List all scheduled tasks with status, schedule, and first prompt",

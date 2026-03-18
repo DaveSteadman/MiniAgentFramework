@@ -134,6 +134,53 @@ def _coerce_text_for_target(target_path: Path, text: str) -> str:
 # ====================================================================================================
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
+# PLANNER_TOOLS: explicit tool definitions for find_files and find_folders so the orchestrator
+# exposes them with typed parameter schemas rather than deriving them from bare signatures.
+PLANNER_TOOLS = [
+    {
+        "name":        "find_files",
+        "function":    "find_files",
+        "description": "Search the workspace for files whose name contains a keyword fragment. Returns a list of matching relative paths. Use this when you know part of a filename but not the exact path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type":        "string",
+                    "description": "Case-insensitive fragment to match against file names.",
+                },
+                "search_root": {
+                    "type":        "string",
+                    "description": "Optional workspace-relative directory to restrict the search (e.g. 'data' or 'controldata'). Leave empty to search the whole workspace.",
+                },
+            },
+            "required": ["keyword"],
+        },
+    },
+    {
+        "name":        "find_folders",
+        "function":    "find_folders",
+        "description": "Search the workspace for folders whose name contains a keyword fragment. Returns a list of matching relative paths. Use this when you need to locate a directory by partial name.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type":        "string",
+                    "description": "Case-insensitive fragment to match against folder names.",
+                },
+                "search_root": {
+                    "type":        "string",
+                    "description": "Optional workspace-relative directory to restrict the search. Leave empty to search the whole workspace.",
+                },
+            },
+            "required": ["keyword"],
+        },
+    },
+]
+
+PRIMARY_PLANNER_TOOL = "find_files"
+
+
+# ----------------------------------------------------------------------------------------------------
 def write_text_file(file_path: str, text: str) -> str:
     try:
         target_path = _resolve_safe_path(file_path)
@@ -181,6 +228,68 @@ def list_data_files() -> str:
     if not file_paths:
         return "No files found under data/."
     return "\n".join(file_paths)
+
+
+# ----------------------------------------------------------------------------------------------------
+def find_files(keyword: str, search_root: str = "") -> str:
+    """Return all files under the workspace whose name contains *keyword* (case-insensitive).
+
+    *search_root* is a workspace-relative directory to restrict the search (e.g. "data" or
+    "controldata").  Defaults to the full workspace root when empty or omitted.
+    """
+    keyword_clean = str(keyword or "").strip().lower()
+    if not keyword_clean:
+        return "Error: keyword must not be empty."
+
+    if search_root:
+        try:
+            base = _resolve_safe_path(search_root if "/" in search_root else search_root + "/placeholder")
+            base = base.parent if base.suffix else base
+        except ValueError:
+            return f"Error: search_root '{search_root}' escapes workspace."
+    else:
+        base = WORKSPACE_ROOT
+
+    matches = [
+        p.relative_to(WORKSPACE_ROOT).as_posix()
+        for p in sorted(base.rglob("*"))
+        if p.is_file() and keyword_clean in p.name.lower()
+    ]
+
+    if not matches:
+        return f"No files found containing '{keyword}'" + (f" under {search_root}" if search_root else "") + "."
+    return "\n".join(matches)
+
+
+# ----------------------------------------------------------------------------------------------------
+def find_folders(keyword: str, search_root: str = "") -> str:
+    """Return all directories under the workspace whose name contains *keyword* (case-insensitive).
+
+    *search_root* is a workspace-relative directory to restrict the search.
+    Defaults to the full workspace root when empty or omitted.
+    """
+    keyword_clean = str(keyword or "").strip().lower()
+    if not keyword_clean:
+        return "Error: keyword must not be empty."
+
+    if search_root:
+        try:
+            base = _resolve_safe_path(search_root if "/" in search_root else search_root + "/placeholder")
+            base = base.parent if base.suffix else base
+        except ValueError:
+            return f"Error: search_root '{search_root}' escapes workspace."
+    else:
+        base = WORKSPACE_ROOT
+
+    matches = [
+        p.relative_to(WORKSPACE_ROOT).as_posix()
+        for p in sorted(base.rglob("*"))
+        if p.is_dir() and keyword_clean in p.name.lower()
+    ]
+
+    if not matches:
+        return f"No folders found containing '{keyword}'" + (f" under {search_root}" if search_root else "") + "."
+    return "\n".join(matches)
 
 
 # ----------------------------------------------------------------------------------------------------

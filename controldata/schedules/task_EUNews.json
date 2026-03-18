@@ -1,0 +1,17 @@
+{
+  "tasks": [
+    {
+      "name": "EUNews",
+      "enabled": false,
+      "schedule": {
+        "type": "daily",
+        "time": "07:00"
+      },
+      "prompts": [
+          "1 - web search for \"EU News Headlines\" 2 - examine each of the webpages behind the returned links. For landing pages open each linked article that is relevant to the search. 3 - For each article page, where the content is a RU News topic, save the the file as a markdown formatted ./data/nnn-<page title>.md file. I'm going to need around 20 articles, but its more important to filter out any pages that don't meet the search criteria. Target AP and Reuters news sites if further results are needed.",
+          "This is an analysis task only, all the data is already downloaded in the 01-Mine area. Todays EU-News articles need to be summarised into top 10 distinct (non-duplicated) news stories, prioritised by geo-political significance, with around 500 words each and output in a single 02-Analysis report summarising the days news content. Match the date and Domain in the path.",
+          "Take the EU News analysis output for today, and convert to an html file using the dark template"
+      ]
+    }
+  ]
+}

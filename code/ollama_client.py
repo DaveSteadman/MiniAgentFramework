@@ -289,12 +289,18 @@ def get_ollama_ps_rows() -> list[dict[str, str]]:
 
 
 def _get_ollama_ps_rows_local() -> list[dict[str, str]]:
-    result = subprocess.run(
-        ["ollama", "ps"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["ollama", "ps"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("'ollama ps' did not respond within 10 s - is Ollama running?")
+    except FileNotFoundError:
+        raise RuntimeError("'ollama' executable not found on PATH.")
 
     if result.returncode != 0:
         raise RuntimeError(f"Failed to run 'ollama ps': {result.stderr.strip()}")

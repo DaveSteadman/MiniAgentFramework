@@ -51,7 +51,7 @@ from scheduler import load_schedules_dir
 from slash_commands import SlashCommandContext
 from slash_commands import handle as handle_slash
 from chat_input import prompt_with_history
-from workspace_utils import get_chatsessions_dir
+from workspace_utils import get_chatsessions_day_dir
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
 from workspace_utils import get_workspace_root
@@ -170,7 +170,7 @@ def run_chat_mode(
     history = ConversationHistory(max_turns=MAX_CHAT_HISTORY_TURNS)
     session_ctx = SessionContext(
         session_id   = log_path.stem,
-        persist_path = get_chatsessions_dir() / f"{log_path.stem}.json",
+        persist_path = get_chatsessions_day_dir() / f"{log_path.stem}.json",
     )
     turn = 0
 
@@ -280,7 +280,7 @@ def run_chat_sequence_mode(
     history     = ConversationHistory(max_turns=MAX_CHAT_HISTORY_TURNS)
     session_ctx = SessionContext(
         session_id   = log_path.stem,
-        persist_path = get_chatsessions_dir() / f"{log_path.stem}.json",
+        persist_path = get_chatsessions_day_dir() / f"{log_path.stem}.json",
     )
 
     for turn_idx, user_prompt in enumerate(prompts, start=1):
@@ -423,7 +423,7 @@ def run_scheduler_mode(
                     task_hist  = ConversationHistory()
                     task_ctx   = SessionContext(
                         session_id   = f"task_{name}",
-                        persist_path = get_chatsessions_dir() / f"task_{name}.json",
+                        persist_path = get_chatsessions_day_dir() / f"task_{name}.json",
                     )
                     sched_ctx  = SlashCommandContext(
                         config         = config,
@@ -515,7 +515,7 @@ def run_schedule_item_mode(
     task_hist = ConversationHistory()
     task_ctx  = SessionContext(
         session_id   = f"task_{item_name}",
-        persist_path = get_chatsessions_dir() / f"task_{item_name}.json",
+        persist_path = get_chatsessions_day_dir() / f"task_{item_name}.json",
     )
     sched_ctx = SlashCommandContext(
         config         = config,
@@ -618,7 +618,10 @@ def main() -> None:
     logger.log(f"num_ctx:         {args.num_ctx}")
     logger.log(f"LLM timeout:     {get_llm_timeout()}s")
     logger.log(f"Max iterations:  {MAX_ITERATIONS}")
-    logger.log(format_running_model_report(resolved_model))
+    try:
+        logger.log(format_running_model_report(resolved_model))
+    except Exception as exc:
+        logger.log(f"Model runtime status: unavailable ({exc})")
     logger.log(f"Log file:        {log_path.as_posix()}")
 
     if args.chat:

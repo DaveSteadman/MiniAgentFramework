@@ -17,7 +17,8 @@
 #   get_schedules_dir()       ->  <repo_root>/controldata/schedules/
 #   get_test_prompts_dir()    ->  <repo_root>/controldata/test_prompts/
 #   get_test_results_dir()    ->  <repo_root>/controldata/test_results/
-#   get_chatsessions_dir()    ->  <repo_root>/controldata/chatsessions/
+#   get_chatsessions_dir()     ->  <repo_root>/controldata/chatsessions/
+#   get_chatsessions_day_dir()  ->  <repo_root>/controldata/chatsessions/<YYYY-MM-DD>/
 #
 # Related modules:
 #   - file_access_skill.py  -- uses get_workspace_root() for path-safety checks
@@ -30,6 +31,7 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -85,6 +87,11 @@ def get_test_results_dir() -> Path:
 def get_chatsessions_dir() -> Path:
     """Return the absolute path to the controldata/chatsessions/ directory."""
     return get_controldata_dir() / "chatsessions"
+
+
+def get_chatsessions_day_dir() -> Path:
+    """Return the absolute path to today's chatsessions subdirectory (controldata/chatsessions/YYYY-MM-DD/)."""
+    return get_chatsessions_dir() / datetime.now().strftime("%Y-%m-%d")
 
 
 # ====================================================================================================
