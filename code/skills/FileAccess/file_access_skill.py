@@ -33,6 +33,14 @@ _PROMPT_PATH_RE  = re.compile(
     r"(?<![\w./-])((?:\./)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:csv|txt|md|json|jsonl|log))(?![\w./-])",
     re.IGNORECASE,
 )
+EXCLUDED_DIRS = frozenset({
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    "node_modules",
+})
 
 
 # ====================================================================================================
@@ -253,7 +261,9 @@ def find_files(keyword: str, search_root: str = "") -> str:
     matches = [
         p.relative_to(WORKSPACE_ROOT).as_posix()
         for p in sorted(base.rglob("*"))
-        if p.is_file() and keyword_clean in p.name.lower()
+        if p.is_file()
+        and keyword_clean in p.name.lower()
+        and not any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts)
     ]
 
     if not matches:
@@ -284,7 +294,9 @@ def find_folders(keyword: str, search_root: str = "") -> str:
     matches = [
         p.relative_to(WORKSPACE_ROOT).as_posix()
         for p in sorted(base.rglob("*"))
-        if p.is_dir() and keyword_clean in p.name.lower()
+        if p.is_dir()
+        and keyword_clean in p.name.lower()
+        and not any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts)
     ]
 
     if not matches:
