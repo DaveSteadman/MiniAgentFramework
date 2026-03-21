@@ -18,7 +18,7 @@
 # so the orchestrator always receives a concrete value.
 #
 # Related modules:
-#   - skills_catalog_builder.py  -- reads skill.md; PLANNER_TOOLS drives orchestrator tool defs
+#   - skills_catalog_builder.py  -- reads skill.md; function signatures drive orchestrator tool defs
 #   - webpage_utils.py           -- HTTP_HEADERS used for fetch_html in other skills (not used here
 #                                   because the Wikipedia API returns JSON, not HTML)
 # ====================================================================================================
@@ -44,35 +44,6 @@ _HEADERS        = {
 }
 MAX_EXTRACT_WORDS = 400
 DEFAULT_TIMEOUT   = 15
-
-
-# ====================================================================================================
-# MARK: PLANNER TOOLS
-# ====================================================================================================
-PLANNER_TOOLS = [
-    {
-        "name":        "lookup_wikipedia",
-        "function":    "lookup_wikipedia",
-        "description": (
-            "Look up a topic on Wikipedia and return a plain-text article summary. "
-            "Use this when you need factual reference data about a person, place, concept, "
-            "event, or technology. Returns the article extract, or 'No Wikipedia data found' "
-            "when nothing is available."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "topic": {
-                    "type":        "string",
-                    "description": "The subject to look up - e.g. 'Python programming language', 'Eiffel Tower', 'quantum entanglement'.",
-                },
-            },
-            "required": ["topic"],
-        },
-    },
-]
-
-PRIMARY_PLANNER_TOOL = "lookup_wikipedia"
 
 
 # ====================================================================================================

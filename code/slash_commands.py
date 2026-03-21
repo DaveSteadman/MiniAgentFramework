@@ -185,6 +185,28 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _cmd_rounds(arg: str, ctx: SlashCommandContext) -> None:
+    if not arg:
+        ctx.output(
+            f"Usage: /rounds <n>  |  current: {ctx.config.max_iterations}",
+            "dim",
+        )
+        return
+    try:
+        value = int(arg.strip())
+    except ValueError:
+        ctx.output(f"Invalid value '{arg}' - must be a positive integer (e.g. /rounds 6).", "error")
+        return
+    if value < 1:
+        ctx.output("Rounds must be at least 1.", "error")
+        return
+    old = ctx.config.max_iterations
+    ctx.config.max_iterations = value
+    ctx.output(f"Max tool rounds changed: {old} \u2192 {value}", "success")
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
     from ollama_client import get_llm_timeout, set_llm_timeout
     if not arg:
@@ -338,7 +360,7 @@ def _cmd_recall(arg: str, ctx: SlashCommandContext) -> None:
         return
 
     ctx.output(f"Session context: {n} turn(s) stored", "info")
-    for t in sc._turns:
+    for t in sc.get_turns():
         ctx.output(f"  Turn {t['turn']}: {t['user_prompt'][:80]}", "item")
         for o in t["skill_outputs"]:
             skill   = o.get("skill", "?")
@@ -802,6 +824,7 @@ _REGISTRY: dict[str, Callable] = {
     "/model":         _cmd_model,
     "/host":          _cmd_host,
     "/ctx":           _cmd_ctx,
+    "/rounds":        _cmd_rounds,
     "/timeout":       _cmd_timeout,
     "/stopmodel":     _cmd_stopmodel,
     "/clearmemory":   _cmd_clearmemory,
@@ -823,6 +846,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/model":         "<name>  Switch active model for all subsequent runs",
     "/host":          "<hostname|url|local> [api-key]  Switch active Ollama host (LAN, cloud, or local)",
     "/ctx":           "<tokens>  Set context window size (e.g. /ctx 32768)",
+    "/rounds":        "<n>  Set max tool-call rounds per prompt (e.g. /rounds 6)",
     "/timeout":       "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
     "/stopmodel":     "[name]  Unload a running model from VRAM (defaults to active model)",
     "/clearmemory":   "Delete the memory store file, starting with a blank memory next session",

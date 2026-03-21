@@ -49,6 +49,9 @@ Before writing or editing any code in this project, read [CODE_CONVENTIONS.md](C
   - In chat mode verbose orchestration detail goes to the log file only; the console shows one compact status line per turn.
 
 ### 6) Skills catalog + concrete skills
+- Each skill folder contains a `skill.md` definition file. When adding or editing a skill, follow the
+  standard schema defined in [SKILL_TEMPLATE.md](SKILL_TEMPLATE.md).
+
 - `code/skills_catalog_builder.py`
   - Scans `code/skills/**/skill.md`.
   - Generates `code/skills/skills_summary.md` as a single JSON catalog.
@@ -63,9 +66,6 @@ Before writing or editing any code in this project, read [CODE_CONVENTIONS.md](C
   - Persists facts across runs in `code/skills/Memory/memory_store.json` (JSON, schema v2.0).
   - Auto-migrates legacy `memory_store.txt` on first run.
 - `code/skills/WebSearch/` - searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
-- `code/skills/WebExtract/` - fetches a URL and extracts its readable prose, stripping HTML markup, navigation, and ads, ready for LLM synthesis.
-- `code/skills/KoreMine/` - mines URLs or DuckDuckGo searches into persisted Markdown files in the `webresearch/01-Mine/` workspace. Supports inline article content embedding via `fetch_content=True`.
-- `code/skills/PageAssess/` - fetches a URL, classifies it as `article`, `index`, or `mixed` using text-density heuristics, and returns article-candidate links filtered by topic. No files written.
 - `code/skills/TaskManagement/` - CRUD operations on scheduled task JSON files in `controldata/schedules/`. Exposes `list_tasks()`, `get_task(name)`, `create_task(name, schedule, prompt)`, `set_task_enabled(name, enabled)`, `set_task_schedule(name, schedule)`, `set_task_prompt(name, prompt)`, and `delete_task(name)` as skill functions the model can invoke from natural-language prompts. Each task is stored in its own `task_<name>.json` file; the dashboard scheduler hot-reloads changes within its next poll cycle.
 
 ### 7) Scheduler
@@ -131,8 +131,8 @@ Before writing or editing any code in this project, read [CODE_CONVENTIONS.md](C
 | `alloc_mine_file(stage, domain, slug)` | Creates date dir and returns next `NNN-slug.md` path |
 
 - `code/webpage_utils.py`
-  - Shared HTTP fetching, HTML extraction, and text utilities used by all four web skill modules (WebExtract, KoreMine, PageAssess, WebSearch).
-  - Centralises ~200 lines of previously duplicated code; skills import `fetch_html`, `extract_content`, and `truncate_to_words` from here rather than defining their own copies.
+  - Shared HTTP fetching, HTML extraction, and text utilities used by web skill modules.
+  - Skills import `fetch_html`, `extract_content`, and `truncate_to_words` from here rather than defining their own copies.
   - Uses BeautifulSoup when available and falls back to a pure-stdlib `html.parser` extractor automatically.
 
 | Public symbol | Description |
@@ -183,14 +183,24 @@ python .\code\skills_catalog_builder.py
 
 ## Project Flow (Single-Shot / Chat Turn)
 
-1. Recall relevant memories and collect ambient system info.
-2. **Resolve prompt tokens** - `resolve_tokens(user_prompt)` expands `{today}`, `{yesterday}`, etc. before anything else runs (see [Prompt Tokens](#prompt-tokens) below).
-3. Load `code/skills/skills_summary.md` and convert it into JSON Schema tool definitions via `build_tool_definitions`.
-4. Send the user message to `/v1/chat/completions` with the tool definitions. The model responds with either a plain-text answer or one or more tool call requests.
-5. For each requested tool call: look up the function in the allow-listed skills catalog, run it, and feed the result back into the message thread as a `tool` role message.
-6. Repeat steps 4-5 (up to `MAX_ITERATIONS` rounds) until the model returns a plain-text final answer or rounds are exhausted.
-7. When rounds are exhausted without a plain-text answer, call the model one final time with tools disabled to force a synthesis response.
-8. Log everything - system message, tool rounds, tool call outputs, final response, and TPS for each LLM call.
+The orchestration design is intentionally singular: one pipeline, one LLM, one native tool-calling loop. There is no separate planning stage, no separate finalisation stage, and no fixed number of steps. The model decides when it is done.
+
+**Preparation (once per turn):**
+1. Expand `{today}` / `{yesterday}` etc. in the prompt via `resolve_tokens`.
+2. Run memory store and recall to build the system-prompt context block.
+3. Collect ambient system info (OS, RAM, disk) to inject as static context.
+4. Build JSON Schema tool definitions from `skills_summary.md` via `build_tool_definitions`.
+5. Compose the system message and initial messages list.
+
+**Tool-calling loop (repeating):**
+6. Call `/v1/chat/completions` with the full messages thread and tool definitions.
+7. If the model returns a plain-text response with no tool calls: that is the final answer - done.
+8. If the model returns tool call requests: execute each one, append tool-role result messages, and go to step 6.
+9. Repeat up to `MAX_ITERATIONS` rounds. The model exits naturally by answering directly; iterations are a safety cap, not a design step count.
+
+**Safety net:**
+10. If `MAX_ITERATIONS` rounds are exhausted without a plain-text answer, call the model one final time with tools disabled to force a synthesis response. This is a fallback for pathological loops, not expected behaviour.
+11. As a last resort if the synthesis call returns empty content (can happen with thinking models that emit only internal tokens), `_build_fallback_answer` assembles a plain-text summary directly from the collected tool outputs so the user always sees something.
 
 ---
 

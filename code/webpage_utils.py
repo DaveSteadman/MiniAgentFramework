@@ -4,7 +4,7 @@
 # Shared web utilities for MiniAgentFramework skills.
 #
 # Provides common HTTP fetching, HTML extraction, and text manipulation utilities used across
-# the web skill modules (WebExtract, WebResearch, PageAssess, WebSearch).  Centralising these
+# the web skill modules (WebSearch).  Centralising these
 # removes ~200 lines of near-identical code that was previously duplicated across skill files.
 #
 # Public API:
@@ -22,10 +22,6 @@
 #
 # Related modules:
 #   code/workspace_utils.py              -- workspace root path management
-#   code/webresearch_utils.py            -- three-stage research workspace management
-#   code/skills/WebExtract/              -- uses fetch_html, extract_content, truncate_to_words
-#   code/skills/KoreMine/                -- uses fetch_html, extract_content, truncate_to_words
-#   code/skills/PageAssess/              -- uses fetch_html
 #   code/skills/WebSearch/               -- uses fetch_html
 # ====================================================================================================
 

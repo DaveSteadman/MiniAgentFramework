@@ -12,22 +12,22 @@ if str(CODE_DIR) not in sys.path:
 from skill_executor import execute_tool_call
 from skills_catalog_builder import build_tool_definitions
 from skills_catalog_builder import load_skills_payload
-from skills.FileAccess.file_access_skill import execute_file_instruction
+from skills.FileAccess.file_access_skill import write_file
+from skills.SystemInfo.system_info_skill import get_system_info_string
 
 
 class RegressionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.skills_payload = load_skills_payload(CODE_DIR / "skills" / "skills_summary.md")
 
-    def test_execute_file_instruction_writes_system_info_csv(self) -> None:
-        prompt = "write the system information to a data/test_systemstats_regression.csv spreadsheet"
+    def test_write_file_writes_system_info_csv(self) -> None:
         output_path = REPO_ROOT / "data" / "test_systemstats_regression.csv"
 
         if output_path.exists():
             output_path.unlink()
 
         try:
-            result = execute_file_instruction(prompt)
+            result = write_file("data/test_systemstats_regression.csv", get_system_info_string())
             self.assertEqual(result, "Wrote data/test_systemstats_regression.csv")
             self.assertTrue(output_path.exists())
 

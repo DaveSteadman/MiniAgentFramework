@@ -4,7 +4,7 @@
 # FileAccess skill module for the MiniAgentFramework.
 #
 # Provides safe file read/write/append operations constrained to the workspace root, with sensible
-# defaults for relative paths and a natural-language command entrypoint for prompt-triggered use.
+# defaults for relative paths.
 #
 # Path behavior:
 #   - bare file name like "x.txt" resolves to ./data/x.txt
@@ -18,7 +18,6 @@
 # ====================================================================================================
 import csv
 import io
-import re
 from pathlib import Path
 
 from workspace_utils import get_workspace_root
@@ -29,18 +28,7 @@ from workspace_utils import get_workspace_root
 # ====================================================================================================
 WORKSPACE_ROOT   = get_workspace_root()
 DEFAULT_DATA_DIR = WORKSPACE_ROOT / "data"
-_PROMPT_PATH_RE  = re.compile(
-    r"(?<![\w./-])((?:\./)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:csv|txt|md|json|jsonl|log))(?![\w./-])",
-    re.IGNORECASE,
-)
-EXCLUDED_DIRS = frozenset({
-    ".git",
-    ".venv",
-    "__pycache__",
-    ".mypy_cache",
-    ".pytest_cache",
-    "node_modules",
-})
+
 
 
 # ====================================================================================================
@@ -80,18 +68,6 @@ def _resolve_safe_path(file_path: str) -> Path:
         raise ValueError(f"Path escapes workspace root and is not allowed: {file_path}") from path_error
 
     return candidate
-
-
-# ----------------------------------------------------------------------------------------------------
-def _extract_path_from_prompt(prompt: str) -> str:
-    explicit_match = re.search(r"\bfile\s+([\"'][^\"']+[\"']|[^\s]+)", prompt, re.IGNORECASE)
-    if explicit_match:
-        return explicit_match.group(1).strip().strip('"').strip("'")
-
-    path_match = _PROMPT_PATH_RE.search(prompt or "")
-    if not path_match:
-        return ""
-    return path_match.group(1).strip().strip('"').strip("'")
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -142,73 +118,26 @@ def _coerce_text_for_target(target_path: Path, text: str) -> str:
 # ====================================================================================================
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
-# PLANNER_TOOLS: explicit tool definitions for find_files and find_folders so the orchestrator
-# exposes them with typed parameter schemas rather than deriving them from bare signatures.
-PLANNER_TOOLS = [
-    {
-        "name":        "find_files",
-        "function":    "find_files",
-        "description": "Search the workspace for files whose name contains all of the given keyword fragments. Returns a list of matching relative paths. Use this when you know part of a filename but not the exact path.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "keywords": {
-                    "type":        "array",
-                    "items":       {"type": "string"},
-                    "description": "One or more case-insensitive fragments that must ALL appear in the file name.",
-                },
-                "search_root": {
-                    "type":        "string",
-                    "description": "Optional workspace-relative directory to restrict the search (e.g. 'data' or 'controldata'). Leave empty to search the whole workspace.",
-                },
-            },
-            "required": ["keywords"],
-        },
-    },
-    {
-        "name":        "find_folders",
-        "function":    "find_folders",
-        "description": "Search the workspace for folders whose name contains all of the given keyword fragments. Returns a list of matching relative paths. Use this when you need to locate a directory by partial name.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "keywords": {
-                    "type":        "array",
-                    "items":       {"type": "string"},
-                    "description": "One or more case-insensitive fragments that must ALL appear in the folder name.",
-                },
-                "search_root": {
-                    "type":        "string",
-                    "description": "Optional workspace-relative directory to restrict the search. Leave empty to search the whole workspace.",
-                },
-            },
-            "required": ["keywords"],
-        },
-    },
-]
-
-PRIMARY_PLANNER_TOOL = "find_files"
-
 
 # ----------------------------------------------------------------------------------------------------
-def write_text_file(file_path: str, text: str) -> str:
+def write_file(path: str, content: str) -> str:
     try:
-        target_path = _resolve_safe_path(file_path)
+        target_path = _resolve_safe_path(path)
     except ValueError as err:
         return f"Error: {err}"
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(_coerce_text_for_target(target_path=target_path, text=text), encoding="utf-8")
+    target_path.write_text(_coerce_text_for_target(target_path=target_path, text=content), encoding="utf-8")
     return f"Wrote {target_path.relative_to(WORKSPACE_ROOT).as_posix()}"
 
 
 # ----------------------------------------------------------------------------------------------------
-def append_text_file(file_path: str, text: str) -> str:
+def append_file(path: str, content: str) -> str:
     try:
-        target_path = _resolve_safe_path(file_path)
+        target_path = _resolve_safe_path(path)
     except ValueError as err:
         return f"Error: {err}"
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    text_to_write = str(text).replace("\\n", "\n")  # unescape literal \n from model output
+    text_to_write = str(content).replace("\\n", "\n")  # unescape literal \n from model output
     if not text_to_write.endswith("\n"):
         text_to_write += "\n"
     with target_path.open("a", encoding="utf-8") as output_file:
@@ -217,9 +146,9 @@ def append_text_file(file_path: str, text: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def read_text_file(file_path: str, max_chars: int = 8000) -> str:
+def read_file(path: str, max_chars: int = 8000) -> str:
     try:
-        target_path = _resolve_safe_path(file_path)
+        target_path = _resolve_safe_path(path)
     except ValueError as err:
         return f"Error: {err}"
     if not target_path.exists():
@@ -232,20 +161,11 @@ def read_text_file(file_path: str, max_chars: int = 8000) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def list_data_files() -> str:
-    _ensure_data_dir()
-    file_paths = [item.relative_to(WORKSPACE_ROOT).as_posix() for item in sorted(DEFAULT_DATA_DIR.rglob("*")) if item.is_file()]
-    if not file_paths:
-        return "No files found under data/."
-    return "\n".join(file_paths)
-
-
-# ----------------------------------------------------------------------------------------------------
 def find_files(keywords: list[str], search_root: str = "") -> str:
-    """Return all files under the workspace whose name contains all *keywords* (case-insensitive).
+    """Search the workspace for files whose name contains all of the given keyword fragments.
 
-    *search_root* is a workspace-relative directory to restrict the search (e.g. "data" or
-    "controldata").  Defaults to the full workspace root when empty or omitted.
+    Returns a newline-separated list of matching workspace-relative paths.
+    Pass search_root (e.g. 'data') to restrict the search to a subdirectory.
     """
     keywords_clean = [str(k).strip().lower() for k in (keywords or []) if str(k).strip()]
     if not keywords_clean:
@@ -265,7 +185,6 @@ def find_files(keywords: list[str], search_root: str = "") -> str:
         for p in sorted(base.rglob("*"))
         if p.is_file()
         and all(k in p.name.lower() for k in keywords_clean)
-        and not any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts)
     ]
 
     label = ", ".join(f"'{k}'" for k in keywords_clean)
@@ -276,10 +195,10 @@ def find_files(keywords: list[str], search_root: str = "") -> str:
 
 # ----------------------------------------------------------------------------------------------------
 def find_folders(keywords: list[str], search_root: str = "") -> str:
-    """Return all directories under the workspace whose name contains all *keywords* (case-insensitive).
+    """Search the workspace for folders whose name contains all of the given keyword fragments.
 
-    *search_root* is a workspace-relative directory to restrict the search.
-    Defaults to the full workspace root when empty or omitted.
+    Returns a newline-separated list of matching workspace-relative paths.
+    Pass search_root (e.g. 'data') to restrict the search to a subdirectory.
     """
     keywords_clean = [str(k).strip().lower() for k in (keywords or []) if str(k).strip()]
     if not keywords_clean:
@@ -299,66 +218,9 @@ def find_folders(keywords: list[str], search_root: str = "") -> str:
         for p in sorted(base.rglob("*"))
         if p.is_dir()
         and all(k in p.name.lower() for k in keywords_clean)
-        and not any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts)
     ]
 
     label = ", ".join(f"'{k}'" for k in keywords_clean)
     if not matches:
         return f"No folders found matching all of {label}" + (f" under {search_root}" if search_root else "") + "."
     return "\n".join(matches)
-
-
-# ----------------------------------------------------------------------------------------------------
-def execute_file_instruction(user_prompt: str) -> str:
-    prompt = str(user_prompt or "").strip()
-    lowered = prompt.lower()
-
-    raw_path = _extract_path_from_prompt(prompt)
-    if not raw_path:
-        return "No file path found in instruction. Include 'file <path>'."
-
-    if "append" in lowered:
-        append_match = re.search(r"append\s+(.+?)\s+to\s+file\b", prompt, re.IGNORECASE)
-        if not append_match:
-            append_match = re.search(rf"append\s+(.+?)\s+to\s+(?:an?\s+)?{re.escape(raw_path)}\b", prompt, re.IGNORECASE)
-        if not append_match:
-            return "Unable to parse append content. Use: append <text> to file <path>."
-
-        content = append_match.group(1).strip()
-        return append_text_file(file_path=raw_path, text=f"{content}\n")
-
-    if "write" in lowered:
-        if any(
-            phrase in lowered for phrase in (
-                "system information",
-                "system info",
-                "system stats",
-                "system health",
-                "runtime info",
-                "environment information",
-            )
-        ):
-            from skills.SystemInfo.system_info_skill import get_system_info_string
-
-            return write_text_file(file_path=raw_path, text=get_system_info_string())
-
-        write_match = re.search(r"write\s+(.+?)\s+to\s+file\b", prompt, re.IGNORECASE)
-        if not write_match:
-            write_match = re.search(rf"write\s+(.+?)\s+to\s+(?:an?\s+)?{re.escape(raw_path)}\b", prompt, re.IGNORECASE)
-        if not write_match:
-            # Support phrasing like: "create file x and write <text> into it".
-            write_match = re.search(r"write\s+(.+?)\s+into\s+it\b", prompt, re.IGNORECASE)
-
-        if not write_match:
-            return "Unable to parse write content. Use: write <text> to file <path>."
-
-        content = write_match.group(1).strip()
-        return write_text_file(file_path=raw_path, text=content + "\n")
-
-    if "read" in lowered:
-        return read_text_file(file_path=raw_path)
-
-    if "list" in lowered and "data" in lowered:
-        return list_data_files()
-
-    return "Instruction not recognized. Supported intents: write, append, read, list data files."

@@ -11,14 +11,14 @@
 #   - file_access_skill.py       (parents[3])
 #
 # Well-known directory accessors (all cached):
-#   get_workspace_root()      ->  <repo_root>/
-#   get_controldata_dir()     ->  <repo_root>/controldata/
-#   get_logs_dir()            ->  <repo_root>/controldata/logs/
-#   get_schedules_dir()       ->  <repo_root>/controldata/schedules/
-#   get_test_prompts_dir()    ->  <repo_root>/controldata/test_prompts/
-#   get_test_results_dir()    ->  <repo_root>/controldata/test_results/
+#   get_workspace_root()       ->  <repo_root>/
+#   get_controldata_dir()      ->  <repo_root>/controldata/
+#   get_logs_dir()             ->  <repo_root>/controldata/logs/
+#   get_schedules_dir()        ->  <repo_root>/controldata/schedules/
+#   get_test_prompts_dir()     ->  <repo_root>/controldata/test_prompts/
+#   get_test_results_dir()     ->  <repo_root>/controldata/test_results/
 #   get_chatsessions_dir()     ->  <repo_root>/controldata/chatsessions/
-#   get_chatsessions_day_dir()  ->  <repo_root>/controldata/chatsessions/<YYYY-MM-DD>/
+#   get_chatsessions_day_dir() ->  <repo_root>/controldata/chatsessions/<YYYY-MM-DD>/
 #
 # Related modules:
 #   - file_access_skill.py  -- uses get_workspace_root() for path-safety checks

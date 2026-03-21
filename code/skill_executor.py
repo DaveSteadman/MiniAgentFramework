@@ -77,49 +77,50 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
 
 
 # ----------------------------------------------------------------------------------------------------
-def _build_allowlist(skills_payload: dict) -> set[tuple[str, str, str]]:
-    allowlist = set()
+def _build_catalog_gates(skills_payload: dict) -> tuple[set[tuple[str, str, str]], dict[str, tuple[str, str]]]:
+    """Build both the security allow-list and the tool-name index in a single pass over the catalog.
+
+    Returns (allowlist, index) where:
+      allowlist  -- set of (tool_name, module_path, function_name) triples that are permitted.
+      index      -- dict mapping tool_name -> (module_path, function_name) for dispatch.
+    """
+    allowlist: set[tuple[str, str, str]]    = set()
+    index:     dict[str, tuple[str, str]]   = {}
+
     for skill in skills_payload.get("skills", []):
         module = normalize_module_path(skill.get("module", ""))
-        planner_tools = skill.get("planner_tools", [])
-        if planner_tools:
-            for planner_tool in planner_tools:
-                tool_name = str(planner_tool.get("name", "")).strip()
-                function_name = str(planner_tool.get("function", "")).strip()
-                if module and tool_name and function_name:
-                    allowlist.add((tool_name, module, function_name))
-            continue
 
         for function_sig in skill.get("functions", []):
             function_name = str(function_sig).split("(")[0].strip()
             if module and function_name:
                 allowlist.add((function_name, module, function_name))
-    return allowlist
+                index[function_name] = (module, function_name)
+
+    return allowlist, index
+
+
+# ----------------------------------------------------------------------------------------------------
+def _build_allowlist(skills_payload: dict) -> set[tuple[str, str, str]]:
+    return _build_catalog_gates(skills_payload)[0]
 
 
 # ----------------------------------------------------------------------------------------------------
 def _build_tool_index(skills_payload: dict) -> dict[str, tuple[str, str]]:
-    """Map planner tool names to (module_path, function_name)."""
-    index: dict[str, tuple[str, str]] = {}
-    for skill in skills_payload.get("skills", []):
-        module = normalize_module_path(skill.get("module", ""))
-        if not module:
-            continue
-        planner_tools = skill.get("planner_tools", [])
-        if planner_tools:
-            for planner_tool in planner_tools:
-                tool_name = str(planner_tool.get("name", "")).strip()
-                function_name = str(planner_tool.get("function", "")).strip()
-                if tool_name and function_name:
-                    index[tool_name] = (module, function_name)
-            continue
+    """Map tool names to (module_path, function_name)."""
+    return _build_catalog_gates(skills_payload)[1]
 
-        for function_sig in skill.get("functions", []):
-            function_name = str(function_sig).split("(")[0].strip()
-            if function_name:
-                index[function_name] = (module, function_name)
-    return index
 
+# ----------------------------------------------------------------------------------------------------
+def build_catalog_gates(
+    skills_payload: dict,
+) -> tuple[set[tuple[str, str, str]], dict[str, tuple[str, str]]]:
+    """Return the security allow-list and tool-name dispatch index for a skills payload.
+
+    Callers that invoke execute_tool_call multiple times for the same payload (e.g. the
+    orchestration loop) should call this once and pass the result via the catalog_gates
+    parameter to avoid rebuilding the index on every tool invocation.
+    """
+    return _build_catalog_gates(skills_payload)
 
 
 # ====================================================================================================
@@ -130,15 +131,20 @@ def execute_tool_call(
     arguments: dict,
     skills_payload: dict,
     user_prompt: str = "",
+    catalog_gates: tuple[set[tuple[str, str, str]], dict[str, tuple[str, str]]] | None = None,
 ) -> dict:
     """Execute one tool call and return the output record.
 
     The returned dict has keys: 'function', 'module', 'arguments', 'result'.
     Raises RuntimeError when the function is not allow-listed or cannot be loaded.
-    """
-    allowlist = _build_allowlist(skills_payload)
-    tool_index = _build_tool_index(skills_payload)
 
+    Pass a pre-built catalog_gates tuple (from build_catalog_gates) to avoid rebuilding
+    the allow-list and index on every call when executing multiple tools in one round.
+    """
+    # Use pre-built gates when provided; otherwise build them from the payload.
+    allowlist, tool_index = catalog_gates if catalog_gates is not None else _build_catalog_gates(skills_payload)
+
+    # Resolve the tool name to its (module, function); fails fast for any unrecognised tool.
     resolved = tool_index.get(tool_name)
     if resolved is None:
         raise RuntimeError(f"Tool '{tool_name}' not found in skills catalog")
@@ -147,12 +153,13 @@ def execute_tool_call(
     if (tool_name, module_path, function_name) not in allowlist:
         raise RuntimeError(f"Tool '{tool_name}' is not allow-listed by skills catalog")
 
-    # Resolve any {{token}} placeholders in string arguments (e.g. {{today}}).
+    # Fill {{today}}, {{yesterday}} etc. in any string argument before passing to the function.
     resolved_args = {
         k: (resolve_tokens(v) if isinstance(v, str) else v)
         for k, v in arguments.items()
     }
 
+    # Load (with caching) and invoke the skill function - the allow-list check above is the security gate.
     fn     = _load_callable_from_module_path(module_path, function_name)
     result = fn(**resolved_args)
 

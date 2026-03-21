@@ -36,8 +36,13 @@ from datetime import date as _date, timedelta as _timedelta
 # ====================================================================================================
 # MARK: TOKEN RESOLUTION
 # ====================================================================================================
+def _longdate(d: _date) -> str:
+    """Return a date formatted as 'March 19, 2026' (no leading zero) cross-platform."""
+    return d.strftime("%B {day}, %Y").replace("{day}", str(d.day))
+
+
 _TOKEN_RE = re.compile(
-    r"\{(today|yesterday|month_year|month|year|week)\}",
+    r"\{(today|yesterday|longdate|longdateyesterday|month_year|month|year|week)\}",
     re.IGNORECASE,
 )
 
@@ -46,12 +51,14 @@ def resolve_tokens(text: str) -> str:
     """Replace date/time tokens in a string with their current values.
 
     Tokens (case-insensitive):
-      {today}       -> YYYY-MM-DD          (e.g. 2026-03-08)
-      {yesterday}   -> YYYY-MM-DD          (e.g. 2026-03-07)
-      {month_year}  -> Month YYYY          (e.g. March 2026)
-      {month}       -> full month name     (e.g. March)
-      {year}        -> four-digit year     (e.g. 2026)
-      {week}        -> ISO week number     (e.g. 10)
+      {today}             -> YYYY-MM-DD          (e.g. 2026-03-08)
+      {yesterday}         -> YYYY-MM-DD          (e.g. 2026-03-07)
+      {longdate}          -> Month D, YYYY        (e.g. March 8, 2026)  -- better for web searches
+      {longdateyesterday} -> Month D, YYYY        (e.g. March 7, 2026)
+      {month_year}        -> Month YYYY           (e.g. March 2026)
+      {month}             -> full month name      (e.g. March)
+      {year}              -> four-digit year      (e.g. 2026)
+      {week}              -> ISO week number      (e.g. 10)
 
     Tokens are resolved at call time so that stored/scheduled prompts and queries
     stay perpetually current without manual edits.
@@ -59,12 +66,14 @@ def resolve_tokens(text: str) -> str:
     today     = _date.today()
     yesterday = today - _timedelta(days=1)
     _values   = {
-        "today":      today.strftime("%Y-%m-%d"),
-        "yesterday":  yesterday.strftime("%Y-%m-%d"),
-        "month_year": today.strftime("%B %Y"),
-        "month":      today.strftime("%B"),
-        "year":       today.strftime("%Y"),
-        "week":       today.strftime("%W"),
+        "today":             today.strftime("%Y-%m-%d"),
+        "yesterday":         yesterday.strftime("%Y-%m-%d"),
+        "longdate":          _longdate(today),
+        "longdateyesterday": _longdate(yesterday),
+        "month_year":        today.strftime("%B %Y"),
+        "month":             today.strftime("%B"),
+        "year":              today.strftime("%Y"),
+        "week":              today.strftime("%W"),
     }
 
     def _replace(match: re.Match) -> str:

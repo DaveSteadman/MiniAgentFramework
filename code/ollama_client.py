@@ -476,6 +476,7 @@ def call_ollama_extended(
     timeout defaults to the module-level _DEFAULT_LLM_TIMEOUT (set via set_llm_timeout()).
     """
     host = host or _active_host
+    # Check/start Ollama before each call; auto-start is suppressed for remote and Cloud hosts.
     ensure_ollama_running(host=host, start_if_needed=True)
 
     if _llm_call_log_fn is not None:
@@ -570,8 +571,22 @@ class ChatCallResult:
 
     @property
     def response(self) -> str:
-        """Text content of the assistant message. Empty when the model issued tool_calls instead."""
-        return (self.message.get("content") or "").strip()
+        """Text content of the assistant message. Empty when the model issued tool_calls instead.
+
+        Falls back to the 'thinking' field (Ollama 0.18+ reasoning models) when 'content' is
+        absent, stripping the surrounding <think>...</think> wrapper so callers see plain text.
+        """
+        content = (self.message.get("content") or "").strip()
+        if content:
+            return content
+        thinking = (self.message.get("thinking") or "").strip()
+        if thinking:
+            # Strip <think>...</think> wrapper if present, then return the raw reasoning as
+            # a last-resort answer so the caller always gets something actionable.
+            thinking = re.sub(r"^<think>\s*", "", thinking, flags=re.IGNORECASE)
+            thinking = re.sub(r"\s*</think>$", "", thinking, flags=re.IGNORECASE)
+            return thinking.strip()
+        return ""
 
     @property
     def tool_calls(self) -> list[dict]:
@@ -595,6 +610,7 @@ def call_llm_chat(
     extensions 'options' block and is silently ignored by non-Ollama servers.
     """
     host = host or _active_host
+    # Check/start Ollama before each call; auto-start is suppressed for remote and Cloud hosts.
     ensure_ollama_running(host=host, start_if_needed=True)
 
     if _llm_call_log_fn is not None:
@@ -655,6 +671,12 @@ def call_llm_chat(
     choice        = choices[0]
     message       = choice.get("message") or {}
     finish_reason = choice.get("finish_reason") or "stop"
+
+    # Debug: log unexpected empty-content responses so we can see the raw message structure.
+    if not (message.get("content") or "").strip() and not (message.get("tool_calls") or []):
+        log_to_session(f"[debug] empty content - message keys: {list(message.keys())!r}; "
+                       f"finish_reason={finish_reason!r}; "
+                       f"thinking_preview={str(message.get('thinking', ''))[:120]!r}")
 
     usage             = body.get("usage") or {}
     prompt_tokens     = usage.get("prompt_tokens", 0)

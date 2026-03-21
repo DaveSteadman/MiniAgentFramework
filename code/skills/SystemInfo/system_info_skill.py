@@ -3,17 +3,17 @@
 # ====================================================================================================
 # SystemInfo skill module for the MiniAgentFramework.
 #
-# Provides a callable function that the orchestration planner can select when a user prompt
-# requires information about the runtime environment:
+# Provides a callable tool function the model can invoke when a user prompt requires
+# information about the runtime environment:
 #   - get_system_info_dict()    -- returns OS, Python/Ollama versions, RAM and disk usage as a
-#                                  structured dict for field-level chaining in skill plans.
+#                                  structured dict.
 #
-# get_system_info_string() is an internal formatting helper (not a planner skill) used by
+# get_system_info_string() is an internal formatting helper (not a callable tool) used by
 # orchestration.py to inject system context into every prompt and by the FileAccess shortcut.
 #
 # This module is also imported directly by main.py to inject system info as ambient prompt context
 # on every orchestration turn, guaranteeing that any prompt touching hardware or runtime state
-# receives accurate data even when the planner does not explicitly select this skill.
+# receives accurate data even when the model does not explicitly call this tool.
 #
 # This module is discovered automatically by skills_catalog_builder.py via the accompanying
 # skill.md definition file and added to the skills_summary.md catalog.
@@ -156,7 +156,7 @@ def get_system_info_dict() -> dict:
       disk_used_gb     (float) - Disk used, GiB rounded to 2 dp
       disk_available_gb(float) - Disk free, GiB rounded to 2 dp
 
-    Reference individual fields with ${outputN.ram_available_gb} etc. in the planner plan.
+    Reference individual fields e.g. result["ram_available_gb"] downstream.
     """
     ram_used_bytes, ram_available_bytes   = _get_memory_usage_bytes()
     disk_used_bytes, disk_available_bytes = _get_disk_usage_bytes()
@@ -179,7 +179,7 @@ def get_system_info_dict() -> dict:
 def get_system_info_string() -> str:
     """Format system info as a human-readable string for ambient prompt context and logging.
 
-    Internal helper - not exposed as a planner skill.  Use get_system_info_dict() in skill plans.
+    Internal helper - not exposed as a callable tool.  Use get_system_info_dict() for tool-call access.
     """
     d = get_system_info_dict()
     return (

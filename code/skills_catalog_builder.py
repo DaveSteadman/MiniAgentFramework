@@ -70,49 +70,6 @@ def _load_module_from_path(module_path: str):
     return module
 
 
-def _normalize_planner_tool_entry(entry: dict, module_path: str, skill_name: str) -> dict:
-    normalized = dict(entry)
-    tool_name = str(normalized.get("name", "")).strip()
-    function_name = str(normalized.get("function", "")).strip()
-    if not tool_name or not function_name:
-        raise ValueError(f"{skill_name}: planner tool entries require both 'name' and 'function'")
-
-    normalized["name"] = tool_name
-    normalized["function"] = function_name
-    normalized["module"] = normalize_module_path(module_path)
-    normalized["description"] = str(normalized.get("description", "")).strip()
-
-    parameters = normalized.get("parameters") or {"type": "object", "properties": {}}
-    if not isinstance(parameters, dict):
-        raise ValueError(f"{skill_name}: planner tool '{tool_name}' parameters must be an object schema")
-    parameters.setdefault("type", "object")
-    parameters.setdefault("properties", {})
-    if not isinstance(parameters["properties"], dict):
-        raise ValueError(f"{skill_name}: planner tool '{tool_name}' properties must be a dict")
-    normalized["parameters"] = parameters
-    return normalized
-
-
-def _load_planner_tools(module_path: str, skill_name: str) -> tuple[list[dict], str]:
-    if not module_path:
-        return [], ""
-
-    module = _load_module_from_path(module_path)
-    if module is None:
-        return [], ""
-
-    raw_tools = getattr(module, "PLANNER_TOOLS", None)
-    if not isinstance(raw_tools, list):
-        return [], str(getattr(module, "PRIMARY_PLANNER_TOOL", "") or "").strip()
-
-    planner_tools = [
-        _normalize_planner_tool_entry(entry, module_path=module_path, skill_name=skill_name)
-        for entry in raw_tools
-        if isinstance(entry, dict)
-    ]
-    primary_tool = str(getattr(module, "PRIMARY_PLANNER_TOOL", "") or "").strip()
-    return planner_tools, primary_tool
-
 
 def _existing_callable_signatures(functions: list[str], module_path: str) -> list[str]:
     if not module_path:
@@ -243,8 +200,6 @@ def summarize_locally(skill_md_path: Path) -> dict:
     if output_section:
         output_lines = [line.strip(" -") for line in output_section[0][0].splitlines() if line.strip().startswith("-")]
 
-    planner_tools, primary_tool = _load_planner_tools(module_path=module, skill_name=title)
-
     return {
         "skill_name":      title,
         "relative_path":   skill_md_path.as_posix(),
@@ -252,8 +207,6 @@ def summarize_locally(skill_md_path: Path) -> dict:
         "module":          module,
         "trigger_keyword": trigger_keyword,
         "functions":       functions,
-        "planner_tools":   planner_tools,
-        "primary_tool":    primary_tool,
         "inputs":          input_lines,
         "outputs":         output_lines,
     }
@@ -273,15 +226,6 @@ def summarize_skill(skill_md_path: Path, use_llm: bool, model_name: str, num_ctx
     if summary is None:
         summary = summarize_locally(skill_md_path=skill_md_path)
 
-    module_path = str(summary.get("module", "")).strip()
-    skill_name = str(summary.get("skill_name", skill_md_path.parent.name))
-    planner_tools, primary_tool = _load_planner_tools(module_path=module_path, skill_name=skill_name)
-    if planner_tools:
-        summary["planner_tools"] = planner_tools
-    summary.setdefault("planner_tools", [])
-    if primary_tool:
-        summary["primary_tool"] = primary_tool
-    summary.setdefault("primary_tool", "")
     return summary
 
 
@@ -300,7 +244,6 @@ def normalize_summary(summary: dict, skill_md_path: Path) -> dict:
     normalized["relative_path"] = to_workspace_relative_path(skill_md_path)
 
     normalized.setdefault("trigger_keyword", "")
-    normalized.setdefault("primary_tool", "")
     for field_name in ["functions", "inputs", "outputs"]:
         field_value = normalized.get(field_name, [])
         if isinstance(field_value, list):
@@ -309,12 +252,6 @@ def normalize_summary(summary: dict, skill_md_path: Path) -> dict:
             normalized[field_name] = [field_value.strip()]
         else:
             normalized[field_name] = []
-
-    planner_tools = normalized.get("planner_tools", [])
-    if isinstance(planner_tools, list):
-        normalized["planner_tools"] = [tool for tool in planner_tools if isinstance(tool, dict)]
-    else:
-        normalized["planner_tools"] = []
 
     return normalized
 
@@ -419,13 +356,18 @@ _CLEAN_SIG_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\(([^<>\\]*)\)$')
 _PARAM_RE     = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*([A-Za-z_][A-Za-z0-9_\[\]| ]*))?\s*(?:=\s*\S+)?')
 
 
-def _python_type_to_json_type(ptype: str) -> str:
-    ptype_lower = ptype.lower().strip()
+def _python_type_to_json_schema(ptype: str) -> dict:
+    """Return a JSON Schema fragment for a Python type annotation string."""
+    ptype_stripped = ptype.strip()
+    list_match = re.match(r'^list\[([^\]]+)\]$', ptype_stripped, re.IGNORECASE)
+    if list_match:
+        return {"type": "array", "items": _python_type_to_json_schema(list_match.group(1))}
+    ptype_lower = ptype_stripped.lower()
     if ptype_lower in ("bool", "boolean"):
-        return "boolean"
+        return {"type": "boolean"}
     if ptype_lower in ("int", "float", "number"):
-        return "number"
-    return "string"
+        return {"type": "number"}
+    return {"type": "string"}
 
 
 def _parse_tool_signature(sig: str) -> tuple[str, list[dict]] | None:
@@ -475,31 +417,11 @@ def build_tool_definitions(skills_payload: dict) -> list[dict]:
         purpose         = skill.get("purpose", "")
         trigger_kw      = skill.get("trigger_keyword", "").strip()
         description     = f"Triggered by keyword '{trigger_kw}'. {purpose}" if trigger_kw else purpose
-        planner_tools   = skill.get("planner_tools", [])
 
-        if planner_tools:
-            for planner_tool in planner_tools:
-                tool_name = str(planner_tool.get("name", "")).strip()
-                if not tool_name:
-                    continue
-                if tool_name in seen_names:
-                    raise RuntimeError(f"Duplicate planner tool name in skills catalog: {tool_name}")
-                seen_names.add(tool_name)
-
-                tool_description = str(planner_tool.get("description", "")).strip() or description
-                tool_parameters = dict(planner_tool.get("parameters") or {"type": "object", "properties": {}})
-                tool_parameters.setdefault("type", "object")
-                tool_parameters.setdefault("properties", {})
-
-                tools.append({
-                    "type": "function",
-                    "function": {
-                        "name": tool_name,
-                        "description": tool_description,
-                        "parameters": tool_parameters,
-                    },
-                })
-            continue
+        skill_module = None
+        skill_module_path = str(skill.get("module", "")).strip()
+        if skill_module_path:
+            skill_module = _load_module_from_path(skill_module_path)
 
         for func_sig in skill.get("functions", []):
             parsed = _parse_tool_signature(func_sig)
@@ -510,19 +432,31 @@ def build_tool_definitions(skills_payload: dict) -> list[dict]:
                 continue
             seen_names.add(func_name)
 
+            # Prefer a per-function docstring over the skill-level description.
+            func_description = description
+            if skill_module:
+                func_obj = getattr(skill_module, func_name, None)
+                if func_obj and getattr(func_obj, "__doc__", None):
+                    first_para = func_obj.__doc__.strip().split("\n\n")[0]
+                    func_description = " ".join(first_para.split())
+
             properties: dict = {}
             required:   list = []
             for p in params:
-                properties[p["name"]] = {
-                    "type":        _python_type_to_json_type(p["type"]),
-                    "description": p["name"],
+                param_name = p["name"]
+                # Give the model an explicit description naming the parameter to prevent it
+                # from inventing aliases (e.g. "search_query" instead of "query").
+                param_desc = f"Parameter '{param_name}'. Use exactly this name."
+                properties[param_name] = {
+                    **_python_type_to_json_schema(p["type"]),
+                    "description": param_desc,
                 }
                 if p["required"]:
-                    required.append(p["name"])
+                    required.append(param_name)
 
             tool_func: dict = {
                 "name":        func_name,
-                "description": description,
+                "description": func_description,
                 "parameters": {
                     "type":       "object",
                     "properties": properties,

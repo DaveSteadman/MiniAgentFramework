@@ -7,8 +7,8 @@
 # controldata/schedules/.  Each task lives in its own file named task_<name>.json so the
 # dashboard scheduler hot-reloads changes within its next poll cycle without a restart.
 #
-# All public functions return plain-text status strings so the planner can feed them directly
-# into a final LLM prompt or present them verbatim to the user.
+# All public functions return plain-text status strings so the model can present them
+# verbatim to the user or chain them into subsequent tool calls.
 #
 # Related modules:
 #   - workspace_utils.py          -- get_schedules_dir()

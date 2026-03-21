@@ -29,3 +29,15 @@ def get_datetime_data() -> dict:
         "date": current_local.strftime("%Y-%m-%d"),
         "time": current_local.strftime("%H:%M:%S"),
     }
+
+
+# ----------------------------------------------------------------------------------------------------
+def get_day_name() -> str:
+    """Return the full name of the current day of the week, e.g. 'Saturday'."""
+    return datetime.now().strftime("%A")
+
+
+# ----------------------------------------------------------------------------------------------------
+def get_month_name() -> str:
+    """Return the full name of the current month, e.g. 'March'."""
+    return datetime.now().strftime("%B")

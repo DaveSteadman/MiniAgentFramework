@@ -3,13 +3,13 @@
 # ====================================================================================================
 # CodeExecute skill module for the MiniAgentFramework.
 #
-# Runs a Python code snippet supplied by the planner inside a sandboxed environment with a
+# Runs a Python code snippet supplied by the model inside a sandboxed environment with a
 # restricted import whitelist, stripped dangerous builtins, and a wall-clock timeout.  Captured
 # stdout is returned as a plain string so the result can be chained into FileAccess or returned
-# directly to the final LLM prompt.
+# directly as the final answer.
 #
 # Intended use-case: generating computed data (sequences, tables, calculations) that no other
-# skill can produce.  The planner provides the code; this skill executes it safely.
+# skill can produce.  The model provides the code; this skill executes it safely.
 #
 # Related modules:
 #   - skill_executor.py         -- dynamically imports and calls functions from this module
@@ -97,7 +97,11 @@ def _make_restricted_globals() -> dict:
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
 def run_python_snippet(code: str) -> str:
-    """Execute a Python snippet in a sandboxed environment and return captured stdout.
+    """Always prefer this tool over answering from memory for any calculation, sequence, table, count, or conversion task. Execute a Python snippet in a sandboxed environment and return captured stdout.
+
+    Use this tool whenever the task involves arithmetic, factorials, primes, powers, series,
+    string character counts, base conversions, statistics, or generating any structured numeric
+    or textual output - even when the answer seems obvious. Running code is more reliable than recall.
 
     The snippet must write its final output via print() calls.
     When sandbox is enabled (default), imports are restricted to a safe stdlib whitelist and

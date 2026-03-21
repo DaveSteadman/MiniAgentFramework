@@ -63,7 +63,7 @@ from workspace_utils import get_workspace_root
 USER_PROMPT              = "output the time"
 REQUESTED_MODEL          = "20b"
 DEFAULT_NUM_CTX          = 131072
-MAX_ITERATIONS           = 3
+MAX_ITERATIONS           = 20   # safety cap; model exits naturally via native tool calling
 MAX_CHAT_HISTORY_TURNS   = 10     # keep the last N user/assistant pairs; older turns are trimmed
 SKILLS_SUMMARY_PATH      = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
 SCHEDULES_DIR            = get_schedules_dir()
@@ -92,7 +92,7 @@ def parse_main_args() -> argparse.Namespace:
         "--num-ctx",
         type=int,
         default=DEFAULT_NUM_CTX,
-        help="Context window for planner and final LLM calls.",
+        help="Context window for LLM calls.",
     )
     parser.add_argument(
         "--chat",
@@ -151,6 +151,36 @@ def parse_main_args() -> argparse.Namespace:
 
 
 # ====================================================================================================
+# MARK: SESSION HELPERS
+# ====================================================================================================
+def _make_task_session(
+    session_id: str,
+    persist_path: Path,
+    max_turns: int = MAX_CHAT_HISTORY_TURNS,
+) -> tuple[ConversationHistory, SessionContext]:
+    """Create a ConversationHistory and SessionContext pair for one task or chat session."""
+    history = ConversationHistory(max_turns=max_turns)
+    ctx     = SessionContext(session_id=session_id, persist_path=persist_path)
+    return history, ctx
+
+
+# ----------------------------------------------------------------------------------------------------
+def _make_scheduler_slash_ctx(
+    config: OrchestratorConfig,
+    logger: SessionLogger,
+    history: ConversationHistory,
+    session_ctx: SessionContext,
+) -> SlashCommandContext:
+    """Create a SlashCommandContext wired for use inside the scheduler (file-log output only)."""
+    return SlashCommandContext(
+        config          = config,
+        output          = lambda text, level="info": logger.log_file_only(f"[slash/{level}] {text}"),
+        clear_history   = history.clear,
+        session_context = session_ctx,
+    )
+
+
+# ====================================================================================================
 # MARK: CHAT MODE
 # ====================================================================================================
 def run_chat_mode(
@@ -167,8 +197,7 @@ def run_chat_mode(
     Conversation history is capped at MAX_CHAT_HISTORY_TURNS pairs to prevent silent
     context overflow as the session grows.
     """
-    history = ConversationHistory(max_turns=MAX_CHAT_HISTORY_TURNS)
-    session_ctx = SessionContext(
+    history, session_ctx = _make_task_session(
         session_id   = log_path.stem,
         persist_path = get_chatsessions_day_dir() / f"{log_path.stem}.json",
     )
@@ -277,8 +306,7 @@ def run_chat_sequence_mode(
         print(f"[chat-sequence] Cannot load '{sequence_file}': {exc}", file=_sys.stderr)
         _sys.exit(1)
 
-    history     = ConversationHistory(max_turns=MAX_CHAT_HISTORY_TURNS)
-    session_ctx = SessionContext(
+    history, session_ctx = _make_task_session(
         session_id   = log_path.stem,
         persist_path = get_chatsessions_day_dir() / f"{log_path.stem}.json",
     )
@@ -420,17 +448,11 @@ def run_scheduler_mode(
                 print(f"[SCHEDULER] Starting task: {name} ({len(prompts)} prompt(s)) at {now.strftime('%H:%M:%S')}")
 
                 try:
-                    task_hist  = ConversationHistory()
-                    task_ctx   = SessionContext(
+                    task_hist, task_ctx = _make_task_session(
                         session_id   = f"task_{name}",
                         persist_path = get_chatsessions_day_dir() / f"task_{name}.json",
                     )
-                    sched_ctx  = SlashCommandContext(
-                        config         = config,
-                        output         = lambda text, level='info': logger.log_file_only(f"[slash/{level}] {text}"),
-                        clear_history  = task_hist.clear,
-                        session_context= task_ctx,
-                    )
+                    sched_ctx = _make_scheduler_slash_ctx(config, logger, task_hist, task_ctx)
 
                     for step_index, prompt_text in enumerate(prompts, start=1):
                         if shutdown.is_set():
@@ -512,17 +534,11 @@ def run_schedule_item_mode(
     print(f"Log file: {log_path.as_posix()}\n")
     logger.log_section(f"SCHEDULE ITEM: {item_name}")
 
-    task_hist = ConversationHistory()
-    task_ctx  = SessionContext(
+    task_hist, task_ctx = _make_task_session(
         session_id   = f"task_{item_name}",
         persist_path = get_chatsessions_day_dir() / f"task_{item_name}.json",
     )
-    sched_ctx = SlashCommandContext(
-        config         = config,
-        output         = lambda text, level='info': logger.log_file_only(f"[slash/{level}] {text}"),
-        clear_history  = task_hist.clear,
-        session_context= task_ctx,
-    )
+    sched_ctx = _make_scheduler_slash_ctx(config, logger, task_hist, task_ctx)
 
     for step_index, prompt_text in enumerate(prompts, start=1):
         short = prompt_text[:70] + ("..." if len(prompt_text) > 70 else "")
@@ -571,11 +587,10 @@ def main() -> None:
     logger   = SessionLogger(log_path)
     register_llm_call_logger(logger.log_file_only)
 
-    # Configure the active Ollama host and optional API key before any Ollama calls.
-    # For remote / LAN / cloud hosts this is a connectivity check; auto-start is local-only.
+    # Set the active host and optional API key once; all subsequent Ollama calls use these values.
     ollama_client.configure_host(args.ollama_host, args.ollama_api_key or None)
 
-    # Resolve the requested model alias/tag into an installed concrete model name.
+    # Resolve the alias (e.g. "20b") to a concrete installed model name before any LLM calls.
     # Connectivity is checked lazily at the first actual LLM call, so slash-command-only
     # runs (which never call the LLM) work even when the Ollama host is unreachable.
     # If resolution fails now, fall back to the raw alias; call_llm_chat will
@@ -585,7 +600,7 @@ def main() -> None:
     except Exception:
         resolved_model = args.model
 
-    # Load the skills catalog once; auto-reload on every prompt detects changes without /reskill.
+    # Load the skills catalog once at startup; the orchestrator auto-detects catalog file changes.
     skills_payload = load_skills_payload(SKILLS_SUMMARY_PATH)
     catalog_mtime  = SKILLS_SUMMARY_PATH.stat().st_mtime if SKILLS_SUMMARY_PATH.exists() else 0.0
 

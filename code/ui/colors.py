@@ -38,7 +38,7 @@ CARET     = f'{ESC}[0;7m'           # cursor block      - reverse video
 
 RED       = f'{ESC}[0;1;31m'        # bold red   - skills, warnings, values
 BLUE      = f'{ESC}[0;36m'          # cyan       - anaglyph blue, labels, keys
-MAGENTA   = f'{ESC}[0;1;35m'        # magenta    - planner output
+MAGENTA   = f'{ESC}[0;1;35m'        # magenta    - tool output
 
 # ----------------------------------------------------------------------------------------------------
 # Timeline

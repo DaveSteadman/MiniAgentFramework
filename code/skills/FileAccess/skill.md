@@ -1,54 +1,62 @@
 # FileAccess Skill
 
 ## Purpose
-Provide safe workspace-constrained file access for write, append, read, listing, and name-based search operations.
+Interface for all file read, write, append, and search operations. All paths are workspace-relative; bare file names resolve to `./data/`. Paths that escape the workspace root are rejected.
+
+## Trigger keyword: file
 
 ## Interface
 - Module: `code/skills/FileAccess/file_access_skill.py`
-- Primary functions:
-  - `write_text_file(file_path: str, text: str)`
-  - `append_text_file(file_path: str, text: str)`
-  - `read_text_file(file_path: str, max_chars: int = 8000)`
-  - `list_data_files()`
+- Functions:
+  - `write_file(path: str, content: str)`
+  - `append_file(path: str, content: str)`
+  - `read_file(path: str, max_chars: int = 8000)`
   - `find_files(keywords: list[str], search_root: str = "")`
   - `find_folders(keywords: list[str], search_root: str = "")`
-  - `execute_file_instruction(user_prompt: str)`
 
-## Path Rules
-- Bare path like `x.txt` resolves to `./data/x.txt`.
-- Relative paths with a directory component like `data/x.csv` or `logs/run.txt` resolve from workspace root.
-- Path starting with `./` resolves from workspace root.
-- Absolute paths are permitted only if they resolve inside workspace root.
-- Paths escaping workspace root are rejected.
+## Parameters
 
-## Input
-- `file_path`: target file path.
-- `text`: content to write or append.
-- `user_prompt`: natural-language instruction for command parsing.
-- `keywords`: list of one or more case-insensitive name fragments for find operations - ALL must appear in the name.
-- `search_root`: optional workspace-relative directory to restrict find searches.
-- Typical trigger phrases:
-  - `create file <name>`
-  - `write ... to file <path>`
-  - `append ... to file <path>`
-  - `read file <path>`
-  - `find file named <keyword>`
-  - `find folder named <keyword>`
-  - `find files containing <keyword> in <folder>`
+### `write_file(path, content)`
+- `path` *(required)* - workspace-relative path. A bare name like `"x.txt"` resolves to `data/x.txt`. A path starting with `"./"` resolves from workspace root.
+- `content` *(required)* - content to write. Overwrites the file if it exists.
+
+### `append_file(path, content)`
+- `path` *(required)* - same path rules as `write_file`.
+- `content` *(required)* - content to append. A newline is added automatically if missing.
+
+### `read_file(path, max_chars = 8000)`
+- `path` *(required)* - same path rules as `write_file`.
+- `max_chars` *(optional, default 8000)* - maximum characters to return; content is truncated with `[truncated]` if exceeded.
+
+### `find_files(keywords, search_root = "")`
+- `keywords` *(required)* - list of case-insensitive fragments that must ALL appear in the file name, e.g. `["pulse", "2026"]`.
+- `search_root` *(optional, default "")* - workspace-relative directory to restrict the search, e.g. `"data"`. Leave empty to search the whole workspace.
+
+### `find_folders(keywords, search_root = "")`
+- `keywords` *(required)* - list of case-insensitive fragments that must ALL appear in the folder name.
+- `search_root` *(optional, default "")* - workspace-relative directory to restrict the search. Leave empty to search the whole workspace.
 
 ## Output
-- Returns status messages for write/append/list operations.
-- Writing a SystemInfo string to a `.csv` file converts it to `key,value` CSV rows automatically.
-- Returns file content for read operations.
-- `find_files` returns a newline-separated list of workspace-relative file paths whose names contain ALL keywords, or a "not found" message.
-- `find_folders` returns a newline-separated list of workspace-relative folder paths whose names contain ALL keywords, or a "not found" message.
-- Returns parse guidance when instruction intent/path cannot be resolved.
+- `write_file(...)` - returns `"Wrote data/filename.txt"` on success, or `"Error: ..."` on failure.
+- `append_file(...)` - returns `"Appended data/filename.txt"` on success, or `"Error: ..."` on failure.
+- `read_file(...)` - returns the file content as a string, or `"File not found: ..."` if the file does not exist.
+- `find_files(...)` - returns a newline-separated list of matching workspace-relative paths, or a `"No files found..."` message.
+- `find_folders(...)` - returns a newline-separated list of matching workspace-relative paths, or a `"No folders found..."` message.
+
+## Triggers
+Invoke this skill when the prompt contains any of these concepts or phrases:
+- `write to file`, `create file`, `save to file`
+- `append to file`, `add to file`
+- `read file`, `show file`, `open file`, `contents of`
+- `find file`, `find folder`, `locate file`, `search for file`
 
 ## Examples
-- `execute_file_instruction("write hello world to file x.txt")`
-- `execute_file_instruction("append done to file ./data/content.txt")`
-- `execute_file_instruction("read file ./data/content.txt")`
-- `find_files(["analysis"])` - returns all files with "analysis" in the name
-- `find_files(["pulse"], "data")` - returns all files with "pulse" in the name under data/
-- `find_files(["test", "2026"])` - returns all files whose name contains both "test" and "2026"
-- `find_folders(["2026-03"])` - returns all folders containing "2026-03" in the name
+- `write_file("notes/meeting.txt", "Discuss project timeline")` - creates or overwrites the file
+  - Returns: `"Wrote data/notes/meeting.txt"`
+- `append_file("data/log.txt", "new entry")` - appends a line
+  - Returns: `"Appended data/log.txt"`
+- `read_file(path="data/log.txt")` - returns full content up to 8000 chars
+- `find_files(["pulse"], "data")` - find files with "pulse" in the name under data/
+  - Returns: `"data/pulse_log.csv\ndata/sys_pulse.csv"`
+- `find_files(["test", "2026"])` - find files whose name contains both fragments
+- `find_folders(["2026-03"])` - find folders containing "2026-03" in the name

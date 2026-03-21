@@ -7,7 +7,7 @@
 # All network I/O uses Python stdlib (urllib) so there are no mandatory third-party dependencies.
 #
 # Inspired by Gen2WebSearch from OpenClawTest (DaveSteadman), adapted to this framework's
-# single-file skill pattern with a simplified, planner-friendly function surface.
+# single-file skill pattern with a clean, model-callable function surface.
 #
 # Related modules:
 #   - main.py                          -- orchestration entry point
@@ -47,10 +47,12 @@ _SNIPPET_RE = re.compile(
 _TAG_RE   = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"\s+")
 
-MAX_RESULTS_CAP     = 10
-TIMEOUT_SECONDS_CAP = 30
-DEFAULT_MAX_RESULTS = 5
-DEFAULT_TIMEOUT     = 15
+MAX_RESULTS_CAP          = 10
+TIMEOUT_SECONDS_CAP      = 30
+MAX_CHARS_PER_RESULT_CAP = 2000
+DEFAULT_MAX_RESULTS      = 5
+DEFAULT_TIMEOUT          = 15
+DEFAULT_MAX_CHARS        = 500
 
 
 # ====================================================================================================
@@ -126,19 +128,33 @@ def _extract_ddg_results(html_text: str, max_results: int) -> list[dict]:
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
 def search_web(
-    query: str,
+    query: str = "",
     max_results: int = DEFAULT_MAX_RESULTS,
     timeout_seconds: int = DEFAULT_TIMEOUT,
+    # Accept common aliases that models often use instead of the canonical names:
+    num_results: int | None = None,
+    limit: int | None = None,
+    n: int | None = None,
+    **kwargs,
 ) -> list[dict]:
     """Search DuckDuckGo and return a structured list of results.
 
     Returns a list of dicts: [{"rank": int, "title": str, "url": str, "snippet": str}, ...]
     Returns a single error-entry dict on network or parse failure - never raises.
     """
+    # Absorb query aliases the model may send instead of 'query'.
+    if not query:
+        for alias in ("search_query", "q", "text", "keywords", "search", "term"):
+            if alias in kwargs:
+                query = str(kwargs[alias])
+                break
+
     if not query or not query.strip():
         return [{"rank": 0, "title": "Error", "url": "", "snippet": "query cannot be empty"}]
 
-    max_results     = max(1, min(int(max_results),     MAX_RESULTS_CAP))
+    # Resolve whichever count alias the model used, preferring the canonical name.
+    effective_max   = num_results if num_results is not None else (limit if limit is not None else (n if n is not None else max_results))
+    max_results     = max(1, min(int(effective_max),   MAX_RESULTS_CAP))
     timeout_seconds = max(5, min(int(timeout_seconds), TIMEOUT_SECONDS_CAP))
 
     encoded    = urllib.parse.quote_plus(query.strip())
@@ -159,9 +175,15 @@ def search_web(
 
 # ----------------------------------------------------------------------------------------------------
 def search_web_text(
-    query: str,
+    query: str = "",
     max_results: int = DEFAULT_MAX_RESULTS,
     timeout_seconds: int = DEFAULT_TIMEOUT,
+    max_chars_per_result: int = DEFAULT_MAX_CHARS,
+    # Accept common aliases:
+    num_results: int | None = None,
+    limit: int | None = None,
+    n: int | None = None,
+    **kwargs,
 ) -> str:
     """Search DuckDuckGo and return a plain-text formatted result block for LLM consumption.
 
@@ -169,8 +191,20 @@ def search_web_text(
         [1] Title
             https://example.com
             Snippet text describing the result.
+
+    max_chars_per_result caps the snippet length per result to limit token consumption.
+    Set to 0 to disable truncation.
     """
-    results = search_web(query=query, max_results=max_results, timeout_seconds=timeout_seconds)
+    if not query:
+        for alias in ("search_query", "q", "text", "keywords", "search", "term"):
+            if alias in kwargs:
+                query = str(kwargs[alias])
+                break
+
+    effective_max = num_results if num_results is not None else (limit if limit is not None else (n if n is not None else max_results))
+    results = search_web(query=query, max_results=int(effective_max), timeout_seconds=timeout_seconds)
+
+    char_cap = max(0, min(int(max_chars_per_result), MAX_CHARS_PER_RESULT_CAP)) if max_chars_per_result > 0 else 0
 
     lines = [f"Web search results for: {query}", ""]
     for r in results:
@@ -178,6 +212,9 @@ def search_web_text(
         title   = r.get("title", "")
         url     = r.get("url",   "")
         snippet = r.get("snippet", "")
+
+        if char_cap and len(snippet) > char_cap:
+            snippet = snippet[:char_cap] + "..."
 
         lines.append(f"[{rank}] {title}")
         if url:

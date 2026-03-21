@@ -23,7 +23,6 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,17 +31,12 @@ from ollama_client import list_ollama_models
 from ollama_client import resolve_model_name
 from prompt_tokens import resolve_tokens
 from runtime_logger import SessionLogger
+from skill_executor import build_catalog_gates
 from skill_executor import execute_tool_call
 from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
 from skills.SystemInfo.system_info_skill import get_system_info_string
 from skills_catalog_builder import build_tool_definitions
-
-
-# ====================================================================================================
-# MARK: PATHS
-# ====================================================================================================
-_SKILLS_SUMMARY_PATH = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
 
 
 # ====================================================================================================
@@ -168,6 +162,10 @@ class SessionContext:
     def turn_count(self) -> int:
         return len(self._turns)
 
+    def get_turns(self) -> list[dict]:
+        """Return a snapshot of all stored turns, safe for external inspection."""
+        return list(self._turns)
+
     # --------------------------------------------------------------------------
 
     def as_inject_block(self, max_turns: int | None = None) -> str:
@@ -288,34 +286,21 @@ def resolve_execution_model(requested_model: str) -> str:
 def _build_keyword_routing_rules(skills_payload: dict) -> str:
     """Build explicit routing rules from skills that have a trigger_keyword field.
 
-    Also handles the legacy catalog format where skill_name is 'Trigger keyword: X'.
     Returns a formatted string suitable for inclusion in the system prompt,
     or an empty string when no keyword-routed skills are present.
     """
     rules: list[str] = []
     for skill in skills_payload.get("skills", []):
-        # Prefer the dedicated field; fall back to the legacy mangled skill_name.
+        # Use the dedicated trigger_keyword field.
         kw = skill.get("trigger_keyword", "").strip()
-        if not kw:
-            sname = skill.get("skill_name", "")
-            if re.search(r"trigger keyword", sname, re.IGNORECASE):
-                parts = sname.split(":", 1)
-                if len(parts) == 2:
-                    kw = parts[1].strip()
         if not kw:
             continue
 
-        primary = str(skill.get("primary_tool", "")).strip()
-        if not primary:
-            planner_tools = skill.get("planner_tools", [])
-            if planner_tools:
-                primary = str(planner_tools[0].get("name", "")).strip()
-        if not primary:
-            funcs = skill.get("functions", [])
-            primary = next(
-                (f.split("(")[0].strip() for f in funcs if "(" in f and not f.startswith("list_")),
-                None,
-            )
+        funcs   = skill.get("functions", [])
+        primary = next(
+            (f.split("(")[0].strip() for f in funcs if "(" in f and not f.startswith("list_")),
+            None,
+        )
         if primary:
             rules.append(
                 f'  - Prompt contains "{kw}": '
@@ -380,6 +365,57 @@ def _format_tool_outputs(tool_outputs: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ----------------------------------------------------------------------------------------------------
+def _build_fallback_answer(user_prompt: str, tool_outputs: list[dict]) -> str:
+    """Construct a minimal plain-text answer from raw tool outputs when LLM synthesis fails.
+
+    Used when all synthesis attempts return empty content (e.g. Ollama thinking models that
+    only generate internal reasoning tokens via /v1/chat/completions).  Formats each tool
+    result into a readable block the user can act on, prefixed with a notice about partial output.
+    """
+    lines: list[str] = [
+        f"(Note: the model did not produce a synthesized answer for: \"{user_prompt[:80]}\")",
+        "Raw tool results follow:",
+        "",
+    ]
+    for output in tool_outputs:
+        tool_name = output.get("tool", "") or output.get("function", "unknown")
+        args      = output.get("arguments", {}) or {}
+        result    = output.get("result")
+
+        arg_str = ", ".join(f"{k}={v!r}" for k, v in args.items())
+        lines.append(f"[{tool_name}({arg_str})]")
+
+        if isinstance(result, list):
+            for item in result:
+                if isinstance(item, dict):
+                    title   = item.get("title", "")
+                    url     = item.get("url", "")
+                    snippet = item.get("snippet") or item.get("body", "")
+                    if title:
+                        lines.append(f"  - {title}")
+                    if url:
+                        lines.append(f"    {url}")
+                    if snippet:
+                        lines.append(f"    {str(snippet)[:200]}")
+                else:
+                    lines.append(f"  {str(item)[:200]}")
+        elif isinstance(result, dict):
+            for k, v in result.items():
+                lines.append(f"  {k}: {str(v)[:200]}")
+        elif isinstance(result, str):
+            for ln in result.splitlines()[:20]:
+                lines.append(f"  {ln}")
+            if result.count("\n") >= 20:
+                lines.append("  ...")
+        elif result is not None:
+            lines.append(f"  {str(result)[:400]}")
+
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
 # ====================================================================================================
 # MARK: ORCHESTRATION PIPELINE
 # ====================================================================================================
@@ -431,8 +467,10 @@ def orchestrate_prompt(
 
     # -- Memory --
     _log_file_only("[progress] Storing prompt memories...")
+    # Persist any facts in the prompt before tool calls run, so the turn is captured even on failure.
     memory_store_result = store_prompt_memories(user_prompt=user_prompt)
     _log_file_only("[progress] Recalling relevant memories...")
+    # Pull the most relevant prior memories to inject as context in the system prompt.
     recalled_memories   = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
 
     _log_section("MEMORY")
@@ -444,6 +482,7 @@ def orchestrate_prompt(
     _log(ambient_system_info)
 
     # -- Build tool definitions from the skills catalog --
+    # Convert the catalog into JSON Schema objects sent to the model on every tool-calling round.
     tool_defs = build_tool_definitions(config.skills_payload)
     _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
 
@@ -455,6 +494,8 @@ def orchestrate_prompt(
         "After using tools, synthesize the results into a clear, direct answer.",
         "Never claim a tool action succeeded unless the tool output explicitly confirms it.",
         "Do not add explanatory preamble - respond with direct answers only.",
+        "Complete ALL steps in the user's request. If the user asks for output to be written "
+        "to a file, that write must happen as a tool call before you give your final answer.",
         "The current runtime system info (RAM, disk, OS, etc.) is already provided below - "
         "do not call get_system_info_dict unless the user explicitly asks to refresh it.",
     ]
@@ -480,6 +521,8 @@ def orchestrate_prompt(
     messages.append({"role": "user", "content": user_prompt})
 
     # -- Tool calling loop --
+    # Build once for the entire run - avoids re-scanning the catalog on every tool invocation.
+    catalog_gates      = build_catalog_gates(config.skills_payload)
     tool_outputs:      list[dict] = []
     prompt_tokens:     int        = 0
     completion_tokens: int        = 0
@@ -491,6 +534,7 @@ def orchestrate_prompt(
         _log_section(f"TOOL ROUND {round_num}")
         _log_file_only(f"[progress] Round {round_num}: calling model...")
 
+        # Send the growing messages thread; the model either answers directly or requests more tool calls.
         try:
             result = call_llm_chat(
                 model_name=config.resolved_model,
@@ -543,7 +587,7 @@ def orchestrate_prompt(
             _log(f"  -> {func_name}({arg_preview})")
 
             try:
-                output         = execute_tool_call(func_name, arguments, config.skills_payload, user_prompt)
+                output         = execute_tool_call(func_name, arguments, config.skills_payload, user_prompt, catalog_gates)
                 result_content = output["result"]
                 if not isinstance(result_content, str):
                     result_content = json.dumps(result_content, default=str)
@@ -575,9 +619,16 @@ def orchestrate_prompt(
         # Exhausted all rounds without a plain-text answer - request a final synthesis.
         _log("[warn] Max tool rounds exhausted - requesting final synthesis.")
         try:
+            # Append an explicit user directive so the model is forced to emit visible content
+            # rather than only generating internal thinking tokens (Ollama 0.18+ thinking models).
+            synthesis_messages = messages + [{
+                "role":    "user",
+                "content": "Based on the tool results above, please answer my original question now.",
+            }]
+            # Call without tools so the model synthesises a final answer from accumulated results.
             result             = call_llm_chat(
                 model_name=config.resolved_model,
-                messages=messages,
+                messages=synthesis_messages,
                 tools=None,
                 num_ctx=config.num_ctx,
             )
@@ -585,9 +636,19 @@ def orchestrate_prompt(
             prompt_tokens     += result.prompt_tokens
             completion_tokens += result.completion_tokens
             final_tps          = result.tokens_per_second
-            run_success        = bool(final_response)
             _log_section("FINAL RESPONSE")
             _log(final_response)
+
+            # Last-resort fallback: if the model produced no content (e.g. Ollama thinking
+            # models that emit only internal reasoning tokens via /v1/chat/completions),
+            # build a minimal plain-text answer directly from the collected tool outputs so
+            # the user always sees something.
+            if not final_response and tool_outputs:
+                _log_file_only("[warn] Synthesis returned empty - falling back to tool-output summary.")
+                final_response = _build_fallback_answer(user_prompt, tool_outputs)
+                _log(final_response)
+
+            run_success = bool(final_response)
         except Exception as error:
             final_response = f"(synthesis failed: {error})"
 
@@ -595,6 +656,7 @@ def orchestrate_prompt(
     _log_file_only(_format_tool_outputs(tool_outputs))
     _log(f"Total: {prompt_tokens:,} prompt tokens | {completion_tokens:,} completion tokens")
 
+    # Archive this turn's skill outputs so later turns can reference prior results without re-running.
     if session_context is not None and run_success and tool_outputs:
         session_context.add_turn(
             user_prompt=user_prompt,

@@ -1,43 +1,60 @@
 # CodeExecute Skill
 
 ## Purpose
-Execute a Python code snippet in a sandboxed environment and return the captured stdout as a string - use when the user requests computed or generated data (sequences, tables, calculations) that no other skill can produce. Only Python stdlib modules are available (math, itertools, collections, datetime, json, csv, re, statistics, etc.) - third-party packages such as numpy, pandas, sympy, and scipy are not available; always write self-contained stdlib code.
+- Execute a self-contained Python code snippet and return the captured stdout.
+- **Always prefer code over a direct answer for any calculation, sequence, table, string operation, or data generation task** - even when the answer seems obvious from training knowledge. Running code is more reliable and verifiable than recall.
+- Only Python stdlib is available; third-party packages (numpy, pandas, sympy) are not.
+- When paired with FileAccess, call this skill first to generate the content, then pass its output to a FileAccess write call.
+- Code should strongly avoid IF statements, loops, or function calls; favouring code that will execute with high reliability.
+
+## Trigger keyword: calculate
 
 ## Interface
 - Module: `code/skills/CodeExecute/code_execute_skill.py`
-- Function: `run_python_snippet(code: str)`
+- Functions:
+  - `run_python_snippet(code: str)`
 
-## Input
-- `run_python_snippet(code: str)`
-  - `code`: a complete, self-contained Python snippet.
-  - The snippet must use print() to emit all output - the return value of the last
-    expression is not captured, only printed lines.
-  - Imports are restricted to a safe stdlib whitelist when sandbox is enabled (default): math, itertools, collections, csv, io,
-    json, re, random, statistics, datetime, decimal, fractions, functools,
-    operator, string, textwrap, heapq, bisect, array, calendar, time, cmath.
-  - os, sys, subprocess, open, eval, exec, and file I/O are blocked when sandbox is enabled.
-  - Sandbox state can be toggled at runtime with `/sandbox on|off`.
-  - Execution timeout: 15 seconds.
+## Parameters
+
+### `run_python_snippet(code)`
+- `code` *(required)* - a complete, self-contained Python snippet as a string. Must use `print()` for all output.
+  - Allowed stdlib imports: `math`, `itertools`, `collections`, `csv`, `io`, `json`, `re`, `random`, `statistics`, `datetime`, `decimal`, `fractions`, `functools`, `operator`, `string`, `textwrap`, `heapq`, `bisect`, `array`, `calendar`, `time`, `cmath`.
+  - Blocked when sandbox is enabled (default): `os`, `sys`, `subprocess`, `open`, `eval`, `exec`, and all file I/O.
+  - Execution timeout: 15 seconds. Sandbox state can be toggled at runtime with `/sandbox on|off`.
 
 ## Output
-- Captured stdout as a plain string.
-- If the snippet raises an exception or produces no output, returns an error string starting
-  with `"Error:"`.
+- `run_python_snippet(...)` - returns captured stdout as a plain string. Returns `"Error: ..."` if the snippet raises an exception, times out, or produces no output.
 
-## Typical trigger phrases (select this skill for any of these concepts)
-- `compute`, `calculate`, `generate a sequence`, `generate numbers`
-- `prime numbers`, `fibonacci`, `factorial`, `sequence of`
-- `produce a table`, `make a table of`, `create a list of numbers`
-- `formula`, `arithmetic`, `statistics`, `series`
-- Any prompt requesting *generated* numeric or structured data that needs to be computed
+## Triggers
+Use `run_python_snippet` by default whenever the task involves any of the following - do **not** answer from model knowledge when code can settle it:
 
-## Tool-calling guidance
-When this skill is selected alongside FileAccess, the model will make two sequential tool calls:
-1. `run_python_snippet(code=<snippet>)` - generates the data; the model receives the captured stdout.
-2. FileAccess write with the captured output as the file content.
-The snippet should build the full file content (including any headers) and print it to stdout.
-For CSV output, the snippet should print header and rows using print().
+**Arithmetic and maths**
+- Any calculation, formula, or numeric result: `calculate`, `compute`, `what is X`, `evaluate`
+- Powers, factorials, primes, fibonacci, sequences, series
+- Sum, product, average, mean, median, mode, standard deviation
+- Compound interest, percentage, ratio, conversion between units
+
+**Tables and data generation**
+- Multiplication tables, squares/cubes tables, truth tables, lookup tables
+- `print a table`, `generate a list`, `produce a list`, `list all X`, `first N of`
+- Identity matrix, Pascal's triangle, any structured numeric output
+
+**String and character operations**
+- Count occurrences of a letter or substring: `how many times`, `count the`
+- Reverse, sort, check for palindromes, anagram detection
+- Any prompt asking to inspect or transform a string value
+
+**Number base and encoding conversions**
+- `convert X to binary/hex/octal/decimal`
+- ASCII codes, encoding lookups
+
+**Iteration and enumeration**
+- Collatz sequence, any recurrence relation
+- `first N`, `up to N`, `for each`, `from 1 to N`
+
+When in doubt: write code and run it rather than recalling the answer.
 
 ## Examples
-- `run_python_snippet(code="import math\nfor i in range(1, 6):\n    print(i, math.factorial(i))")`
-- `run_python_snippet(code="print('index,prime,fib')\n# ... full snippet ...")`
+- `run_python_snippet(code="import math\nfor i in range(1, 6):\n    print(i, math.factorial(i))")` - print factorials 1-5
+  - Returns: `"1 1\n2 2\n3 6\n4 24\n5 120"`
+- `run_python_snippet(code="print('index,square')\nfor i in range(1, 6):\n    print(i, i*i)")` - generate CSV content for a FileAccess write call
