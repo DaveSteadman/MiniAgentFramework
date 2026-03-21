@@ -24,6 +24,14 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `what is`, `tell me about`, `who is`
 - `look up on Wikipedia`, `Wikipedia article`
 - `background on`, `history of`, `definition of`
+- `bio`, `biography`, `write the bio of`, `write about`
+
+## Scratchpad integration
+Article extracts can be several hundred words.  When the content will be used in a downstream
+step (write to file, summarise, compare with another result), park it with `scratch_save` first.
+
+- `lookup_wikipedia("Python programming language")` → `scratch_save("wikiarticle", <output>)` → reference with `{scratch:wikiarticle}` in later steps
+- `write_file("data/article.txt", "{scratch:wikiarticle}")` - write parked article content without a separate `scratch_load`
 
 ## Examples
 - `lookup_wikipedia("Python programming language")` - returns the Wikipedia summary

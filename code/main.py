@@ -55,6 +55,7 @@ from workspace_utils import get_chatsessions_day_dir
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
 from workspace_utils import get_workspace_root
+from workspace_utils import trunc
 
 
 # ====================================================================================================
@@ -208,6 +209,16 @@ def run_chat_mode(
     print(f"History window: last {MAX_CHAT_HISTORY_TURNS} turns")
     print("Type 'exit' or 'quit' to end the session. Up/down arrows scroll through history.\n")
 
+    # Define slash-command I/O wiring once; the closures capture history/session_ctx by reference
+    # so switching history inside a handler is reflected on the next turn.
+    def _cli_clear_history() -> None:
+        history.clear()
+        session_ctx.clear()
+
+    def _cli_output(text: str, level: str = "info") -> None:
+        prefix = "[!] " if level == "error" else ""
+        print(f"{prefix}{text}")
+
     while True:
         try:
             user_prompt = prompt_with_history("You: ")
@@ -222,19 +233,11 @@ def run_chat_mode(
             break
 
         # Slash commands bypass orchestration entirely.
-        def _cli_clear_history():
-            history.clear()
-            session_ctx.clear()
-
-        def _cli_output(text: str, level: str = 'info') -> None:
-            prefix = "[!] " if level == 'error' else ""
-            print(f"{prefix}{text}")
-
         cli_ctx = SlashCommandContext(
-            config         = config,
-            output         = _cli_output,
-            clear_history  = _cli_clear_history,
-            session_context= session_ctx,
+            config          = config,
+            output          = _cli_output,
+            clear_history   = _cli_clear_history,
+            session_context = session_ctx,
         )
         if handle_slash(user_prompt, cli_ctx):
             continue
@@ -353,6 +356,56 @@ def run_chat_sequence_mode(
 
 
 # ====================================================================================================
+# MARK: TASK PROMPT RUNNER
+# ====================================================================================================
+def _run_task_prompts(
+    prompts:     list[str],
+    config:      OrchestratorConfig,
+    logger:      SessionLogger,
+    history:     ConversationHistory,
+    session_ctx: SessionContext,
+    slash_ctx:   SlashCommandContext,
+    *,
+    shutdown:    threading.Event | None = None,
+    task_label:  str = "",
+) -> None:
+    """Execute a sequence of prompts sharing a common history and session context.
+
+    Used by run_scheduler_mode and run_schedule_item_mode to avoid duplicating the step loop.
+    If *shutdown* is set before a step begins that step is skipped and the loop exits early.
+    """
+    for step_index, prompt_text in enumerate(prompts, start=1):
+        if shutdown is not None and shutdown.is_set():
+            print(f"  [SCHEDULER] Shutdown - skipping remaining steps for '{task_label}'.")
+            logger.log_file_only(f"[SCHEDULER] Task '{task_label}' step {step_index} skipped (shutdown).")
+            break
+
+        short = trunc(prompt_text, 70)
+        print(f"  Step {step_index}/{len(prompts)}: {short}")
+        logger.log_file_only(f"[Step {step_index}] {prompt_text}")
+
+        if handle_slash(prompt_text, slash_ctx):
+            print("  [slash command handled]")
+            continue
+
+        response, p_tokens, _c, _success, tps = orchestrate_prompt(
+            user_prompt=prompt_text,
+            config=config,
+            logger=logger,
+            conversation_history=history.as_list() or None,
+            session_context=session_ctx,
+            quiet=True,
+        )
+
+        tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
+        preview = trunc(response, 120)
+        print(f"  [{p_tokens:,} ctx tokens{tps_str}] {preview}")
+        print()
+
+        history.add(prompt_text, response)
+
+
+# ====================================================================================================
 # MARK: SCHEDULER MODE
 # ====================================================================================================
 def run_scheduler_mode(
@@ -453,37 +506,16 @@ def run_scheduler_mode(
                         persist_path = get_chatsessions_day_dir() / f"task_{name}.json",
                     )
                     sched_ctx = _make_scheduler_slash_ctx(config, logger, task_hist, task_ctx)
-
-                    for step_index, prompt_text in enumerate(prompts, start=1):
-                        if shutdown.is_set():
-                            print(f"  [SCHEDULER] Shutdown - skipping remaining steps for '{name}'.")
-                            logger.log_file_only(f"[SCHEDULER] Task '{name}' step {step_index} skipped (shutdown).")
-                            break
-
-                        short = prompt_text[:70] + ("..." if len(prompt_text) > 70 else "")
-                        print(f"  Step {step_index}/{len(prompts)}: {short}")
-                        logger.log_file_only(f"[Step {step_index}] {prompt_text}")
-
-                        if handle_slash(prompt_text, sched_ctx):
-                            print(f"  [slash command handled]")
-                            continue
-
-                        response, p_tokens, _c, success, tps = orchestrate_prompt(
-                            user_prompt=prompt_text,
-                            config=config,
-                            logger=logger,
-                            conversation_history=task_hist.as_list() or None,
-                            session_context=task_ctx,
-                            quiet=True,
-                        )
-
-                        tps_str  = f" | {tps:.1f} tok/s" if tps > 0 else ""
-                        preview  = response[:120] + ("..." if len(response) > 120 else "")
-                        print(f"  [{p_tokens:,} ctx tokens{tps_str}] {preview}")
-                        print()
-
-                        task_hist.add(prompt_text, response)
-
+                    _run_task_prompts(
+                        prompts=prompts,
+                        config=config,
+                        logger=logger,
+                        history=task_hist,
+                        session_ctx=task_ctx,
+                        slash_ctx=sched_ctx,
+                        shutdown=shutdown,
+                        task_label=name,
+                    )
                     print(f"[SCHEDULER] Task '{name}' completed.\n")
                     logger.log(f"[SCHEDULER] Task '{name}' completed.")
                 finally:
@@ -539,32 +571,14 @@ def run_schedule_item_mode(
         persist_path = get_chatsessions_day_dir() / f"task_{item_name}.json",
     )
     sched_ctx = _make_scheduler_slash_ctx(config, logger, task_hist, task_ctx)
-
-    for step_index, prompt_text in enumerate(prompts, start=1):
-        short = prompt_text[:70] + ("..." if len(prompt_text) > 70 else "")
-        print(f"  Step {step_index}/{len(prompts)}: {short}")
-        logger.log_file_only(f"[Step {step_index}] {prompt_text}")
-
-        if handle_slash(prompt_text, sched_ctx):
-            print(f"  [slash command handled]")
-            continue
-
-        response, p_tokens, _c, success, tps = orchestrate_prompt(
-            user_prompt=prompt_text,
-            config=config,
-            logger=logger,
-            conversation_history=task_hist.as_list() or None,
-            session_context=task_ctx,
-            quiet=True,
-        )
-
-        tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
-        preview = response[:120] + ("..." if len(response) > 120 else "")
-        print(f"  [{p_tokens:,} ctx tokens{tps_str}] {preview}")
-        print()
-
-        task_hist.add(prompt_text, response)
-
+    _run_task_prompts(
+        prompts=prompts,
+        config=config,
+        logger=logger,
+        history=task_hist,
+        session_ctx=task_ctx,
+        slash_ctx=sched_ctx,
+    )
     print(f"Task '{item_name}' completed.")
     logger.log(f"[SCHEDULE ITEM] Task '{item_name}' completed.")
 

@@ -99,16 +99,6 @@ def _build_catalog_gates(skills_payload: dict) -> tuple[set[tuple[str, str, str]
     return allowlist, index
 
 
-# ----------------------------------------------------------------------------------------------------
-def _build_allowlist(skills_payload: dict) -> set[tuple[str, str, str]]:
-    return _build_catalog_gates(skills_payload)[0]
-
-
-# ----------------------------------------------------------------------------------------------------
-def _build_tool_index(skills_payload: dict) -> dict[str, tuple[str, str]]:
-    """Map tool names to (module_path, function_name)."""
-    return _build_catalog_gates(skills_payload)[1]
-
 
 # ----------------------------------------------------------------------------------------------------
 def build_catalog_gates(
@@ -126,6 +116,23 @@ def build_catalog_gates(
 # ====================================================================================================
 # MARK: EXECUTION
 # ====================================================================================================
+
+# ----------------------------------------------------------------------------------------------------
+def _sanitize_skill_result(value: str) -> str:
+    # Replace characters that cause Ollama tool-call JSON parse failures when the model
+    # reproduces a prior skill result verbatim as a function argument.
+    # Straight double-quote is the primary culprit (breaks JSON string field boundaries).
+    # Unicode typographic variants are normalized as a defensive sweep.
+    value = value.replace('"',      "'")    # straight double quote
+    value = value.replace("\u201c", "'")    # left double quote
+    value = value.replace("\u201d", "'")    # right double quote
+    value = value.replace("\u2018", "'")    # left single quote
+    value = value.replace("\u2019", "'")    # right single quote
+    value = value.replace("\u2014", " - ")  # em dash
+    value = value.replace("\u2013", " - ")  # en dash
+    return value
+
+
 def execute_tool_call(
     tool_name: str,
     arguments: dict,
@@ -160,8 +167,9 @@ def execute_tool_call(
     }
 
     # Load (with caching) and invoke the skill function - the allow-list check above is the security gate.
-    fn     = _load_callable_from_module_path(module_path, function_name)
-    result = fn(**resolved_args)
+    fn         = _load_callable_from_module_path(module_path, function_name)
+    raw_result = fn(**resolved_args)
+    result     = _sanitize_skill_result(raw_result) if isinstance(raw_result, str) else raw_result
 
     return {
         "tool":      tool_name,

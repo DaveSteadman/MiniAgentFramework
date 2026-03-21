@@ -52,6 +52,7 @@ Single JSON payload for orchestration planning.
       "trigger_keyword": "file",
       "functions": [
         "append_file(\"data/log.txt\", \"new entry\")",
+        "append_file(\"data/log.txt\", \"{scratch:codeoutput}\")",
         "append_file(...)",
         "append_file(path, content)",
         "append_file(path: str, content: str)",
@@ -68,6 +69,7 @@ Single JSON payload for orchestration planning.
         "read_file(path, max_chars = 8000)",
         "read_file(path: str, max_chars: int = 8000)",
         "read_file(path=\"data/log.txt\")",
+        "write_file(\"data/result.txt\", \"{scratch:searchresult}\")",
         "write_file(\"notes/meeting.txt\", \"Discuss project timeline\")",
         "write_file(...)",
         "write_file(path, content)",
@@ -109,6 +111,42 @@ Single JSON payload for orchestration planning.
         "`recall_relevant_memories(...)` - returns a formatted ranked list of memories with category and relevance score.",
         "`extract_environment_facts(...)` - returns a list of candidate environment facts extracted from the prompt.",
         "`get_memory_store_text()` - returns the full pretty-printed JSON of the memory store."
+      ]
+    },
+    {
+      "skill_name": "Scratchpad Skill",
+      "relative_path": "code/skills/Scratchpad/skill.md",
+      "purpose": "Store and retrieve named working values within a session so that bulk data returned by other skills",
+      "module": "code/skills/Scratchpad/scratchpad_skill.py",
+      "trigger_keyword": "scratchpad",
+      "functions": [
+        "scratch_delete(\"webresult\")",
+        "scratch_delete(...)",
+        "scratch_delete(key)",
+        "scratch_delete(key: str)",
+        "scratch_dump()",
+        "scratch_list()",
+        "scratch_load(\"webresult\")",
+        "scratch_load(...)",
+        "scratch_load(key)",
+        "scratch_load(key: str)",
+        "scratch_save(\"webresult\", \"page content here...\")",
+        "scratch_save(...)",
+        "scratch_save(key, value)",
+        "scratch_save(key: str, value: str)",
+        "scratch_search(\"error\")",
+        "scratch_search(...)",
+        "scratch_search(substring)",
+        "scratch_search(substring: str)"
+      ],
+      "inputs": [],
+      "outputs": [
+        "`scratch_save(...)` - returns `\"Saved to scratchpad key '<key>' (N chars)\"` on success, or `\"Error: ...\"`.",
+        "`scratch_load(...)` - returns the stored string value, or an error message if the key is not found.",
+        "`scratch_list()` - returns a formatted list of active keys and their sizes, or `\"Scratchpad is empty.\"`.",
+        "`scratch_dump()` - returns every key followed by its full stored value. Use to inspect scratchpad contents for debugging.",
+        "`scratch_delete(...)` - returns confirmation or `\"Scratchpad key '<key>' not found - nothing deleted.\"`.",
+        "`scratch_search(...)` - returns a formatted list of matching key names and sizes, or `\"No scratchpad keys contain the substring '<text>'.\"` when no match is found."
       ]
     },
     {
@@ -178,6 +216,7 @@ Single JSON payload for orchestration planning.
         "search_web(...)",
         "search_web(query, max_results = 5, timeout_seconds = 15)",
         "search_web(query: str, max_results: int = 5, timeout_seconds: int = 15)",
+        "search_web_text(\"Python 3.14 release notes\")",
         "search_web_text(\"Python 3.14 release notes\", max_results=3)",
         "search_web_text(...)",
         "search_web_text(query, max_results = 5, timeout_seconds = 15)",

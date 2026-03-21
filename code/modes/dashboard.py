@@ -59,6 +59,7 @@ from workspace_utils import get_chatsessions_dir
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
 from workspace_utils import get_workspace_root
+from workspace_utils import trunc
 
 
 # ====================================================================================================
@@ -335,7 +336,7 @@ def run_dashboard_mode(
                     for step_index, prompt_text in enumerate(prompts, start=1):
                         if shutdown.is_set():
                             break
-                        app.add_log_line(f"  [Step {step_index}] {prompt_text[:70]}", ui_colors.DIM)
+                        app.add_log_line(f"  [Step {step_index}] {trunc(prompt_text, 70)}", ui_colors.DIM)
                         task_logger.log_file_only(f"[Step {step_index}] {prompt_text}")
 
                         if handle_slash(prompt_text, sched_ctx):
@@ -358,7 +359,7 @@ def run_dashboard_mode(
                         task_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
                         app.add_log_line(f"  \u2713 [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
                         app.add_chat_line(
-                            f"Sched\u25b6 [{name} step {step_index}] {response[:100]}",
+                            f"Sched\u25b6 [{name} step {step_index}] {trunc(response, 100)}",
                             ui_colors.BLUE,
                         )
 

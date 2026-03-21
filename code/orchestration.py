@@ -31,12 +31,14 @@ from ollama_client import list_ollama_models
 from ollama_client import resolve_model_name
 from prompt_tokens import resolve_tokens
 from runtime_logger import SessionLogger
+from scratchpad import get_key_names as get_scratchpad_key_names
 from skill_executor import build_catalog_gates
 from skill_executor import execute_tool_call
 from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
 from skills.SystemInfo.system_info_skill import get_system_info_string
 from skills_catalog_builder import build_tool_definitions
+from workspace_utils import trunc
 
 
 # ====================================================================================================
@@ -181,16 +183,16 @@ class SessionContext:
 
         parts = []
         for t in recent:
-            lines = [f"Turn {t['turn']} | user: {t['user_prompt'][:100]}"]
+            lines = [f"Turn {t['turn']} | user: {trunc(t['user_prompt'], 100)}"]
             for o in t["skill_outputs"]:
                 skill   = o.get("skill", "?")
                 summary = o.get("summary", "")
                 lines.append(f"  [{skill}] {summary}")
                 for r in o.get("results", []):
-                    snippet = r.get("snippet", "")[:80]
+                    snippet = trunc(r.get("snippet", ""), 80)
                     lines.append(f"    · {r.get('url', '')}  \"{r.get('title', '')}\"  {snippet}")
                 if "content" in o:
-                    lines.append(f"    {o['content'][:1500]}")
+                    lines.append(f"    {trunc(o['content'], 1500)}")
             parts.append("\n".join(lines))
 
         return "Prior turn skill context (for follow-up reference):\n\n" + "\n\n".join(parts)
@@ -208,7 +210,7 @@ class SessionContext:
         entry: dict = {"skill": tool_name or f"{module}.{function}"}
         for key in ("query", "url", "path", "file_path", "domain", "topic"):
             if key in args:
-                entry[key] = str(args[key])[:200]
+                entry[key] = trunc(str(args[key]), 200)
                 break
 
         if result is None:
@@ -237,7 +239,7 @@ class SessionContext:
             entry["content"] = _truncate_words(result, self.MAX_CONTENT_WORDS)
             entry["summary"] = f"text output ({len(result)} chars)"
         else:
-            entry["summary"] = str(result)[:200]
+            entry["summary"] = trunc(str(result), 200)
 
         return entry
 
@@ -333,32 +335,27 @@ def _format_tool_outputs(tool_outputs: list[dict]) -> str:
         heading = f"{tool_name} -> {module}.{function}()" if tool_name else f"{module}.{function}()"
         lines.append(heading)
         for k, v in args.items():
-            v_str = repr(v)
-            if len(v_str) > 120:
-                v_str = v_str[:117] + "..."
+            v_str = trunc(repr(v), 120)
             lines.append(f"  {k} = {v_str}")
 
         if result is None:
             lines.append("  -> None")
         elif isinstance(result, str):
             result_stripped = result.strip()
-            preview_lines   = result_stripped.splitlines()[:4]
+            preview_lines   = result_stripped.splitlines()[:50]
             total_lines     = result_stripped.count("\n") + 1
             lines.append(f"  -> str  {len(result)} chars / {total_lines} lines")
             for pl in preview_lines:
-                if len(pl) > 110:
-                    pl = pl[:107] + "..."
-                lines.append(f"  {pl}")
-            if total_lines > 4:
-                lines.append(f"  ... ({total_lines - 4} more lines)")
+                lines.append(f"  {trunc(pl, 110)}")
+            if total_lines > 50:
+                lines.append(f"  ... ({total_lines - 50} more lines)")
         elif isinstance(result, dict):
             keys = list(result.keys())
             lines.append(f"  -> dict  [{', '.join(str(k) for k in keys)}]")
         elif isinstance(result, list):
             lines.append(f"  -> list  len={len(result)}")
         else:
-            v_str = str(result)[:110]
-            lines.append(f"  -> {type(result).__name__}: {v_str}")
+            lines.append(f"  -> {type(result).__name__}: {trunc(str(result), 110)}")
 
         lines.append("")
 
@@ -374,7 +371,7 @@ def _build_fallback_answer(user_prompt: str, tool_outputs: list[dict]) -> str:
     result into a readable block the user can act on, prefixed with a notice about partial output.
     """
     lines: list[str] = [
-        f"(Note: the model did not produce a synthesized answer for: \"{user_prompt[:80]}\")",
+        f"(Note: the model did not produce a synthesized answer for: \"{trunc(user_prompt, 80)}\")",
         "Raw tool results follow:",
         "",
     ]
@@ -397,19 +394,19 @@ def _build_fallback_answer(user_prompt: str, tool_outputs: list[dict]) -> str:
                     if url:
                         lines.append(f"    {url}")
                     if snippet:
-                        lines.append(f"    {str(snippet)[:200]}")
+                        lines.append(f"    {trunc(str(snippet), 200)}")
                 else:
-                    lines.append(f"  {str(item)[:200]}")
+                    lines.append(f"  {trunc(str(item), 200)}")
         elif isinstance(result, dict):
             for k, v in result.items():
-                lines.append(f"  {k}: {str(v)[:200]}")
+                lines.append(f"  {k}: {trunc(str(v), 200)}")
         elif isinstance(result, str):
             for ln in result.splitlines()[:20]:
                 lines.append(f"  {ln}")
             if result.count("\n") >= 20:
                 lines.append("  ...")
         elif result is not None:
-            lines.append(f"  {str(result)[:400]}")
+            lines.append(f"  {trunc(str(result), 400)}")
 
         lines.append("")
 
@@ -496,6 +493,9 @@ def orchestrate_prompt(
         "Do not add explanatory preamble - respond with direct answers only.",
         "Complete ALL steps in the user's request. If the user asks for output to be written "
         "to a file, that write must happen as a tool call before you give your final answer.",
+        "When a prompt asks about a person, place, event, concept, or historical figure - "
+        "always call a research skill (lookup_wikipedia or web_search) to fetch the content first. "
+        "Never generate biographical, historical, or factual content from memory.",
         "The current runtime system info (RAM, disk, OS, etc.) is already provided below - "
         "do not call get_system_info_dict unless the user explicitly asks to refresh it.",
     ]
@@ -511,6 +511,13 @@ def orchestrate_prompt(
     _routing_rules = _build_keyword_routing_rules(config.skills_payload)
     if _routing_rules:
         system_parts.append(f"\n{_routing_rules}")
+
+    _scratch_keys = get_scratchpad_key_names()
+    if _scratch_keys:
+        system_parts.append(
+            f"\nScratchpad keys currently stored: {', '.join(_scratch_keys)}\n"
+            "Reference them in skill arguments using {scratch:key} or load them with scratch_load()."
+        )
 
     system_message = "\n".join(system_parts)
 
@@ -552,6 +559,10 @@ def orchestrate_prompt(
         final_tps          = result.tokens_per_second
 
         _log(f"Round {round_num} TPS: {final_tps:.1f} tok/s  ({result.completion_tokens} tokens)")
+
+        _thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
+        if _thinking:
+            _log_file_only(f"[thinking]\n{_thinking}\n[/thinking]")
 
         if not result.tool_calls:
             # Model answered directly - this is the final response.
@@ -595,7 +606,7 @@ def orchestrate_prompt(
                 result_content = f"Error executing {func_name}: {exc}"
                 output = {"function": func_name, "module": "", "arguments": arguments, "result": result_content}
 
-            _log(f"     {str(result_content)[:120]}")
+            _log(f"     {trunc(str(result_content), 120)}")
             round_outputs.append(output)
             tool_outputs.append(output)
             messages.append({
@@ -637,6 +648,9 @@ def orchestrate_prompt(
             completion_tokens += result.completion_tokens
             final_tps          = result.tokens_per_second
             _log_section("FINAL RESPONSE")
+            _thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
+            if _thinking:
+                _log_file_only(f"[thinking]\n{_thinking}\n[/thinking]")
             _log(final_response)
 
             # Last-resort fallback: if the model produced no content (e.g. Ollama thinking

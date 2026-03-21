@@ -35,6 +35,12 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `phrase or concept`
 - `another phrase`
 
+## Scratchpad integration
+<Describe whether and how this skill interacts with the scratchpad.
+If outputs are large or reused in downstream steps, show the park-then-reference pattern.
+If the skill is not a scratchpad candidate, state that clearly and explain why
+(e.g. output is a small struct, runs in a subprocess, or is the scratchpad itself).>
+
 ## Examples
 - `function_one("arg1", "arg2")` - plain English description of what this achieves
   - Returns: `"expected output string"`

@@ -46,3 +46,6 @@ Use `str | None` union syntax, not `Optional[str]`.
 
 ## No EM Dashes
 The - character will be replaced with - in all cases.
+
+## Standard Characters
+Minimuse use of directional quote characters, using standard single and double quotes wherever possible.

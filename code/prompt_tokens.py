@@ -7,6 +7,7 @@
 #
 #   resolve_tokens(text)       -- replaces {today}, {yesterday}, {month_year}, {month},
 #                                 {year}, and {week} in any string with their current values.
+#                                 Also resolves {scratch:key} to the current scratchpad value.
 #                                 Applied automatically to user prompts in orchestration.py
 #                                 and to string skill arguments in skill_executor.py.
 #
@@ -30,7 +31,8 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import re
-from datetime import date as _date, timedelta as _timedelta
+from datetime import date as _date
+from datetime import timedelta as _timedelta
 
 
 # ====================================================================================================
@@ -45,6 +47,8 @@ _TOKEN_RE = re.compile(
     r"\{(today|yesterday|longdate|longdateyesterday|month_year|month|year|week)\}",
     re.IGNORECASE,
 )
+
+_SCRATCH_TOKEN_RE = re.compile(r"\{scratch:([a-zA-Z0-9_]+)\}", re.IGNORECASE)
 
 
 def resolve_tokens(text: str) -> str:
@@ -62,6 +66,10 @@ def resolve_tokens(text: str) -> str:
 
     Tokens are resolved at call time so that stored/scheduled prompts and queries
     stay perpetually current without manual edits.
+
+    Also resolves {scratch:key} to the current scratchpad value for that key.  Unrecognised
+    scratch keys are left as-is.  Resolution is single-pass and non-recursive - the substituted
+    value is never re-scanned, which prevents prompt-injection via stored content.
     """
     today     = _date.today()
     yesterday = today - _timedelta(days=1)
@@ -79,7 +87,21 @@ def resolve_tokens(text: str) -> str:
     def _replace(match: re.Match) -> str:
         return _values[match.group(1).lower()]
 
-    return _TOKEN_RE.sub(_replace, text)
+    # Single-pass date/time token resolution.
+    result = _TOKEN_RE.sub(_replace, text)
+
+    # Single-pass scratch token resolution.  Import is lazy to avoid a circular import at startup;
+    # scratchpad.py has no dependency on prompt_tokens.py.
+    if "{scratch:" in result:
+        from scratchpad import get_store  # noqa: PLC0415
+        store = get_store()
+        if store:
+            def _replace_scratch(m: re.Match) -> str:
+                val = store.get(m.group(1).lower())
+                return val if val is not None else m.group(0)
+            result = _SCRATCH_TOKEN_RE.sub(_replace_scratch, result)
+
+    return result
 
 
 # ====================================================================================================

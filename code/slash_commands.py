@@ -38,6 +38,8 @@
 from dataclasses import dataclass
 from typing import Callable
 
+from workspace_utils import trunc
+
 
 # ====================================================================================================
 # MARK: CONTEXT
@@ -266,6 +268,28 @@ def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _cmd_scratchdump(arg: str, ctx: SlashCommandContext) -> None:
+    from scratchpad import get_dump_enabled, set_dump_enabled, flush_now
+    from workspace_utils import get_controldata_dir
+
+    sub = arg.strip().lower()
+    if sub == "on":
+        set_dump_enabled(True)
+        dump_path = get_controldata_dir() / "scratchpad_dump.txt"
+        ctx.output("Scratchpad file dump enabled.", "success")
+        ctx.output(f"  Writing to: {dump_path}", "dim")
+        ctx.output("  File is overwritten on every scratch_save / scratch_delete / scratch_clear.", "dim")
+        flush_now()   # write current state immediately so user can confirm the file exists
+    elif sub == "off":
+        set_dump_enabled(False)
+        ctx.output("Scratchpad file dump disabled.", "success")
+    else:
+        state = "on" if get_dump_enabled() else "off"
+        ctx.output(f"Usage: /scratchdump <on|off>  |  current: {state}", "dim")
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _cmd_finalgen(arg: str, ctx: SlashCommandContext) -> None:
     sub = arg.strip().lower()
     if sub == "on":
@@ -361,7 +385,7 @@ def _cmd_recall(arg: str, ctx: SlashCommandContext) -> None:
 
     ctx.output(f"Session context: {n} turn(s) stored", "info")
     for t in sc.get_turns():
-        ctx.output(f"  Turn {t['turn']}: {t['user_prompt'][:80]}", "item")
+        ctx.output(f"  Turn {t['turn']}: {trunc(t['user_prompt'], 80)}", "item")
         for o in t["skill_outputs"]:
             skill   = o.get("skill", "?")
             summary = o.get("summary", "")
@@ -369,7 +393,7 @@ def _cmd_recall(arg: str, ctx: SlashCommandContext) -> None:
             extra   = f"  url: {url}" if url else ""
             ctx.output(f"    [{skill}] {summary}{extra}", "dim")
             for r in o.get("results", []):
-                ctx.output(f"      · {r.get('url', '')}  {r.get('title', '')[:60]}", "dim")
+                ctx.output(f"      \u00b7 {r.get('url', '')}  {trunc(r.get('title', ''), 60)}", "dim")
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -408,6 +432,7 @@ def _cmd_host(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
+    import re
     import subprocess
     import sys
     from pathlib import Path
@@ -464,6 +489,7 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output(f"Running test suite: {candidate.name} …", "info")
     if ctx.lock_input:
         ctx.lock_input()
+    _summary_re = re.compile(r"^\[TEST_SUMMARY\] passed=(\d+) total=(\d+)$")
     try:
         proc = subprocess.Popen(
             cmd,
@@ -472,10 +498,20 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
             text=True,
             encoding="utf-8",
         )
+        test_passed = test_total = None
         for line in proc.stdout:
-            ctx.output(line.rstrip(), "dim")
+            stripped = line.rstrip()
+            m = _summary_re.match(stripped)
+            if m:
+                test_passed = int(m.group(1))
+                test_total  = int(m.group(2))
+            else:
+                ctx.output(stripped, "dim")
         proc.wait()
-        if proc.returncode == 0:
+        if test_passed is not None:
+            level = "success" if test_passed == test_total else "error"
+            ctx.output(f"[Test: {candidate.name}  Passed {test_passed}/{test_total}]", level)
+        elif proc.returncode == 0:
             ctx.output("Test suite completed.", "success")
         else:
             ctx.output(f"Test suite exited with code {proc.returncode}.", "error")
@@ -626,7 +662,7 @@ def _cmd_tasks(arg: str, ctx: SlashCommandContext) -> None:
                 sched_str = stype
             prompts   = task.get("prompts", [])
             status    = "on " if enabled else "off"
-            first_p   = prompts[0][:60] + "..." if prompts and len(prompts[0]) > 60 else (prompts[0] if prompts else "(no prompts)")
+            first_p   = trunc(prompts[0], 60) if prompts else "(no prompts)"
             ctx.output(f"  [{status}]  {name:<28}  {sched_str:<18}  {first_p}", "item")
             total += 1
 
@@ -763,7 +799,7 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
         }
         _task_save(json_path, new_data)
         ctx.output(f"Task '{task_name}' created ({sched_str}).", "success")
-        ctx.output(f"  Prompt: {prompt_txt[:80]}{'...' if len(prompt_txt) > 80 else ''}", "dim")
+        ctx.output(f"  Prompt: {trunc(prompt_txt, 80)}", "dim")
         return
 
     # ---- run ----
@@ -832,6 +868,7 @@ _REGISTRY: dict[str, Callable] = {
     "/reskill":       _cmd_reskills,
     "/finalgen":      _cmd_finalgen,
     "/sandbox":       _cmd_sandbox,
+    "/scratchdump":   _cmd_scratchdump,
     "/deletelogs":    _cmd_deletelogs,
     "/test":          _cmd_test,
     "/recall":        _cmd_recall,
@@ -854,6 +891,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/reskill":       "Rebuild the skills catalog from skill.md files and hot-reload into session",
     "/finalgen":      "<on|off>  Enable/disable final LLM synthesis of skill output (default: on)",
     "/sandbox":       "<on|off>  Enable/disable Python code execution sandbox (import whitelist + blocked builtins)",
+    "/scratchdump":   "<on|off>  Write scratchpad contents to controldata/scratchpad_dump.txt on every change (default: off)",
     "/deletelogs":    "<days>  Delete log and chatsession date-folders older than N days (e.g. /deletelogs 10)",
     "/test":          "<prompts-file>  Run test_wrapper on a prompts file; streams results live",
     "/recall":        "Show a summary of prior skill outputs stored in this session's context",

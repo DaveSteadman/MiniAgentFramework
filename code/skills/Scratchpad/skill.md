@@ -1,0 +1,87 @@
+# Scratchpad Skill
+
+## Purpose
+Store and retrieve named working values within a session so that bulk data returned by other skills
+(web pages, file content, computation results) can be parked under a short key and referenced later
+without consuming context window space.  Use this skill whenever the plan involves multi-step tool
+chains where an intermediate result is needed again in a later step.  Do not use it for durable
+facts that should survive across sessions - use the Memory skill for that.
+
+## Trigger keyword: scratchpad
+
+## Interface
+- Module: `code/skills/Scratchpad/scratchpad_skill.py`
+- Functions:
+  - `scratch_save(key: str, value: str)`
+  - `scratch_load(key: str)`
+  - `scratch_list()`
+  - `scratch_dump()`
+  - `scratch_delete(key: str)`
+  - `scratch_search(substring: str)`
+
+## Parameters
+
+### `scratch_save(key, value)`
+- `key` *(required)* - short alphanumeric identifier for the value, e.g. `"webresult"` or `"step1_output"`. Letters, digits, and underscores only. Stored lowercased.
+- `value` *(required)* - the string content to store. Overwrites any previous value at that key.
+  **IMPORTANT**: the value must be the return value of a prior skill call (Wikipedia, WebSearch,
+  CodeExecute, FileAccess, etc.) - never pass LLM-generated text inline in this argument.
+  Inline text containing double-quote characters or apostrophes will produce a JSON parsing
+  error in the tool call and the save will fail entirely.
+
+### `scratch_load(key)`
+- `key` *(required)* - the key to retrieve. Returns an error message when the key does not exist.
+
+### `scratch_list()`
+No parameters.
+
+### `scratch_dump()`
+No parameters.  Returns the full content of every key - use this to inspect stored values during debugging.
+
+### `scratch_delete(key)`
+- `key` *(required)* - the key to remove from the scratchpad.
+
+### `scratch_search(substring)`
+- `substring` *(required)* - case-insensitive text to search for within stored values. Returns all keys whose value contains the substring.
+
+## Output
+- `scratch_save(...)` - returns `"Saved to scratchpad key '<key>' (N chars)"` on success, or `"Error: ..."`.
+- `scratch_load(...)` - returns the stored string value, or an error message if the key is not found.
+- `scratch_list()` - returns a formatted list of active keys and their sizes, or `"Scratchpad is empty."`.
+- `scratch_dump()` - returns every key followed by its full stored value. Use to inspect scratchpad contents for debugging.
+- `scratch_delete(...)` - returns confirmation or `"Scratchpad key '<key>' not found - nothing deleted."`.
+- `scratch_search(...)` - returns a formatted list of matching key names and sizes, or `"No scratchpad keys contain the substring '<text>'."` when no match is found.
+
+## Token substitution
+Any skill argument containing `{scratch:key}` is automatically resolved to the stored value
+before the skill function is called.  This lets you write:
+  `write_file("data/result.txt", "{scratch:webresult}")`
+without an explicit `scratch_load` step.
+
+## Triggers
+Invoke this skill when the prompt contains any of these concepts or phrases:
+- `save to scratchpad`, `store in scratchpad`, `park this result`
+- `load from scratchpad`, `retrieve from scratchpad`, `get scratchpad value`
+- `list scratchpad`, `what is in the scratchpad`
+- `dump scratchpad`, `show scratchpad contents`, `inspect scratchpad`, `debug scratchpad`
+- `delete from scratchpad`, `clear scratchpad key`
+- `search scratchpad`, `find scratchpad keys containing`, `which scratchpad keys have`
+
+## Scratchpad integration
+This is the scratchpad skill itself.  All other skills reference this one for their
+scratchpad integration patterns.  No self-referential use needed.
+
+## Examples
+- `scratch_save("webresult", "page content here...")` - parks a fetched page for later use
+  - Returns: `"Saved to scratchpad key 'webresult' (21 chars)"`
+- `scratch_load("webresult")` - retrieves the previously parked page
+  - Returns: `"page content here..."`
+- `scratch_list()` - shows key names and sizes only; use `scratch_dump()` to see the actual values
+  - Returns: `"Scratchpad keys:\n  webresult  (21 chars)"`
+- `scratch_dump()` - shows every key and its full content
+  - Returns: `"Scratchpad dump:\n\n[webresult]\npage content here..."`
+- `scratch_delete("webresult")` - removes the key
+  - Returns: `"Deleted scratchpad key 'webresult'."`
+- `write_file("data/out.txt", "{scratch:webresult}")` - FileAccess write using token substitution, no extra scratch_load needed
+- `scratch_search("error")` - find all keys containing "error" in their value
+  - Returns: `"Keys matching 'error':\n  logdata  (312 chars)"`

@@ -38,6 +38,12 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `what month is it`, `current month`, `month name`
 - `day of the week`, `day name`
 
+## Scratchpad integration
+Not typically applicable - output is a small dict or a short string.  If this skill is one
+step in a multi-step plan that builds a larger composite string (e.g. a timestamped report),
+use `scratch_save` to park the date/time string alongside other collected values before
+assembling the final output.
+
 ## Examples
 - `get_datetime_data()` - get the current date and time
   - Returns: `{"date": "2026-03-21", "time": "14:30:00"}`

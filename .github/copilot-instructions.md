@@ -4,6 +4,7 @@ Follow all rules in CODE_CONVENTIONS.md exactly. Key rules reproduced here for e
 
 ## Formatting
 - No em dashes (—) anywhere. Use a plain hyphen-minus (-) instead.
+- No typographic/curly quotes anywhere - not in .py, .md, or .json files. Use only straight ASCII quotes (" and '). This applies to all generated and edited content including skill.md files, comments, and documentation.
 - Double quotes for all string literals. Never single quotes.
 - One symbol per import line - never `from X import A, B, C`.
 - Stdlib imports first, blank line, then project imports.

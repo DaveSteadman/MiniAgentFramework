@@ -18,11 +18,11 @@ Interface for all file read, write, append, and search operations. All paths are
 
 ### `write_file(path, content)`
 - `path` *(required)* - workspace-relative path. A bare name like `"x.txt"` resolves to `data/x.txt`. A path starting with `"./"` resolves from workspace root.
-- `content` *(required)* - content to write. Overwrites the file if it exists.
+- `content` *(required)* - content to write. Overwrites the file if it exists. Supports `{scratch:key}` token substitution - use `"{scratch:mykey}"` to write scratchpad content directly without calling `scratch_load` first.
 
 ### `append_file(path, content)`
 - `path` *(required)* - same path rules as `write_file`.
-- `content` *(required)* - content to append. A newline is added automatically if missing.
+- `content` *(required)* - content to append. A newline is added automatically if missing. Supports `{scratch:key}` token substitution - use `"{scratch:mykey}"` to append scratchpad content directly.
 
 ### `read_file(path, max_chars = 8000)`
 - `path` *(required)* - same path rules as `write_file`.
@@ -49,6 +49,14 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `append to file`, `add to file`
 - `read file`, `show file`, `open file`, `contents of`
 - `find file`, `find folder`, `locate file`, `search for file`
+
+## Scratchpad integration
+The `content` argument of `write_file` and `append_file` supports `{scratch:key}` token substitution.
+This means you can park a large result (web search, code output, file content) with `scratch_save`,
+then write it to disk without a separate `scratch_load` call.
+
+- `write_file("data/result.txt", "{scratch:searchresult}")` - writes the stored value directly
+- `append_file("data/log.txt", "{scratch:codeoutput}")` - appends the stored value directly
 
 ## Examples
 - `write_file("notes/meeting.txt", "Discuss project timeline")` - creates or overwrites the file

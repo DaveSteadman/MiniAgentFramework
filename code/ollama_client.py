@@ -33,6 +33,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+from workspace_utils import trunc
+
 
 # ====================================================================================================
 # MARK: CONSTANTS
@@ -480,7 +482,7 @@ def call_ollama_extended(
     ensure_ollama_running(host=host, start_if_needed=True)
 
     if _llm_call_log_fn is not None:
-        preview = prompt.replace("\n", " ")[:32]
+        preview = trunc(prompt.replace("\n", " "), 32)
         ctx_str = f"{num_ctx:,}" if num_ctx is not None else "default"
         try:
             _llm_call_log_fn(f"[LLM call] {model_name} | ctx={ctx_str} | {preview!r}")
@@ -579,7 +581,7 @@ class ChatCallResult:
         content = (self.message.get("content") or "").strip()
         if content:
             return content
-        thinking = (self.message.get("thinking") or "").strip()
+        thinking = (self.message.get("thinking") or self.message.get("reasoning") or "").strip()
         if thinking:
             # Strip <think>...</think> wrapper if present, then return the raw reasoning as
             # a last-resort answer so the caller always gets something actionable.
@@ -615,7 +617,7 @@ def call_llm_chat(
 
     if _llm_call_log_fn is not None:
         last_user = next(
-            (m.get("content", "")[:32] for m in reversed(messages) if m.get("role") == "user"), ""
+            (trunc(m.get("content", ""), 32) for m in reversed(messages) if m.get("role") == "user"), ""
         )
         ctx_str  = f"{num_ctx:,}" if num_ctx is not None else "default"
         tool_str = f" | {len(tools)} tools" if tools else ""
@@ -676,7 +678,7 @@ def call_llm_chat(
     if not (message.get("content") or "").strip() and not (message.get("tool_calls") or []):
         log_to_session(f"[debug] empty content - message keys: {list(message.keys())!r}; "
                        f"finish_reason={finish_reason!r}; "
-                       f"thinking_preview={str(message.get('thinking', ''))[:120]!r}")
+                       f"thinking_preview={trunc(str(message.get('thinking', '')), 120)!r}")
 
     usage             = body.get("usage") or {}
     prompt_tokens     = usage.get("prompt_tokens", 0)

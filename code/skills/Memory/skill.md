@@ -42,6 +42,12 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `my name is`, `I prefer`, `our project is`, `the default model is`
 - `show memory`, `memory store`, `what have you stored`
 
+## Scratchpad integration
+Not applicable.  Memory persists durable facts across sessions in `memory_store.json`.
+Scratchpad holds in-session working values in RAM.  They serve different lifetimes and
+should not be substituted for each other.  Use Memory for facts that must outlive a session;
+use Scratchpad for intermediate results within a single session.
+
 ## Examples
 - `store_prompt_memories("Our workspace path is c:/Util/GithubRepos/MiniAgentFramework")` - stores a new environment fact
   - Returns: `"Stored 1 new memory fact(s)."`

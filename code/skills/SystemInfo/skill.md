@@ -33,6 +33,12 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `Python version`, `Ollama version`, `what OS`, `operating system`
 - `can we fit`, `do we have enough`, `is there enough space`
 
+## Scratchpad integration
+Not typically applicable - output is a small dict.  If system info is one step in a larger
+report-building chain (e.g. fetch stats, compute headroom, write to file), park the formatted
+summary string with `scratch_save` so it can be included in the final assembled output via
+`{scratch:key}` without re-invoking the skill.
+
 ## Examples
 - `get_system_info_dict()` - retrieve all system metrics
   - Returns: `{"os": "Windows", "python_version": "3.14.2", "ollama_version": "0.17.5", "ram_used_gb": 12.34, "ram_available_gb": 19.66, "disk_used_gb": 110.25, "disk_available_gb": 401.75}`

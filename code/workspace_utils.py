@@ -109,3 +109,13 @@ def normalize_module_path(module_path: str) -> str:
     if normalized.endswith(".py"):
         normalized = normalized[:-3]
     return normalized
+
+
+# ====================================================================================================
+# MARK: STRING UTILITIES
+# ====================================================================================================
+def trunc(s: str, n: int) -> str:
+    """Return s capped to n characters, appending '...' when truncated."""
+    if len(s) <= n:
+        return s
+    return s[:n - 3] + "..."

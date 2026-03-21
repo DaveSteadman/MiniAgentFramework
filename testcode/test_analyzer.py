@@ -39,6 +39,10 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / "code"))
+from workspace_utils import trunc  # noqa: E402
+
 
 # ====================================================================================================
 # MARK: CONSTANTS
@@ -344,7 +348,7 @@ def analyze_results_file(csv_path: Path) -> tuple[Path, Path]:
             outcome        = "FAIL"
             failure_reason = "Orchestration validation failed (from log)"
 
-        preview = final_output.replace("\n", " ").replace("\r", "")[:120]
+        preview = trunc(final_output.replace("\n", " ").replace("\r", ""), 120)
 
         analysis_rows.append({
             "timestamp":           timestamp,
@@ -400,7 +404,7 @@ def print_summary(analysis_rows: list[dict], analysis_path: Path, gap_path: Path
     for row in analysis_rows:
         icon = {"PASS": "OK  ", "FAIL": "FAIL", "TIMEOUT": "TIME", "GAP": "GAP "}.get(row["outcome"], "??? ")
         skills = row["skills_selected"] or "(none)"
-        print(f"  [{icon}]  {row['prompt'][:55]:<55}  skills: {skills}")
+        print(f"  [{icon}]  {trunc(row['prompt'], 55):<55}  skills: {skills}")
         if row["failure_reason"]:
             print(f"           -> {row['failure_reason']}")
 

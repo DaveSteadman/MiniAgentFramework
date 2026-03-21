@@ -4,7 +4,7 @@
 - Execute a self-contained Python code snippet and return the captured stdout.
 - **Always prefer code over a direct answer for any calculation, sequence, table, string operation, or data generation task** - even when the answer seems obvious from training knowledge. Running code is more reliable and verifiable than recall.
 - Only Python stdlib is available; third-party packages (numpy, pandas, sympy) are not.
-- When paired with FileAccess, call this skill first to generate the content, then pass its output to a FileAccess write call.
+- When paired with FileAccess, call this skill first to generate the content, then park the output with `scratch_save`, and pass `{scratch:key}` as the content argument to `write_file` - this avoids carrying the full output string as an inline argument through the tool-calling loop.
 - Code should strongly avoid IF statements, loops, or function calls; favouring code that will execute with high reliability.
 
 ## Trigger keyword: calculate
@@ -54,7 +54,15 @@ Use `run_python_snippet` by default whenever the task involves any of the follow
 
 When in doubt: write code and run it rather than recalling the answer.
 
+## Scratchpad integration
+Code output can be large (generated tables, reports, CSV rows).  When the result will be
+used in a downstream step, park it with `scratch_save` immediately after execution, then pass
+`{scratch:key}` as the `content` argument to `write_file` or `append_file` - this avoids
+carrying the full output string inline through subsequent tool-calling rounds.
+
+- `run_python_snippet(...)` → `scratch_save("codeout", <output>)` → `write_file("data/result.txt", "{scratch:codeout}")`
+
 ## Examples
 - `run_python_snippet(code="import math\nfor i in range(1, 6):\n    print(i, math.factorial(i))")` - print factorials 1-5
   - Returns: `"1 1\n2 2\n3 6\n4 24\n5 120"`
-- `run_python_snippet(code="print('index,square')\nfor i in range(1, 6):\n    print(i, i*i)")` - generate CSV content for a FileAccess write call
+- `run_python_snippet(code="print('index,square')\nfor i in range(1, 6):\n    print(i, i*i)")` - generate CSV content; park with scratch_save then pass to write_file

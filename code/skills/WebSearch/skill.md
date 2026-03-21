@@ -32,6 +32,14 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `search the web for`, `find information about`, `look up`
 - `what is the latest news on`, `search for`, `find recent`
 
+## Scratchpad integration
+Search results can be large.  When the result will be referenced in a later step (summarise,
+extract a field, write to file), park it immediately with `scratch_save` so the full text does
+not have to be re-fetched or carried as an inline string through subsequent planning rounds.
+
+- `search_web_text("Python 3.14 release notes")` → `scratch_save("searchresult", <output>)` → use `{scratch:searchresult}` in downstream steps
+- `write_file("data/results.txt", "{scratch:searchresult}")` - write parked search result without an extra `scratch_load` call
+
 ## Examples
 - `search_web_text("Python 3.14 release notes", max_results=3)` - top 3 DuckDuckGo results as formatted text
   - Returns: `"Web search results for: Python 3.14 release notes\n\n[1] ..."`

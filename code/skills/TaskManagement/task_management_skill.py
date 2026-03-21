@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 
 from workspace_utils import get_schedules_dir
+from workspace_utils import trunc
 
 
 # ====================================================================================================
@@ -134,7 +135,7 @@ def list_tasks() -> str:
             prompts  = task.get("prompts", [])
             status   = "on " if enabled else "off"
             sched    = _schedule_str(schedule)
-            preview  = prompts[0][:70] + "..." if prompts and len(prompts[0]) > 70 else (prompts[0] if prompts else "(no prompts)")
+            preview  = trunc(prompts[0], 70) if prompts else "(no prompts)"
             lines.append(f"  [{status}]  {name:<28}  {sched:<18}  {preview}")
             total += 1
 

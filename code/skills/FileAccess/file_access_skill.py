@@ -63,9 +63,9 @@ def _resolve_safe_path(file_path: str) -> Path:
             candidate = (DEFAULT_DATA_DIR / normalized).resolve()
 
     try:
-        candidate.relative_to(WORKSPACE_ROOT)
+        candidate.relative_to(DEFAULT_DATA_DIR)
     except ValueError as path_error:
-        raise ValueError(f"Path escapes workspace root and is not allowed: {file_path}") from path_error
+        raise ValueError(f"Path escapes data directory and is not allowed: {file_path}") from path_error
 
     return candidate
 
@@ -165,31 +165,34 @@ def find_files(keywords: list[str], search_root: str = "") -> str:
     """Search the workspace for files whose name contains all of the given keyword fragments.
 
     Returns a newline-separated list of matching workspace-relative paths.
+    Pass an empty list (or omit keywords) to list all files.
     Pass search_root (e.g. 'data') to restrict the search to a subdirectory.
     """
     keywords_clean = [str(k).strip().lower() for k in (keywords or []) if str(k).strip()]
-    if not keywords_clean:
-        return "Error: keywords must not be empty."
 
-    if search_root:
+    if search_root and search_root.strip() not in (".", ""):
         try:
             base = _resolve_safe_path(search_root if "/" in search_root else search_root + "/placeholder")
             base = base.parent if base.suffix else base
         except ValueError:
             return f"Error: search_root '{search_root}' escapes workspace."
     else:
-        base = WORKSPACE_ROOT
+        base = DEFAULT_DATA_DIR
 
     matches = [
         p.relative_to(WORKSPACE_ROOT).as_posix()
         for p in sorted(base.rglob("*"))
         if p.is_file()
-        and all(k in p.name.lower() for k in keywords_clean)
+        and (not keywords_clean or all(k in p.name.lower() for k in keywords_clean))
     ]
 
     label = ", ".join(f"'{k}'" for k in keywords_clean)
     if not matches:
-        return f"No files found matching all of {label}" + (f" under {search_root}" if search_root else "") + "."
+        return (
+            f"No files found matching all of {label}" + (f" under {search_root}" if search_root else "") + "."
+            if keywords_clean
+            else "No files found" + (f" under {search_root}" if search_root else "") + "."
+        )
     return "\n".join(matches)
 
 
@@ -198,29 +201,32 @@ def find_folders(keywords: list[str], search_root: str = "") -> str:
     """Search the workspace for folders whose name contains all of the given keyword fragments.
 
     Returns a newline-separated list of matching workspace-relative paths.
+    Pass an empty list (or omit keywords) to list all folders.
     Pass search_root (e.g. 'data') to restrict the search to a subdirectory.
     """
     keywords_clean = [str(k).strip().lower() for k in (keywords or []) if str(k).strip()]
-    if not keywords_clean:
-        return "Error: keywords must not be empty."
 
-    if search_root:
+    if search_root and search_root.strip() not in (".", ""):
         try:
             base = _resolve_safe_path(search_root if "/" in search_root else search_root + "/placeholder")
             base = base.parent if base.suffix else base
         except ValueError:
             return f"Error: search_root '{search_root}' escapes workspace."
     else:
-        base = WORKSPACE_ROOT
+        base = DEFAULT_DATA_DIR
 
     matches = [
         p.relative_to(WORKSPACE_ROOT).as_posix()
         for p in sorted(base.rglob("*"))
         if p.is_dir()
-        and all(k in p.name.lower() for k in keywords_clean)
+        and (not keywords_clean or all(k in p.name.lower() for k in keywords_clean))
     ]
 
     label = ", ".join(f"'{k}'" for k in keywords_clean)
     if not matches:
-        return f"No folders found matching all of {label}" + (f" under {search_root}" if search_root else "") + "."
+        return (
+            f"No folders found matching all of {label}" + (f" under {search_root}" if search_root else "") + "."
+            if keywords_clean
+            else "No folders found" + (f" under {search_root}" if search_root else "") + "."
+        )
     return "\n".join(matches)

@@ -57,6 +57,12 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `enable task`, `disable task`, `turn on task`, `turn off task`
 - `update task`, `change schedule`, `delete task`, `remove task`
 
+## Scratchpad integration
+Not applicable for scheduled tasks.  Each task fires in a fresh subprocess where the
+scratchpad `_STORE` is always empty - values saved by a prior skill call within the
+scheduled prompt will not survive to a subsequent one.  Scratchpad can be used normally
+when TaskManagement is invoked as one step within an interactive session plan.
+
 ## Examples
 - `list_tasks()` - show all scheduled tasks
 - `get_task("PerformanceHeadroom")` - show full details of the named task

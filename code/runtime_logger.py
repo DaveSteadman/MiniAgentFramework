@@ -34,17 +34,17 @@ HORIZONTAL_SEPARATOR = "-" * 100
 class _TeeWriter:
     """Wraps sys.stdout so that print() calls go to both the console and the log file."""
 
-    def __init__(self, original, file_path: Path):
-        self._original  = original
-        self._file_path = file_path
+    def __init__(self, original, file_handle):
+        self._original      = original
+        self._file_handle   = file_handle
 
     def write(self, text: str) -> None:
         self._original.write(text)
-        with self._file_path.open("a", encoding="utf-8") as handle:
-            handle.write(text)
+        self._file_handle.write(text)
 
     def flush(self) -> None:
         self._original.flush()
+        self._file_handle.flush()
 
     @property
     def encoding(self) -> str:
@@ -62,6 +62,17 @@ class SessionLogger:
     def __init__(self, file_path: Path):
         self.file_path = file_path
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._handle   = self.file_path.open("a", encoding="utf-8")
+
+    # ----------------------------------------------------------------------------------------------------
+    def close(self) -> None:
+        self._handle.close()
+
+    def __del__(self) -> None:
+        try:
+            self._handle.close()
+        except Exception:
+            pass
 
     # ----------------------------------------------------------------------------------------------------
     def log(self, message: str = "") -> None:
@@ -74,8 +85,8 @@ class SessionLogger:
             safe_text = text.encode(output_encoding, errors="replace").decode(output_encoding, errors="replace")
             print(safe_text)
 
-        with self.file_path.open("a", encoding="utf-8") as handle:
-            handle.write(text + "\n")
+        self._handle.write(text + "\n")
+        self._handle.flush()
 
     # ----------------------------------------------------------------------------------------------------
     def log_section(self, title: str) -> None:
@@ -96,8 +107,8 @@ class SessionLogger:
     def log_file_only(self, message: str = "") -> None:
         """Write to the log file only - no stdout. Used for verbose orchestration detail in chat mode."""
         text = str(message)
-        with self.file_path.open("a", encoding="utf-8") as handle:
-            handle.write(text + "\n")
+        self._handle.write(text + "\n")
+        self._handle.flush()
 
     # ----------------------------------------------------------------------------------------------------
     def log_section_file_only(self, title: str) -> None:
@@ -114,7 +125,7 @@ class SessionLogger:
         """Context manager: redirect sys.stdout so print() calls inside skill code go to both
         the console and the log file for the duration of the block."""
         original    = sys.stdout
-        sys.stdout  = _TeeWriter(original, self.file_path)
+        sys.stdout  = _TeeWriter(original, self._handle)
         try:
             yield
         finally:

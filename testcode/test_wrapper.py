@@ -230,8 +230,9 @@ def extract_final_output(stdout_text: str) -> str:
 # MARK: CSV OUTPUT
 # ====================================================================================================
 def build_output_path(output_dir: Path) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return output_dir / f"test_results_{timestamp}.csv"
+    now      = datetime.now()
+    date_dir = output_dir / now.strftime("%Y-%m-%d")
+    return date_dir / f"test_results_{now.strftime('%Y%m%d_%H%M%S')}.csv"
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -300,23 +301,31 @@ def run_tests(
     host_label  = f" (host: {ollama_host})" if ollama_host else ""
     print(f"Results file initialized: {output_path}{model_label}{host_label}")
 
-    total_items = len(prompts)
+    total_items  = len(prompts)
+    tests_run    = 0
+    tests_passed = 0
 
     for index, item in enumerate(prompts, start=1):
+        tests_run += 1
         if isinstance(item, dict):   # exchange
-            _run_exchange_item(
+            passed = _run_exchange_item(
                 item, index, total_items, output_path,
                 model=model, ollama_host=ollama_host, ollama_api_key=ollama_api_key,
             )
+            if passed:
+                tests_passed += 1
         else:                        # plain string
-            interrupted = _run_single_item(
+            interrupted, passed = _run_single_item(
                 str(item), index, total_items, output_path,
                 model=model, ollama_host=ollama_host, ollama_api_key=ollama_api_key,
             )
+            if passed:
+                tests_passed += 1
             if interrupted:
                 break
 
     print(f"\nResults written to: {output_path}")
+    print(f"[TEST_SUMMARY] passed={tests_passed} total={tests_run}")
     return output_path
 
 
@@ -327,7 +336,7 @@ def _run_single_item(
     total_items: int,
     output_path: Path,
     model, ollama_host, ollama_api_key,
-) -> bool:
+) -> tuple[bool, bool]:
     """Run a single standalone prompt.  Returns True if the run was interrupted."""
     run_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{run_timestamp}] Running prompt {index}/{total_items}: {prompt!r}")
@@ -350,14 +359,14 @@ def _run_single_item(
         status_label = "FAIL"
         print(f"  [{status_label}] duration={row['duration_seconds']}s  exit_code={row['exit_code']}")
         print("Interrupted by user, ending test run.")
-        return True
+        return True, False
     except Exception as e:
         row.update({"exit_code": 125, "stderr": f"Wrapper error: {e}"})
 
     append_csv_row(output_path=output_path, row=row)
     status_label = "OK" if row["exit_code"] == 0 else "FAIL"
     print(f"  [{status_label}] duration={row['duration_seconds']}s  exit_code={row['exit_code']}")
-    return False
+    return False, row["exit_code"] == 0
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -367,7 +376,7 @@ def _run_exchange_item(
     total_items: int,
     output_path: Path,
     model, ollama_host, ollama_api_key,
-) -> None:
+) -> bool:
     """Run a multi-turn exchange.  Writes one CSV row per turn."""
     name   = exchange.get("exchange", f"exchange_{index}")
     turns  = exchange.get("turns", [])
@@ -392,12 +401,15 @@ def _run_exchange_item(
     log_file      = extract_log_file(stdout_text=stdout)
     turn_outputs  = _parse_turn_outputs(stdout)
     per_turn_dur  = duration / n if n else duration
+    any_assert_fail = False
 
     for turn_idx, turn in enumerate(turns, start=1):
         user_prompt  = turn["user"]
         assert_expr  = turn.get("assert", "")
         final_output = turn_outputs.get(turn_idx, "")
         assert_result = _evaluate_assert(assert_expr, final_output, exit_code)
+        if assert_result == "FAIL":
+            any_assert_fail = True
 
         row = _base_row(run_timestamp, user_prompt, exchange_name=name, turn_index=turn_idx)
         row.update({
@@ -413,6 +425,8 @@ def _run_exchange_item(
         status_label = "OK" if exit_code == 0 else "FAIL"
         assert_label = f"  assert={assert_result}" if assert_expr else ""
         print(f"  [Turn {turn_idx}/{n}] [{status_label}]{assert_label}: {user_prompt!r}")
+
+    return exit_code == 0 and not any_assert_fail
 
 
 # ====================================================================================================

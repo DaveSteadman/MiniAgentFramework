@@ -32,6 +32,7 @@ from ollama_client import ensure_ollama_running
 from ollama_client import format_running_model_report
 from ollama_client import list_ollama_models
 from ollama_client import resolve_model_name
+from workspace_utils import trunc
 
 
 # ====================================================================================================
@@ -163,7 +164,7 @@ def run_model_check(model_name: str, prompt: str, num_ctx: int | None = None) ->
     if request_error:
         print(f"Request result:      ERROR - {request_error}")
     else:
-        print(f"Request result:      OK - {response_preview[:100]}")
+        print(f"Request result:      OK - {trunc(response_preview, 100)}")
 
 
 # ----------------------------------------------------------------------------------------------------
