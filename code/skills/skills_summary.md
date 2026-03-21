@@ -206,6 +206,23 @@ Single JSON payload for orchestration planning.
       ]
     },
     {
+      "skill_name": "WebFetch Skill",
+      "relative_path": "code/skills/WebFetch/skill.md",
+      "purpose": "Fetch a web page by URL and extract its readable prose content, stripping all HTML markup, navigation, scripts, advertisements, and other non-content noise. Returns clean text ready for LLM synthesis or summarization.",
+      "module": "code/skills/WebFetch/web_fetch_skill.py",
+      "trigger_keyword": "fetch",
+      "functions": [
+        "fetch_page_text(\"https://example.com/asyncio-guide\", max_words=2000)",
+        "fetch_page_text(url: str, max_words: int = 1000, timeout_seconds: int = 15, query: str | None = None)"
+      ],
+      "inputs": [],
+      "outputs": [
+        "When `query` is None: the readable body text extracted from the page, up to `max_words` words.",
+        "When `query` is set: a concise LLM-extracted answer targeted at the query, or `\"Not found on this page.\"`",
+        "A string beginning with `\"Error:\"` if the fetch or parse failed. Never raises."
+      ]
+    },
+    {
       "skill_name": "WebSearch Skill",
       "relative_path": "code/skills/WebSearch/skill.md",
       "purpose": "Search the web using DuckDuckGo and return ranked results with title, URL, and snippet. No API key required. Use `search_web_text` when results will be read directly by the LLM; use `search_web` when the caller needs structured data. This skill only returns results - it does not persist or save anything.",

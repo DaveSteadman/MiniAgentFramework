@@ -354,6 +354,17 @@ def _format_tool_outputs(tool_outputs: list[dict]) -> str:
             lines.append(f"  -> dict  [{', '.join(str(k) for k in keys)}]")
         elif isinstance(result, list):
             lines.append(f"  -> list  len={len(result)}")
+            for item in result:
+                if isinstance(item, dict):
+                    title   = item.get("title", "")
+                    url     = item.get("url", "")
+                    snippet = item.get("snippet") or item.get("body", "")
+                    if title:
+                        lines.append(f"  {trunc(title, 80)}")
+                    if url:
+                        lines.append(f"    {url}")
+                    if snippet:
+                        lines.append(f"    {trunc(snippet, 110)}")
         else:
             lines.append(f"  -> {type(result).__name__}: {trunc(str(result), 110)}")
 
@@ -485,19 +496,17 @@ def orchestrate_prompt(
 
     # -- Build system message --
     system_parts = [
-        "You are a helpful AI assistant with access to tools.",
-        "Use tools when they are the appropriate way to answer the user's request - "
-        "for real-time data, file operations, task management, computations, and web research.",
-        "After using tools, synthesize the results into a clear, direct answer.",
-        "Never claim a tool action succeeded unless the tool output explicitly confirms it.",
-        "Do not add explanatory preamble - respond with direct answers only.",
-        "Complete ALL steps in the user's request. If the user asks for output to be written "
-        "to a file, that write must happen as a tool call before you give your final answer.",
-        "When a prompt asks about a person, place, event, concept, or historical figure - "
-        "always call a research skill (lookup_wikipedia or web_search) to fetch the content first. "
-        "Never generate biographical, historical, or factual content from memory.",
-        "The current runtime system info (RAM, disk, OS, etc.) is already provided below - "
-        "do not call get_system_info_dict unless the user explicitly asks to refresh it.",
+        "You are a helpful AI assistant with access to tools. Follow these rules:",
+        "- Use tools when they are the appropriate way to answer the user's request - for real-time data, file operations, task management, computations, and web research.",
+        "- After using tools, synthesize the results into a clear, direct answer.",
+        "- Never claim a tool action succeeded unless the tool output explicitly confirms it.",
+        "- Do not add explanatory preamble - respond with direct answers only.",
+        "- Complete ALL steps in the user's request. If the user asks for output to be written to a file, that write must happen as a tool call before you give your final answer.",
+        "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research skill (lookup_wikipedia or web_search) to fetch the content first. Never generate biographical, historical, or factual content from memory.",
+        "- When search results return URLs, always fetch the most relevant URL using fetch_page_text with the query parameter set to your specific question (e.g. fetch_page_text(url=..., query=\"<your specific question here>\")). The query parameter runs an isolated extraction so only the relevant facts are returned - this avoids overloading the context with raw page text. Only run a new search if the extracted answer was 'Not found on this page' or clearly irrelevant.",
+        "- The python execution tool is more reliable for calculations than the model's internal math capabilities.",
+        "- The scratchpad tool can store intermediate results across steps.",
+        "- The current runtime system info (RAM, disk, OS, etc.) is already provided below - do not call get_system_info_dict unless the user explicitly asks to refresh it.",
     ]
     if ambient_system_info:
         system_parts.append(f"\nRuntime system context:\n{ambient_system_info}")

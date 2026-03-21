@@ -220,7 +220,13 @@ def _attrs_lower(tag) -> str:
 def _prune_noise_bs4(soup) -> None:
     """Remove known-noisy tags and heuristically identified layout containers in-place."""
     for tag in list(soup.find_all(list(SKIP_TAGS))):
-        tag.decompose()
+        # Void elements (link, meta) are self-closing in spec but html.parser treats them as
+        # open containers, mis-adopting subsequent content as children.  unwrap() preserves
+        # those children in the tree; decompose() would silently destroy them.
+        if tag.contents:
+            tag.unwrap()
+        else:
+            tag.decompose()
     for tag in list(soup.find_all(True)):
         if not hasattr(tag, "attrs") or tag.attrs is None:
             continue
