@@ -99,6 +99,12 @@ def lookup_wikipedia(topic: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     topic_clean = str(topic or "").strip()
     if not topic_clean:
         return "No Wikipedia data found: topic must not be empty."
+    # Coerce timeout defensively - some models send all parameters as strings
+    # regardless of the JSON Schema type hint.
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        timeout = DEFAULT_TIMEOUT
 
     candidates = _opensearch_candidates(topic_clean, timeout)
     if not candidates:

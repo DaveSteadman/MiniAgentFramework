@@ -365,7 +365,9 @@ def _python_type_to_json_schema(ptype: str) -> dict:
     ptype_lower = ptype_stripped.lower()
     if ptype_lower in ("bool", "boolean"):
         return {"type": "boolean"}
-    if ptype_lower in ("int", "float", "number"):
+    if ptype_lower in ("int",):
+        return {"type": "integer"}
+    if ptype_lower in ("float", "number"):
         return {"type": "number"}
     return {"type": "string"}
 
@@ -399,6 +401,12 @@ def _parse_tool_signature(sig: str) -> tuple[str, list[dict]] | None:
             ptype       = (pm.group(2) or "str").strip()
             has_default = "=" in part
             params.append({"name": pname, "type": ptype, "required": not has_default})
+
+        # If params_str was non-empty but nothing parsed, the signature is a
+        # placeholder like func(...) - treat it as an example and reject it so
+        # a properly-typed overload later in the list can win the seen_names slot.
+        if not params:
+            return None
 
     return func_name, params
 
