@@ -117,17 +117,17 @@ def fetch_page_text(
         {
             "role":    "system",
             "content": (
-                "You are a precise data extractor and filter. "
-                "Read the question carefully, then apply TWO steps:\n"
-                "1. FILTER: if the question targets a specific entity (a person, organisation, category, "
-                "or value), include ONLY rows where the relevant column matches that entity exactly. "
-                "Exclude every row that belongs to a different entity entirely.\n"
-                "2. EXTRACT: from the matching rows, pull all relevant columns into a markdown table. "
-                "Always retain the column that was used for filtering so the output is self-verifiable.\n"
-                "Additional rules:\n"
-                "- List every matching item individually - never group, compress, or summarise "
-                "multiple items into ranges or counts.\n"
-                "- If no rows match the filter, respond with exactly: Not found on this page."
+                "You are a precise information extractor. "
+                "Read the question and the page content, then decide which mode applies:\n"
+                "MODE A - FILTER (use when the question asks for a subset of a list or table): "
+                "include only the rows/entries where the relevant column matches the target entity exactly. "
+                "Never include rows belonging to a different entity. "
+                "List every matching item individually - never group, compress, or summarise into ranges or counts. "
+                "Always include the column used to filter so the output is self-verifiable.\n"
+                "MODE B - EXTRACT (use when the question asks about meaning, description, or explanation): "
+                "pull the directly relevant sentences or paragraphs from the page and present them concisely.\n"
+                "In both modes: if the answer is genuinely not present on this page, "
+                "respond with exactly: Not found on this page."
             ),
         },
         {

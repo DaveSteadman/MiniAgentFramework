@@ -29,6 +29,7 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import gzip
 import html as _html
 import re
 import urllib.parse
@@ -49,6 +50,7 @@ HTTP_HEADERS = {
     "User-Agent":      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate",
     "Connection":      "close",
 }
 
@@ -115,7 +117,13 @@ def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT) -> tuple[str, str]:
             if part.startswith("charset="):
                 charset = part[8:].strip() or "utf-8"
                 break
+        content_encoding = response.headers.get("Content-Encoding", "")
         raw = response.read()
+    if "gzip" in content_encoding:
+        raw = gzip.decompress(raw)
+    elif "deflate" in content_encoding:
+        import zlib
+        raw = zlib.decompress(raw)
     try:
         return raw.decode(charset, errors="replace"), final_url
     except LookupError:
