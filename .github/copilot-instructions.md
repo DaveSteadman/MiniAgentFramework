@@ -1,6 +1,6 @@
 # Copilot Instructions
 
-Follow all rules in CODE_CONVENTIONS.md exactly. Key rules reproduced here for enforcement:
+Code standards for this project:
 
 ## Formatting
 - No em dashes (—) anywhere. Use a plain hyphen-minus (-) instead.

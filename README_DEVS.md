@@ -1,8 +1,7 @@
 # MiniAgentFramework - Developer Notes
 
 For user-facing setup and usage see [README.md](README.md).
-
-Before writing or editing any code in this project, read [CODE_CONVENTIONS.md](CODE_CONVENTIONS.md).
+For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 
 ---
 
