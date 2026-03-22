@@ -1,0 +1,17 @@
+{
+  "tasks": [
+    {
+      "name": "AINews",
+      "enabled": false,
+      "schedule": {
+        "type": "daily",
+        "time": "07:00"
+      },
+      "prompts": [
+        "Today is {longdate}. Mine today's AI/ML research for developer-relevant content. Run ALL of the following searches and fetch the articles behind promising results:\n1. search_web('arXiv cs.AI cs.LG cs.CL new submissions {longdate}', max_results=8)\n2. search_web('Hugging Face papers daily {longdate}', max_results=5)\n3. search_web('DeepMind research blog {longdate}', max_results=4)\n4. search_web('Anthropic research {longdate}', max_results=4)\n5. search_web('Meta AI research paper {longdate}', max_results=4)\n6. search_web('Google AI research paper {longdate}', max_results=4)\n7. search_web('OpenAI research paper {longdate}', max_results=4)\nFor each result URL, fetch the page and evaluate it. KEEP articles that describe: a new paper, model, training technique, benchmark, dataset, or novel method. DISCARD: product launches, pricing news, opinion/hype posts, anything without a technical contribution. For each kept article, save it as a markdown file to webresearch/01-Mine/{today}/NNN-<short-title>.md where NNN is a zero-padded counter starting at 001. The markdown must include: the source URL, a full technical summary (300+ words), and any key numbers or metrics from the paper. If fewer than 8 qualifying articles are found from the above sources, also run: search_web('AI machine learning research paper {longdate}', max_results=10) and search_web('large language model benchmark {longdate}', max_results=6) to supplement.",
+        "Today is {longdate}. This is an analysis task - all source material is already in webresearch/01-Mine/{today}/. Read every markdown file there. Synthesize a developer-focused AI daily newsletter with 6 to 8 items. Deduplicate: if two articles cover the same paper or topic, merge them into one entry. For each item write approximately 400 words covering exactly three sub-sections: (1) What it is - the technical contribution explained precisely, with key architecture choices, metrics, or results; (2) Why it matters - its significance to the broader research landscape; (3) How to apply it - concrete ways an AI developer could use this work today, e.g. a technique to try, a dataset to pull, a library to evaluate, or a line of research to follow. Order items by practical developer relevance (most actionable first). Open with a 2-3 sentence executive summary of the day's theme. Save the complete newsletter to webresearch/02-Analysis/{today}/ai_daily.md.",
+        "Convert the AI news analysis at webresearch/02-Analysis/{today}/ai_daily.md to a polished HTML file. Use the dark angular template at controldata/html_template/tech_company_website_black_angular.jsx as the visual reference for style: dark background, angular geometric accents, monospace headings, high-contrast text. Each newsletter item should be a self-contained card section. Include a page header with the date {longdate} and a subtitle 'AI Research Daily - Developer Edition'. Save the output to webresearch/03-Presentation/{today}/ai_daily.html."
+      ]
+    }
+  ]
+}

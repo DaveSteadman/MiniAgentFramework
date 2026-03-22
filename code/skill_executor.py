@@ -77,11 +77,11 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
 
 
 # ----------------------------------------------------------------------------------------------------
-def _build_catalog_gates(skills_payload: dict) -> tuple[set[tuple[str, str, str]], dict[str, tuple[str, str]]]:
-    """Build both the security allow-list and the tool-name index in a single pass over the catalog.
+def _build_catalog_gates(skills_payload: dict) -> dict[str, tuple[str, str]]:
+    """Build the tool-name dispatch index in a single pass over the catalog.
 
-    Returns (empty_set, index) where index maps tool_name -> (module_path, function_name).
-    The set is returned for API compatibility; the index lookup is the security gate.
+    Returns a dict mapping tool_name -> (module_path, function_name).
+    The index lookup is the security gate: unknown names are rejected before any import.
     """
     index: dict[str, tuple[str, str]] = {}
 
@@ -93,15 +93,13 @@ def _build_catalog_gates(skills_payload: dict) -> tuple[set[tuple[str, str, str]
             if module and function_name:
                 index[function_name] = (module, function_name)
 
-    return set(), index
+    return index
 
 
 
 # ----------------------------------------------------------------------------------------------------
-def build_catalog_gates(
-    skills_payload: dict,
-) -> tuple[set[tuple[str, str, str]], dict[str, tuple[str, str]]]:
-    """Return the security allow-list and tool-name dispatch index for a skills payload.
+def build_catalog_gates(skills_payload: dict) -> dict[str, tuple[str, str]]:
+    """Return the tool-name dispatch index for a skills payload.
 
     Callers that invoke execute_tool_call multiple times for the same payload (e.g. the
     orchestration loop) should call this once and pass the result via the catalog_gates
@@ -143,18 +141,18 @@ def execute_tool_call(
     arguments: dict,
     skills_payload: dict,
     user_prompt: str = "",
-    catalog_gates: tuple[set[tuple[str, str, str]], dict[str, tuple[str, str]]] | None = None,
+    catalog_gates: dict[str, tuple[str, str]] | None = None,
 ) -> dict:
     """Execute one tool call and return the output record.
 
     The returned dict has keys: 'function', 'module', 'arguments', 'result'.
     Raises RuntimeError when the function is not allow-listed or cannot be loaded.
 
-    Pass a pre-built catalog_gates tuple (from build_catalog_gates) to avoid rebuilding
-    the allow-list and index on every call when executing multiple tools in one round.
+    Pass a pre-built catalog_gates dict (from build_catalog_gates) to avoid rebuilding
+    the index on every call when executing multiple tools in one round.
     """
-    # Use pre-built gates when provided; otherwise build them from the payload.
-    _, tool_index = catalog_gates if catalog_gates is not None else _build_catalog_gates(skills_payload)
+    # Use pre-built index when provided; otherwise build it from the payload.
+    tool_index = catalog_gates if catalog_gates is not None else _build_catalog_gates(skills_payload)
 
     # Resolve the tool name to its (module, function); fails fast for any unrecognised tool.
     resolved = tool_index.get(tool_name)

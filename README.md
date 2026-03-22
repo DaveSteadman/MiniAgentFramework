@@ -15,8 +15,6 @@ The project uses a local [Ollama](https://ollama.com) runtime and focuses on tra
 | **This file** | Modes, commands, task management, usage reference |
 | [README_GETTING_STARTED.md](README_GETTING_STARTED.md) | First-time setup: Python, Ollama, venv, first run |
 | [README_DEVS.md](README_DEVS.md) | Module architecture, design notes, internal flow |
-| [SKILL_TEMPLATE.md](SKILL_TEMPLATE.md) | Template and schema for adding new skills |
-
 ---
 
 ## Modes of Operation

@@ -27,10 +27,16 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - **Context map:** every LLM round appends a `dict` entry to `_context_map` recording `round`, `label`, `chars`, `msg_idx` (index into `messages`), and `compacted` flag. The full map is printed to the log at the end of each run under a `[CONTEXT MAP]` section.
   - **Context budget logging:** before each LLM call the estimated thread size (chars and token estimate) plus remaining window headroom is logged; after each call the actual `prompt_tokens` from Ollama are logged.
   - **Auto-compaction:** before round N (N >= 3), any context-map entry from round <= N-2 whose `msg_idx` is not `None` is compacted via `compact_context()`, which replaces the message content in-place with a one-line headline and sets `compacted = True`.
+  - **`_build_system_message(ambient_system_info, session_context, skills_payload)`** - module-level helper extracted from `orchestrate_prompt`. Assembles all runtime context sources (behavioural rules, ambient system info, prior-turn inject block, keyword routing rules, and scratchpad hints) into the single system message string sent on each round.
+  - **`_build_keyword_routing_rules(skills_payload)`** - Converts skills with a `trigger_keyword` field into explicit routing instructions included in the system prompt, formatted as `  - <keyword> -> <function_name>`. Guiding the model's tool selection this way avoids unnecessary web searches for locally-resolved lookups.
   - **`compact_context(context_map, messages, idx)`** - public helper; compacts a single context-map entry identified by list index; saves original content to the scratchpad under key `tc_rN_<label>` and returns `True` on success.
-  - **`_estimate_thread_chars(messages)`** - sums `len(content)` for all message dicts in the thread.
-  - **`_format_context_map(context_map, num_ctx)`** - returns a printable diagnostic table; compacted entries are prefixed with `*`.
-  - **Last-run state:** `get_last_context_map()` and `get_last_messages()` return the context map and messages list from the most recent `orchestrate_prompt()` call; used by `/ctx` slash commands.
+
+- **`SessionContext`** - per-session cache of skill outputs for cross-turn and cross-task context injection.
+  - Accumulates one entry per completed turn via `add_turn(user_prompt, assistant_response, skill_outputs)`.
+  - On each subsequent turn, `as_inject_block()` returns a compact formatted digest of the last `MAX_INJECT_TURNS` (default 2) turns. This block is appended to the system prompt so the model can reference prior fetched data (web pages, code output, file content) without re-running the skills.
+  - Each skill output is distilled to a compact summary by `_compact_output()`: search results become a list of `{url, title, snippet}` triplets (truncated to 50 words); page text and file content are capped at `MAX_CONTENT_WORDS` (300) words.
+  - Optionally persisted: pass a `persist_path` to the constructor to save and reload state across process restarts. The file is a plain JSON object with a `"turns"` list. Scheduled tasks use this to carry state from a mining phase into an analysis phase even when the framework is restarted between runs.
+  - **Cross-task injection**: three-phase tasks (mine -> analyze -> present) share one `SessionContext`. After Phase 1 writes mined files, Phase 2 receives the file paths via `as_inject_block()` without any explicit parameter wiring. The scheduler creates one `SessionContext` per task name and persists it under `controldata/chatsessions/<task_name>.json`.
 
 - `code/slash_commands.py`
   - Registers and dispatches all `/` commands available in chat, dashboard, and scheduled-task prompts.
@@ -139,11 +145,6 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 | `get_test_results_dir()` | `<repo_root>/controldata/test_results/` |
 | `get_chatsessions_dir()` | `<repo_root>/controldata/chatsessions/` |
 
-- `code/webresearch_utils.py`
-  - Three-stage web research workspace under `webresearch/`.
-  - Manages `01-Mine`, `02-Analysis`, and `03-Presentation` stage directories, each partitioned by domain and `yyyy/mm/dd` dated folders.
-  - All files are stored directly inside the date directory - no sub-folder layer.
-
 | Accessor | Path |
 |---|---|
 | `get_webresearch_root()` | `<repo_root>/webresearch/` |
@@ -178,7 +179,7 @@ All runtime dependencies are listed in [`requirements.txt`](requirements.txt).
 
 | Package | Version | Required by | Notes |
 |---|---|---|---|
-| `beautifulsoup4` | ≥ 4.12 | WebExtract, KoreMine skills | Optional but strongly recommended - both skills fall back to stdlib `html.parser` if absent, but bs4 gives much cleaner extraction from real-world pages. |
+| `beautifulsoup4` | ≥ 4.12 | WebFetch skill | Optional but strongly recommended. Falls back to stdlib `html.parser` if absent, but bs4 gives much cleaner extraction from real-world pages. |
 | `psutil` | ≥ 5.9 | `system_check.py` | Provides RAM, disk, and CPU metrics. |
 | `prompt_toolkit` | ≥ 3.0 | `chat_input.py` | Enables up/down arrow history in the console chat prompt. Optional - falls back to plain `input()` if not installed. |
 
@@ -295,65 +296,50 @@ webresearch/
   01-Mine/                   Raw fetched content (URLs and search results as .md files).
   02-Analysis/               Processed and summarised research artefacts.
   03-Presentation/           Final polished outputs for sharing or reporting.
-  (each stage uses <domain>/yyyy/mm/dd/NNN-slug/ sub-directories)
 ```
 
 ---
 
-## Web Skills: WebSearch vs WebExtract vs KoreMine vs PageAssess
+## Web Skills
 
-There are four web-facing skills. They are deliberately narrow in scope so the model can
-compose them correctly. Each serves a different stage in the "find → assess → read → keep" pipeline.
-
-### Overview
-
-| | WebSearch | WebExtract | KoreMine | PageAssess |
-|---|---|---|---|---|
-| **What it does** | Returns a ranked list of URLs + snippets from DuckDuckGo | Fetches one URL and returns its readable prose | Mines a URL or search into a persisted Markdown file | Classifies a URL as article/index/mixed; returns filtered links |
-| **Input** | A query string | A URL | A URL or query string, plus a domain label | A URL, optional topic, optional link cap |
-| **Output** | Structured result list (in-memory / LLM context) | Plain text (in-memory / LLM context) | A saved `.md` file on disk; returns the file path | A structured dict (in-memory / LLM context) |
-| **Persists anything?** | No | No | Yes - writes to `webresearch/01-Mine/` | No |
-| **Needs a domain label?** | No | No | Yes (e.g. `"CarIndustry"`, `"GeneralNews"`) | No |
-| **Typical use** | Discovery - find candidate URLs | Deep-read - get the content of one known URL | Research archiving - save raw material for later analysis | Pre-qualification - decide whether a URL is worth mining |
-
----
+Two web-facing skills are available. They compose naturally: search to discover URLs, then fetch
+to read content, then `write_file` (FileAccess) to persist results.
 
 ### WebSearch
 
-**Purpose:** Discover what is on the web. Returns title, URL, and snippet for the top N DuckDuckGo results. Nothing is saved.
+**Purpose:** Discover what is on the web. Returns title, URL, and snippet for the top N DuckDuckGo results. Nothing is saved to disk.
+
+**Functions:** `search_web(query, max_results=5)`, `search_web_text(query, max_results=5)`
 
 **Key behaviours:**
 - Output lives only in the LLM context for the current turn.
-- Commonly used as the first step in a two-step chain: search → then WebExtract one or more of the resulting URLs.
-- Does *not* save results to disk; if persistence is required, use KoreMine (`mine_search`) instead.
+- Chain with `fetch_page_text` (WebFetch) to read a result URL, and `write_file` (FileAccess) to persist output.
 
 **Trigger prompts:**
 - `search the web for <topic>`
 - `find information about <topic>`
 - `look up the latest news on <topic>`
 - `what does the web say about <topic>`
-- `find me some links about <topic>`
 - `do a web search for <query>`
 - `search for recent articles on <topic>`
 - `what is the current status of <topic>`
 
 ---
 
-### WebExtract
+### WebFetch
 
-**Purpose:** Read the content of a single, already-known URL. Strips HTML noise and returns clean prose, ready for the LLM to summarise or answer from.
+**Purpose:** Fetch and read the content of a single, already-known URL. Strips HTML noise and returns clean prose, ready for the LLM to summarise or answer from.
+
+**Function:** `fetch_page_text(url, max_words=1000, query=None)`
 
 **Key behaviours:**
 - Requires a full URL as input - it cannot discover URLs from a query.
-- Most often chained after WebSearch: the model calls WebSearch first to find a URL, then WebExtract to read it.
-- Can be called directly when the user supplies a URL in their prompt.
-- Does *not* save content to disk; if persistence is required, use KoreMine (`mine_url`) instead.
-- `max_words` (default 400) governs how much text is returned; increase it for lengthy articles.
+- Set `query=` when looking for specific information - runs an isolated LLM extraction pass and returns only relevant facts, avoiding context overload from raw page text.
+- Nothing is saved to disk. Chain with `write_file` to persist fetched content or `scratch_save` to hold it for later steps.
 
 **Trigger prompts:**
 - `fetch the page at <url>`
 - `read the content of <url>`
-- `extract the text from <url>`
 - `get the article at <url>`
 - `summarise the page at <url>`
 - `what does this page say: <url>`
@@ -384,92 +370,3 @@ set OLLAMA_API_KEY=<key>
 - `ensure_ollama_running` skips the auto-start attempt and raises a clean error if the host is unreachable.
 - `get_ollama_ps_rows` returns `[]` (running-model list is a localhost-only API). The SYSTEM STATUS block will show "unavailable for remote host".
 - All inference and model-listing calls work identically regardless of host.
-
----
-
-### KoreMine
-
-**Purpose:** Mine and archive web content into the structured `webresearch/` workspace for later analysis or presentation. This is the only skill that writes to disk.
-
-**Key behaviours:**
-- Two entry points:
-  - `mine_url` - fetches one URL and saves it as `source.md` under the named domain.
-  - `mine_search` - runs a DuckDuckGo search and saves the ranked results list as `results.md`.
-- Both require a `domain` label (e.g. `"CarIndustry"`, `"AIModels"`, `"GeneralNews"`). The domain determines the directory branch and acts as a thematic filing key.
-- Files are automatically placed in a dated, numbered folder: `webresearch/01-Mine/<domain>/yyyy/mm/dd/NNN-<slug>/`.
-- Stage 1 (`01-Mine`) is raw capture. Stages 2 and 3 (`02-Analysis`, `03-Presentation`) share the same folder structure and are intended for downstream processing skills.
-- Return value is the absolute path to the saved file - this is what gets surfaced in the LLM's final answer.
-- `mine_url` works best on article-level URLs. For homepages or section index pages, run PageAssess first to classify the page and discover individual article links to mine.
-- `mine_search(fetch_content=True)` fetches each result URL and embeds extracted prose inline,
-  making the saved `results.md` self-contained with article text rather than just snippets.
-  Results with fewer than 120 extracted words are flagged as index pages. Use `content_words`
-  to control how much prose to embed per result (default 200 words, max 600).
-
-**Trigger prompts - mine a specific URL:**
-- `mine this URL into the <domain> research area: <url>`
-- `save <url> to the <domain> research area`
-- `fetch and save <url> to <domain>`
-- `archive the page at <url> in the <domain> domain`
-- `store this article in <domain>: <url>`
-
-**Trigger prompts - mine a search query:**
-- `search for <topic> and save the results to the <domain> research area`
-- `mine the web for <topic> and file it under <domain>`
-- `research <topic> and save it to <domain>`
-- `search for <query> and store the results in the <domain> research area`
-- `mine the web for information about <topic> in the <domain> domain`
-
-**Trigger prompts - mine a search with inline article content:**
-- `search for <query> and save results with article content to <domain>`
-- `search for <query> and save full article text to <domain>`
-- `mine a search for <query> with content into <domain>`
-
----
-
-### PageAssess
-
-**Purpose:** Fetch a URL and classify it before deciding whether to mine it. Returns a structured dict with page type classification, word count, a prose preview, and a list of article-candidate links filtered by topic.
-
-**Key behaviours:**
-- Single entry point: `assess_page(url, topic="", max_links=10)`.
-- Classification is deterministic (no LLM): `word_count` and link-to-text ratio determine whether the page is `"article"`, `"index"`, or `"mixed"`.
-- Links are extracted from the main content area only - `<nav>`, `<header>`, `<footer>`, and heuristically identified noise containers are pruned first.
-- If `topic` is provided, returned links are ranked by token overlap with the topic string.
-- Does *not* write any files to disk.
-- Canonical use: run before `mine_url` when you don't know what kind of page a URL leads to.
-
-**Trigger prompts:**
-- `assess the page at <url>`
-- `assess <url> for topic <topic>`
-- `is <url> an article or a listing page`
-- `what kind of page is <url>`
-- `find article links on <url> about <topic>`
-- `get links from <url> related to <topic>`
-
-**Decision guide:**
-
-| `page_type` returned | Recommended next step |
-|---|---|
-| `"article"` | Call `mine_url` directly |
-| `"index"` | Use `article_links` from the result to discover individual article URLs; call `mine_url` on those |
-| `"mixed"` | Try `mine_url`; if `word_count < 200` also follow `article_links` |
-
----
-
-### Tool selection guidance: which skill to use when
-
-The model should apply this decision logic:
-
-1. **User provides a URL and wants to read it now, no saving needed → WebExtract**
-2. **User wants to search and get an answer now, no saving needed → WebSearch (+ optionally WebExtract)**
-3. **User wants to save / archive / mine / file content for later → KoreMine**
-4. **User says "mine", "save to the X research area", "file under X domain", "store in X" → always KoreMine**, never WebSearch or WebExtract
-5. **User gives a URL and explicitly wants it saved → KoreMine (`mine_url`)**
-6. **User gives a query and explicitly wants results saved → KoreMine (`mine_search`)**
-7. **User gives a URL that might be a homepage, section page, or landing page → PageAssess first**, then route based on `page_type`
-8. **User wants saved results to include article prose, not just snippets → WebResearch `mine_search(fetch_content=True)`**
-
-The critical distinctions:
-- **WebSearch, WebExtract, and PageAssess are ephemeral** - their output exists only in the LLM's current context window.
-- **KoreMine is persistent** - it always writes a file to `webresearch/01-Mine/`.
-- **PageAssess is a router** - it never mines content itself but tells the model what kind of page a URL is so the right skill can be called next.

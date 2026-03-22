@@ -338,7 +338,7 @@ def _build_keyword_routing_rules(skills_payload: dict) -> str:
             if len(primary_candidates) == 1
             else f"the appropriate {skill.get('skill_name', 'skill')} function"
         )
-        rules.append(f"  - {kw} \u2192 {call_hint}")
+        rules.append(f"  - {kw} -> {call_hint}")
 
     if not rules:
         return ""
@@ -525,6 +525,52 @@ def _format_context_map(context_map: list[dict], num_ctx: int) -> str:
     return "\n".join(lines)
 
 
+# ----------------------------------------------------------------------------------------------------
+def _build_system_message(
+    ambient_system_info: str,
+    session_context: "SessionContext | None",
+    skills_payload: dict,
+) -> str:
+    """Assemble the full system prompt from all runtime context sources.
+
+    Combines core behavioural rules, ambient system info, prior-turn context injection,
+    keyword routing rules, and active scratchpad hints into a single system message string.
+    Called once per orchestration run, before the tool-calling loop begins.
+    """
+    system_parts = [
+        "You are a helpful AI assistant with access to tools. Follow these rules:",
+        "- Use tools when they are the appropriate way to answer the user's request - for real-time data, file operations, task management, computations, and web research.",
+        "- After using tools, synthesize the results into a clear, direct answer.",
+        "- Never claim a tool action succeeded unless the tool output explicitly confirms it.",
+        "- Do not add explanatory preamble - respond with direct answers only.",
+        "- Complete ALL steps in the user's request. If the user asks for output to be written to a file, that write must happen as a tool call before you give your final answer.",
+        "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research skill (lookup_wikipedia or web_search) to fetch the content first. Never generate biographical, historical, or factual content from memory.",
+        '- Whenever you call fetch_page_text to retrieve specific information, always set the query parameter to your specific question (e.g. fetch_page_text(url=..., query="<your specific question here>")). This applies whether the URL came from a search result or was provided directly by the user. The query parameter runs an isolated extraction so only the relevant facts are returned - this avoids overloading the context with raw page text. Only omit query if the user explicitly asks for raw page content.',
+        "- The python execution tool is more reliable for calculations than the model's internal math capabilities.",
+        "- The scratchpad tool can store intermediate results across steps.",
+        "- The current runtime system info (RAM, disk, OS, etc.) is already provided below - do not call get_system_info_dict unless the user explicitly asks to refresh it.",
+    ]
+    if ambient_system_info:
+        system_parts.append(f"\n{ambient_system_info}")
+
+    prior_inject = session_context.as_inject_block() if session_context else ""
+    if prior_inject:
+        system_parts.append(f"\nPrior session context:\n{prior_inject}")
+
+    routing_rules = _build_keyword_routing_rules(skills_payload)
+    if routing_rules:
+        system_parts.append(f"\n{routing_rules}")
+
+    scratch_keys = get_scratchpad_key_names()
+    if scratch_keys:
+        system_parts.append(
+            f"\nScratchpad keys currently stored: {', '.join(scratch_keys)}\n"
+            "Reference them in skill arguments using {scratch:key} or load them with scratch_load()."
+        )
+
+    return "\n".join(system_parts)
+
+
 # ====================================================================================================
 # MARK: ORCHESTRATION PIPELINE
 # ====================================================================================================
@@ -600,38 +646,7 @@ def orchestrate_prompt(
     _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
 
     # -- Build system message --
-    system_parts = [
-        "You are a helpful AI assistant with access to tools. Follow these rules:",
-        "- Use tools when they are the appropriate way to answer the user's request - for real-time data, file operations, task management, computations, and web research.",
-        "- After using tools, synthesize the results into a clear, direct answer.",
-        "- Never claim a tool action succeeded unless the tool output explicitly confirms it.",
-        "- Do not add explanatory preamble - respond with direct answers only.",
-        "- Complete ALL steps in the user's request. If the user asks for output to be written to a file, that write must happen as a tool call before you give your final answer.",
-        "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research skill (lookup_wikipedia or web_search) to fetch the content first. Never generate biographical, historical, or factual content from memory.",
-        "- Whenever you call fetch_page_text to retrieve specific information, always set the query parameter to your specific question (e.g. fetch_page_text(url=..., query=\"<your specific question here>\")). This applies whether the URL came from a search result or was provided directly by the user. The query parameter runs an isolated extraction so only the relevant facts are returned - this avoids overloading the context with raw page text. Only omit query if the user explicitly asks for raw page content.",
-        "- The python execution tool is more reliable for calculations than the model's internal math capabilities.",
-        "- The scratchpad tool can store intermediate results across steps.",
-        "- The current runtime system info (RAM, disk, OS, etc.) is already provided below - do not call get_system_info_dict unless the user explicitly asks to refresh it.",
-    ]
-    if ambient_system_info:
-        system_parts.append(f"\n{ambient_system_info}")
-
-    _prior_inject = session_context.as_inject_block() if session_context else ""
-    if _prior_inject:
-        system_parts.append(f"\nPrior session context:\n{_prior_inject}")
-
-    _routing_rules = _build_keyword_routing_rules(config.skills_payload)
-    if _routing_rules:
-        system_parts.append(f"\n{_routing_rules}")
-
-    _scratch_keys = get_scratchpad_key_names()
-    if _scratch_keys:
-        system_parts.append(
-            f"\nScratchpad keys currently stored: {', '.join(_scratch_keys)}\n"
-            "Reference them in skill arguments using {scratch:key} or load them with scratch_load()."
-        )
-
-    system_message = "\n".join(system_parts)
+    system_message = _build_system_message(ambient_system_info, session_context, config.skills_payload)
 
     # -- Build initial messages list --
     messages: list[dict] = [{"role": "system", "content": system_message}]
