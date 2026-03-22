@@ -57,9 +57,9 @@ def _resolve_safe_path(file_path: str) -> Path:
         candidate_path = Path(normalized)
         if candidate_path.is_absolute():
             candidate = candidate_path.resolve()
-        elif "/" in normalized:
-            candidate = (WORKSPACE_ROOT / normalized).resolve()
         else:
+            # Both bare names and multi-segment relative paths resolve under data/.
+            # Use "./" prefix to anchor a path at workspace root instead.
             candidate = (DEFAULT_DATA_DIR / normalized).resolve()
 
     try:
@@ -230,3 +230,33 @@ def find_folders(keywords: list[str], search_root: str = "") -> str:
             else "No folders found" + (f" under {search_root}" if search_root else "") + "."
         )
     return "\n".join(matches)
+
+
+# ----------------------------------------------------------------------------------------------------
+def create_folder(path: str) -> str:
+    """Create a directory (and any missing parents) at the given workspace-relative path.
+
+    Safe to call when the directory already exists - returns a success message either way.
+    """
+    try:
+        # Append a dummy leaf so _resolve_safe_path can validate the path, then take the parent.
+        folder = _resolve_safe_path(path.rstrip("/") + "/.keep").parent
+    except ValueError as err:
+        return f"Error: {err}"
+    existed = folder.exists()
+    folder.mkdir(parents=True, exist_ok=True)
+    rel = folder.relative_to(WORKSPACE_ROOT).as_posix()
+    return f"Folder already exists: {rel}" if existed else f"Created folder: {rel}"
+
+
+# ----------------------------------------------------------------------------------------------------
+def folder_exists(path: str) -> str:
+    """Return whether a directory exists at the given workspace-relative path.
+
+    Returns 'yes' or 'no' so the model can branch on the result directly.
+    """
+    try:
+        folder = _resolve_safe_path(path.rstrip("/") + "/.keep").parent
+    except ValueError as err:
+        return f"Error: {err}"
+    return "yes" if folder.exists() and folder.is_dir() else "no"

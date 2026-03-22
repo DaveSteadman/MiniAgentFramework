@@ -1,7 +1,7 @@
 # FileAccess Skill
 
 ## Purpose
-Interface for all file read, write, append, and search operations. All paths are workspace-relative; bare file names resolve to `./data/`. Paths that escape the workspace root are rejected.
+Interface for all file read, write, append, and search operations. All relative paths resolve under `./data/`; a `"./"` prefix anchors a path at the workspace root instead. Paths that escape the workspace root are rejected.
 
 ## Trigger keyword: file
 
@@ -13,8 +13,17 @@ Interface for all file read, write, append, and search operations. All paths are
   - `read_file(path: str, max_chars: int = 8000)`
   - `find_files(keywords: list[str], search_root: str = "")`
   - `find_folders(keywords: list[str], search_root: str = "")`
+  - `create_folder(path: str)`
+  - `folder_exists(path: str)`
 
 ## Parameters
+
+### `create_folder(path)`
+- `path` *(required)* - path of the directory to create, resolved under `data/`, e.g. `"webresearch/01-Mine/2026-03-22"`. Creates all missing parent directories. Safe to call if the folder already exists.
+
+### `folder_exists(path)`
+- `path` *(required)* - workspace-relative path to check.
+- Returns `"yes"` or `"no"` so the model can branch on the result.
 
 ### `write_file(path, content)`
 - `path` *(required)* - workspace-relative path. A bare name like `"x.txt"` resolves to `data/x.txt`. A path starting with `"./"` resolves from workspace root.
@@ -42,6 +51,8 @@ Interface for all file read, write, append, and search operations. All paths are
 - `read_file(...)` - returns the file content as a string, or `"File not found: ..."` if the file does not exist.
 - `find_files(...)` - returns a newline-separated list of matching workspace-relative paths, or a `"No files found..."` message.
 - `find_folders(...)` - returns a newline-separated list of matching workspace-relative paths, or a `"No folders found..."` message.
+- `create_folder(...)` - returns `"Created folder: path"` or `"Folder already exists: path"`, or `"Error: ..."` on failure.
+- `folder_exists(...)` - returns `"yes"` or `"no"`.
 
 ## Triggers
 Invoke this skill when the prompt contains any of these concepts or phrases:
@@ -49,6 +60,7 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `append to file`, `add to file`
 - `read file`, `show file`, `open file`, `contents of`
 - `find file`, `find folder`, `locate file`, `search for file`
+- `create folder`, `make folder`, `create directory`, `folder exists`, `does folder exist`
 
 ## Scratchpad integration
 The `content` argument of `write_file` and `append_file` supports `{scratch:key}` token substitution.

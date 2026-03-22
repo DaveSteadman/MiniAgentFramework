@@ -55,7 +55,7 @@ from slash_commands import SlashCommandContext
 from slash_commands import handle as handle_slash
 from ui import colors as ui_colors
 from ui.dashboard_app import DashboardApp
-from workspace_utils import get_chatsessions_dir
+from workspace_utils import get_chatsessions_day_dir
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
 from workspace_utils import get_workspace_root
@@ -97,7 +97,7 @@ def run_dashboard_mode(
     _dash_session_id = f"dashboard_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     chat_session = SessionContext(
         session_id   = _dash_session_id,
-        persist_path = get_chatsessions_dir() / f"{_dash_session_id}.json",
+        persist_path = get_chatsessions_day_dir() / f"{_dash_session_id}.json",
     )
 
     # ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ from ollama_client import resolve_model_name
 from prompt_tokens import resolve_tokens
 from runtime_logger import SessionLogger
 from scratchpad import get_key_names as get_scratchpad_key_names
+from scratchpad import scratch_list as _scratch_list
 from scratchpad import scratch_save as _scratch_auto_save
 from skill_executor import build_catalog_gates
 from skill_executor import execute_tool_call
@@ -66,8 +67,11 @@ def get_last_messages() -> list[dict]:
 # Results exceeding _TOOL_MSG_AUTO_SCRATCH_MIN are also auto-saved to the scratchpad under a
 # deterministic key (_tc_r{round}_{func}) so the model can use scratch_load() to read the full
 # content without blowing through the context budget.
-_TOOL_MSG_MAX_CHARS:        int = 1500
-_TOOL_MSG_AUTO_SCRATCH_MIN: int = 600
+_TOOL_MSG_MAX_CHARS:        int   = 1500
+_TOOL_MSG_AUTO_SCRATCH_MIN: int   = 600
+# Fraction of the context window (chars / num_ctx*4) that must be consumed before any
+# automatic compaction fires. Below this threshold the full thread is kept intact.
+COMPACT_THRESHOLD:          float = 0.50
 
 
 @dataclass
@@ -494,6 +498,51 @@ def compact_context(context_map: list[dict], messages: list[dict], idx: int) -> 
 
 # ----------------------------------------------------------------------------------------------------
 
+def _assess_compact(
+    context_map: list[dict],
+    messages:    list[dict],
+    round_num:   int,
+    num_ctx:     int,
+) -> tuple[int, str | None]:
+    # Fire compaction only when the thread exceeds COMPACT_THRESHOLD of the context budget.
+    # Round-0 entries (system prompt, original user prompt, history) are permanently protected.
+    # Candidates are sorted so lossless entries (auto_key set) go first, then by size descending,
+    # stopping as soon as usage drops back to or below the threshold.
+    # Returns (thread_chars_after, log_line) - log_line is None when nothing was compacted.
+    thread_chars   = _estimate_thread_chars(messages)
+    budget_chars   = num_ctx * 4
+    usage_fraction = thread_chars / budget_chars if budget_chars else 0.0
+
+    if usage_fraction <= COMPACT_THRESHOLD:
+        return thread_chars, None
+
+    candidates = [
+        (cm_idx, entry)
+        for cm_idx, entry in enumerate(context_map)
+        if 0 < entry.get("round", 0) <= round_num - 2
+        and entry.get("msg_idx") is not None
+        and not entry.get("compacted")
+    ]
+    candidates.sort(key=lambda x: (0 if x[1].get("auto_key") else 1, -x[1].get("chars", 0)))
+    compacted_count = 0
+    for cm_idx, _entry in candidates:
+        if compact_context(context_map, messages, cm_idx):
+            compacted_count += 1
+        thread_chars = _estimate_thread_chars(messages)
+        if thread_chars / budget_chars <= COMPACT_THRESHOLD:
+            break
+
+    log_line = None
+    if compacted_count:
+        log_line = (
+            f"[context] compacted {compacted_count} message(s) "
+            f"(usage was {usage_fraction:.1%} > threshold {COMPACT_THRESHOLD:.0%})"
+        )
+    return thread_chars, log_line
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _format_context_map(context_map: list[dict], num_ctx: int) -> str:
     # Renders the per-run context map as a diagnostic table for the log file.
     hdr  = f"  {'#':>3}  {'rnd':>3}  {'role':<6}  {'label':<50}  {'chars':>7}  {'~tok':>6}"
@@ -675,23 +724,12 @@ def orchestrate_prompt(
         _log_section(f"TOOL ROUND {round_num}")
         _log_file_only(f"[progress] Round {round_num}: calling model...")
 
-        # -- Compact consumed messages from rounds <= N-2 --
-        # Entries two or more rounds behind have already been processed by the model.
-        # compact_context() replaces each message content with a one-line headline,
-        # freeing token budget while preserving a readable audit trail in the log.
-        if round_num >= 3:
-            cutoff          = round_num - 2
-            compacted_count = sum(
-                1 for cm_idx, entry in enumerate(_context_map)
-                if entry.get("round", 0) <= cutoff
-                and entry.get("msg_idx") is not None
-                and compact_context(_context_map, messages, cm_idx)
-            )
-            if compacted_count:
-                _log_file_only(f"[context] compacted {compacted_count} message(s) from round(s) <= {cutoff}")
+        # -- Compact context if thread exceeds the budget threshold --
+        _thread_chars, _compact_log = _assess_compact(_context_map, messages, round_num, config.num_ctx)
+        if _compact_log:
+            _log_file_only(_compact_log)
 
         # -- Context budget snapshot before call --
-        _thread_chars = _estimate_thread_chars(messages)
         _log_file_only(
             f"[context] thread: {_thread_chars:,} chars (~{_thread_chars // 4:,} tok est.) | "
             f"window: {config.num_ctx:,} | remaining est.: ~{config.num_ctx - _thread_chars // 4:,}"
@@ -769,8 +807,13 @@ def orchestrate_prompt(
                 output = {"function": func_name, "module": "", "arguments": arguments, "result": result_content, "is_error": True}
 
             # Auto-save large results to scratchpad; cap message to protect context budget.
+            # Scratchpad reader calls (scratch_load, scratch_peek, etc.) are exempt - the data
+            # is already in the scratchpad and re-saving it creates a chain of duplicate keys
+            # that the model will try to load indefinitely without ever reading the content.
+            _is_scratch_reader = func_name.lower().startswith("scratch_")
             auto_scratch_key = None
             if (not output.get("is_error")
+                    and not _is_scratch_reader
                     and isinstance(result_content, str)
                     and len(result_content) >= _TOOL_MSG_AUTO_SCRATCH_MIN):
                 safe_name        = func_name.lower()[:24]
@@ -847,6 +890,8 @@ def orchestrate_prompt(
     _log_file_only(_format_tool_outputs(tool_outputs))
     _log_section_file_only("CONTEXT MAP")
     _log_file_only(_format_context_map(_context_map, config.num_ctx))
+    _log_section_file_only("SCRATCHPAD STATE")
+    _log_file_only(_scratch_list())
     _log(f"Total: {prompt_tokens:,} prompt tokens | {completion_tokens:,} completion tokens")
 
     # Store last-run state for ad-hoc inspection via /compact and other slash commands.

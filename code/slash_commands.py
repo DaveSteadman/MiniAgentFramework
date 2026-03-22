@@ -707,11 +707,27 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
                 except Exception as exc:
                     errors.append(f"{base_dir.name}/{folder.name}: {exc}")
 
+    stray_deleted = []
+    stray_errors  = []
+
+    for base_dir in (get_logs_dir(), get_chatsessions_dir()):
+        if not base_dir.exists():
+            continue
+        for item in sorted(base_dir.iterdir()):
+            if item.is_file():
+                try:
+                    item.unlink()
+                    stray_deleted.append(f"{base_dir.name}/{item.name}")
+                except Exception as exc:
+                    stray_errors.append(f"{base_dir.name}/{item.name}: {exc}")
+
     if deleted:
         ctx.output(f"Deleted {len(deleted)} date-folder(s): {', '.join(deleted)}", "success")
     else:
         ctx.output(f"No date-folders older than {days} day(s) found.", "dim")
-    for err in errors:
+    if stray_deleted:
+        ctx.output(f"Deleted {len(stray_deleted)} stray file(s): {', '.join(stray_deleted)}", "success")
+    for err in errors + stray_errors:
         ctx.output(f"Error deleting {err}", "error")
 
 
@@ -781,6 +797,28 @@ def _task_find(name: str) -> "tuple | None":
             if task.get("name", "").lower() == name.lower():
                 return (json_path, data, idx)
     return None
+
+
+def _task_find_substr(fragment: str) -> "list[tuple]":
+    """Return all tasks whose name contains fragment (case-insensitive)."""
+    import json
+    from workspace_utils import get_schedules_dir
+
+    schedules_dir = get_schedules_dir()
+    if not schedules_dir.exists():
+        return []
+
+    hits = []
+    for json_path in sorted(schedules_dir.glob("*.json")):
+        try:
+            data  = json.loads(json_path.read_text(encoding="utf-8"))
+            tasks = data.get("tasks", [])
+        except Exception:
+            continue
+        for idx, task in enumerate(tasks):
+            if fragment.lower() in task.get("name", "").lower():
+                hits.append((json_path, data, idx))
+    return hits
 
 
 def _task_save(json_path: object, data: dict) -> None:
@@ -902,9 +940,21 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
         if not rest:
             ctx.output("Usage: /task run <name>", "dim")
             return
-        if _task_find(rest) is None:
-            ctx.output(f"Task '{rest}' not found.", "error")
-            return
+        found = _task_find(rest)
+        if found is None:
+            # Fall back to substring match.
+            hits = _task_find_substr(rest)
+            if not hits:
+                ctx.output(f"Task '{rest}' not found.", "error")
+                return
+            if len(hits) > 1:
+                ctx.output(f"'{rest}' matches {len(hits)} tasks - be more specific:", "error")
+                for jp, d, i in hits:
+                    ctx.output(f"  {d['tasks'][i]['name']}", "item")
+                return
+            _, matched_data, matched_idx = hits[0]
+            rest = matched_data["tasks"][matched_idx]["name"]
+            ctx.output(f"Matched: {rest}", "dim")
         main_py = Path(__file__).resolve().parent / "main.py"
         cmd = [
             sys.executable, "-X", "utf8", str(main_py),
@@ -918,6 +968,8 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
         if active_key:
             cmd += ["--ollama-api-key", active_key]
         ctx.output(f"Running task '{rest}' …", "info")
+        if ctx.lock_input:
+            ctx.lock_input()
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -936,6 +988,9 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
                 ctx.output(f"Task '{rest}' exited with code {proc.returncode}.", "error")
         except Exception as exc:
             ctx.output(f"Error running task: {exc}", "error")
+        finally:
+            if ctx.unlock_input:
+                ctx.unlock_input()
         return
 
     ctx.output(f"Unknown sub-command '{sub}'. Use: enable, disable, add, delete, run", "error")
