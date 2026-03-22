@@ -1,5 +1,7 @@
 # MiniAgentFramework
 
+![MiniAgentFramework](progress/readmeheader.png)
+
 > Calling an LLM from Python is easy - this project researches calling Python *from* an LLM prompt.
 
 MiniAgentFramework is an orchestration experiment that blends LLM reasoning with Python tool execution. A local LLM decides which Python skills to call, executes them safely in ordered steps, and incorporates the results into its final response.
