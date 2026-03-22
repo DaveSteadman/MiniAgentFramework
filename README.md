@@ -1,6 +1,6 @@
 # MiniAgentFramework
 
-![MiniAgentFramework](progress/readmeheader2.png)
+![MiniAgentFramework](progress/readme_header.png)
 
 > Calling an LLM from Python is easy - this project researches calling Python *from* an LLM prompt.
 

@@ -1,5 +1,7 @@
 # MiniAgentFramework - Developer Notes
 
+![MiniAgentFramework](progress/readme_dev_header.png)
+
 For user-facing setup and usage see [README.md](README.md).
 For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 

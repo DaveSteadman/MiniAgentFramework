@@ -1,5 +1,7 @@
 # Getting Started with MiniAgentFramework
 
+![MiniAgentFramework](progress/readme_header.png)
+
 This guide covers everything needed to go from a blank machine to a working first run.
 
 For usage reference (modes, slash commands, task management) see [README.md](README.md).
