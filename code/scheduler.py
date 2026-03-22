@@ -29,6 +29,7 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import json
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -52,8 +53,6 @@ def load_schedules_dir(schedules_dir: Path) -> list[dict]:
     'tasks' list.  Files with invalid JSON or missing the key are skipped with a warning
     printed to stderr so one bad file does not prevent the others from loading.
     """
-    import sys
-
     if not schedules_dir.exists():
         raise FileNotFoundError(f"Schedules directory not found: {schedules_dir}")
 

@@ -27,7 +27,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "DateTime Skill",
       "relative_path": "code/skills/DateTime/skill.md",
-      "purpose": "Return the current date and current time as separate values. Use this when a prompt asks what the date, time, day, or year is.",
+      "purpose": "Return the current date, time, day name, and month name. Prefer `get_datetime_data()` in all cases - it returns both date and time in a single call. Use `get_day_name()` or `get_month_name()` only when you specifically need just that one value.",
       "module": "code/skills/DateTime/datetime_skill.py",
       "trigger_keyword": "datetime",
       "functions": [
@@ -130,6 +130,10 @@ Single JSON payload for orchestration planning.
         "scratch_load(...)",
         "scratch_load(key)",
         "scratch_load(key: str)",
+        "scratch_peek(\"webresult\", \"content\", 100)",
+        "scratch_peek(...)",
+        "scratch_peek(key, substring, context_chars = 250)",
+        "scratch_peek(key: str, substring: str, context_chars: int = 250)",
         "scratch_save(\"webresult\", \"page content here...\")",
         "scratch_save(...)",
         "scratch_save(key, value)",
@@ -146,7 +150,8 @@ Single JSON payload for orchestration planning.
         "`scratch_list()` - returns a formatted list of active keys and their sizes, or `\"Scratchpad is empty.\"`.",
         "`scratch_dump()` - returns every key followed by its full stored value. Use to inspect scratchpad contents for debugging.",
         "`scratch_delete(...)` - returns confirmation or `\"Scratchpad key '<key>' not found - nothing deleted.\"`.",
-        "`scratch_search(...)` - returns a formatted list of matching key names and sizes, or `\"No scratchpad keys contain the substring '<text>'.\"` when no match is found."
+        "`scratch_search(...)` - returns a formatted list of matching key names and sizes, or `\"No scratchpad keys contain the substring '<text>'.\"` when no match is found.",
+        "`scratch_peek(...)` - returns `[Match in 'key' at char N / M total]` followed by the surrounding text with `>>>match<<<` highlighting, or an error string when the key or substring is not found."
       ]
     },
     {
@@ -212,7 +217,7 @@ Single JSON payload for orchestration planning.
       "module": "code/skills/WebFetch/web_fetch_skill.py",
       "trigger_keyword": "fetch",
       "functions": [
-        "fetch_page_text(\"https://example.com/asyncio-guide\", max_words=2000)",
+        "fetch_page_text(\"https://example.com/asyncio-guide\", query=\"summarise the key asyncio concepts\")",
         "fetch_page_text(url: str, max_words: int = 1000, timeout_seconds: int = 15, query: str | None = None)"
       ],
       "inputs": [],
@@ -225,7 +230,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "WebSearch Skill",
       "relative_path": "code/skills/WebSearch/skill.md",
-      "purpose": "Search the web using DuckDuckGo and return ranked results with title, URL, and snippet. No API key required. Use `search_web_text` when results will be read directly by the LLM; use `search_web` when the caller needs structured data. This skill only returns results - it does not persist or save anything.",
+      "purpose": "Search the web using DuckDuckGo and return ranked results with title, URL, and snippet. No API key required. Use `search_web_text` for direct synthesis - results come back as formatted text ready to read inline. Use `search_web` when you need to iterate over individual result fields (url, title, snippet) programmatically or pass them selectively to another skill. This skill only returns results - it does not persist or save anything.",
       "module": "code/skills/WebSearch/web_search_skill.py",
       "trigger_keyword": "search",
       "functions": [

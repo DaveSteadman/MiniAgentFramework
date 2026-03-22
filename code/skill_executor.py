@@ -80,12 +80,10 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
 def _build_catalog_gates(skills_payload: dict) -> tuple[set[tuple[str, str, str]], dict[str, tuple[str, str]]]:
     """Build both the security allow-list and the tool-name index in a single pass over the catalog.
 
-    Returns (allowlist, index) where:
-      allowlist  -- set of (tool_name, module_path, function_name) triples that are permitted.
-      index      -- dict mapping tool_name -> (module_path, function_name) for dispatch.
+    Returns (empty_set, index) where index maps tool_name -> (module_path, function_name).
+    The set is returned for API compatibility; the index lookup is the security gate.
     """
-    allowlist: set[tuple[str, str, str]]    = set()
-    index:     dict[str, tuple[str, str]]   = {}
+    index: dict[str, tuple[str, str]] = {}
 
     for skill in skills_payload.get("skills", []):
         module = normalize_module_path(skill.get("module", ""))
@@ -93,10 +91,9 @@ def _build_catalog_gates(skills_payload: dict) -> tuple[set[tuple[str, str, str]
         for function_sig in skill.get("functions", []):
             function_name = str(function_sig).split("(")[0].strip()
             if module and function_name:
-                allowlist.add((function_name, module, function_name))
                 index[function_name] = (module, function_name)
 
-    return allowlist, index
+    return set(), index
 
 
 
@@ -114,24 +111,32 @@ def build_catalog_gates(
 
 
 # ====================================================================================================
-# MARK: EXECUTION
+# MARK: ERROR DETECTION
 # ====================================================================================================
+# String prefixes that skill functions use to signal a failure.  Any result whose stripped text
+# starts with one of these is flagged as is_error=True in the execute_tool_call return dict so
+# the orchestration layer can prepend [SKILL_ERROR] before feeding the result back to the model.
+_SKILL_ERROR_PREFIXES: tuple[str, ...] = (
+    "Error:",
+    "Error ",
+    "File not found:",
+    "Could not extract",
+    "No file path found",
+    "Unable to parse",
+)
+
 
 # ----------------------------------------------------------------------------------------------------
-def _sanitize_skill_result(value: str) -> str:
-    # Replace characters that cause Ollama tool-call JSON parse failures when the model
-    # reproduces a prior skill result verbatim as a function argument.
-    # Straight double-quote is the primary culprit (breaks JSON string field boundaries).
-    # Unicode typographic variants are normalized as a defensive sweep.
-    value = value.replace('"',      "'")    # straight double quote
-    value = value.replace("\u201c", "'")    # left double quote
-    value = value.replace("\u201d", "'")    # right double quote
-    value = value.replace("\u2018", "'")    # left single quote
-    value = value.replace("\u2019", "'")    # right single quote
-    value = value.replace("\u2014", " - ")  # em dash
-    value = value.replace("\u2013", " - ")  # en dash
-    return value
+def is_skill_error(result: object) -> bool:
+    """Return True when result is a plain-string skill error message."""
+    if not isinstance(result, str):
+        return False
+    return result.strip().startswith(_SKILL_ERROR_PREFIXES)
 
+
+# ====================================================================================================
+# MARK: EXECUTION
+# ====================================================================================================
 
 def execute_tool_call(
     tool_name: str,
@@ -149,7 +154,7 @@ def execute_tool_call(
     the allow-list and index on every call when executing multiple tools in one round.
     """
     # Use pre-built gates when provided; otherwise build them from the payload.
-    allowlist, tool_index = catalog_gates if catalog_gates is not None else _build_catalog_gates(skills_payload)
+    _, tool_index = catalog_gates if catalog_gates is not None else _build_catalog_gates(skills_payload)
 
     # Resolve the tool name to its (module, function); fails fast for any unrecognised tool.
     resolved = tool_index.get(tool_name)
@@ -157,19 +162,15 @@ def execute_tool_call(
         raise RuntimeError(f"Tool '{tool_name}' not found in skills catalog")
     module_path, function_name = resolved
 
-    if (tool_name, module_path, function_name) not in allowlist:
-        raise RuntimeError(f"Tool '{tool_name}' is not allow-listed by skills catalog")
-
     # Fill {{today}}, {{yesterday}} etc. in any string argument before passing to the function.
     resolved_args = {
         k: (resolve_tokens(v) if isinstance(v, str) else v)
         for k, v in arguments.items()
     }
 
-    # Load (with caching) and invoke the skill function - the allow-list check above is the security gate.
-    fn         = _load_callable_from_module_path(module_path, function_name)
-    raw_result = fn(**resolved_args)
-    result     = _sanitize_skill_result(raw_result) if isinstance(raw_result, str) else raw_result
+    # Load (with caching) and invoke the skill function. The index lookup above is the security gate.
+    fn     = _load_callable_from_module_path(module_path, function_name)
+    result = fn(**resolved_args)
 
     return {
         "tool":      tool_name,
@@ -177,4 +178,5 @@ def execute_tool_call(
         "module":    module_path,
         "arguments": resolved_args,
         "result":    result,
+        "is_error":  is_skill_error(result),
     }

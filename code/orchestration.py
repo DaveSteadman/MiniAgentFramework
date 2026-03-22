@@ -28,12 +28,15 @@ from pathlib import Path
 
 from ollama_client import call_llm_chat
 from ollama_client import list_ollama_models
+from ollama_client import log_to_session
 from ollama_client import resolve_model_name
 from prompt_tokens import resolve_tokens
 from runtime_logger import SessionLogger
 from scratchpad import get_key_names as get_scratchpad_key_names
+from scratchpad import scratch_save as _scratch_auto_save
 from skill_executor import build_catalog_gates
 from skill_executor import execute_tool_call
+from skill_executor import is_skill_error
 from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
 from skills.SystemInfo.system_info_skill import get_system_info_string
@@ -42,8 +45,31 @@ from workspace_utils import trunc
 
 
 # ====================================================================================================
-# MARK: CONFIG
+# MARK: LAST-RUN STATE
 # ====================================================================================================
+# Holds references to the context_map and messages list from the most recently completed run.
+# Populated at the end of orchestrate_prompt() and available to slash commands (e.g. /compact)
+# for ad-hoc inspection and compaction between turns.
+
+_last_context_map: list[dict] = []
+_last_messages:    list[dict] = []
+
+
+def get_last_context_map() -> list[dict]:
+    return _last_context_map
+
+
+def get_last_messages() -> list[dict]:
+    return _last_messages
+
+# Maximum chars placed in each tool message appended to the model's messages thread.
+# Results exceeding _TOOL_MSG_AUTO_SCRATCH_MIN are also auto-saved to the scratchpad under a
+# deterministic key (_tc_r{round}_{func}) so the model can use scratch_load() to read the full
+# content without blowing through the context budget.
+_TOOL_MSG_MAX_CHARS:        int = 1500
+_TOOL_MSG_AUTO_SCRATCH_MIN: int = 600
+
+
 @dataclass
 class OrchestratorConfig:
     """Session-level configuration bundle shared by all orchestration calls.
@@ -254,8 +280,8 @@ class SessionContext:
             self._path.write_text(
                 json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_to_session(f"[session_context] Warning: failed to persist context to {self._path}: {exc}")
 
 
 # ====================================================================================================
@@ -298,17 +324,19 @@ def _build_keyword_routing_rules(skills_payload: dict) -> str:
         if not kw:
             continue
 
-        funcs   = skill.get("functions", [])
-        primary = next(
-            (f.split("(")[0].strip() for f in funcs if "(" in f and not f.startswith("list_")),
-            None,
+        funcs              = skill.get("functions", [])
+        primary_candidates = [
+            f.split("(")[0].strip()
+            for f in funcs
+            if "(" in f and not f.startswith("list_")
+        ]
+        if len(primary_candidates) != 1:
+            continue
+        rules.append(
+            f'  - Prompt contains "{kw}": '
+            f"call `{primary_candidates[0]}` with parameters parsed from the prompt. "
+            f"Do NOT use web search or any other tool instead."
         )
-        if primary:
-            rules.append(
-                f'  - Prompt contains "{kw}": '
-                f"call `{primary}` with parameters parsed from the prompt. "
-                f"Do NOT use web search or any other tool instead."
-            )
 
     if not rules:
         return ""
@@ -424,6 +452,77 @@ def _build_fallback_answer(user_prompt: str, tool_outputs: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
+# ----------------------------------------------------------------------------------------------------
+
+def _estimate_thread_chars(messages: list[dict]) -> int:
+    # Quick sum of content lengths - used for context budget logging before each LLM call.
+    return sum(len(m.get("content") or "") for m in messages)
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def compact_context(context_map: list[dict], messages: list[dict], idx: int) -> bool:
+    """Replace messages[entry.msg_idx] content with a compact headline.
+
+    Looks up context_map[idx], finds the corresponding message via the stored msg_idx,
+    and replaces its content with a single-line summary that preserves the key facts
+    (what happened, original size, scratchpad key if one was written) while freeing
+    token budget for later rounds.
+
+    Returns True when the entry was compacted, False when skipped (already compacted,
+    no msg_idx stored, or idx out of range).
+    """
+    if idx < 0 or idx >= len(context_map):
+        return False
+    entry   = context_map[idx]
+    msg_idx = entry.get("msg_idx")
+    if msg_idx is None or entry.get("compacted"):
+        return False
+    orig_chars  = entry["chars"]
+    auto_key    = entry.get("auto_key")
+    label       = entry.get("label") or entry.get("role", "?")
+    ref         = f" -> scratchpad: {auto_key}" if auto_key else ""
+    round_n     = entry.get("round", 0)
+    placeholder = f"[compacted: rnd {round_n} {label} ({orig_chars:,} chars{ref})]"
+    messages[msg_idx]["content"] = placeholder
+    entry["chars"]     = len(placeholder)
+    entry["compacted"] = True
+    return True
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _format_context_map(context_map: list[dict], num_ctx: int) -> str:
+    # Renders the per-run context map as a diagnostic table for the log file.
+    hdr  = f"  {'#':>3}  {'rnd':>3}  {'role':<6}  {'label':<50}  {'chars':>7}  {'~tok':>6}"
+    sep  = "  ---  ---  ------  " + "-" * 50 + "  -------  ------"
+    lines = [hdr, sep]
+    total_chars = 0
+    for idx, entry in enumerate(context_map):
+        role         = entry.get("role", "?")
+        label        = entry.get("label", "")
+        chars        = entry.get("chars", 0)
+        auto_key     = entry.get("auto_key")
+        round_n      = entry.get("round", 0)
+        is_compacted = entry.get("compacted", False)
+        total_chars += chars
+        if auto_key and not is_compacted:
+            label = f"{label} -> {auto_key}"
+        if is_compacted:
+            label = f"* {label}"
+        lines.append(
+            f"  {idx:>3}  {round_n:>3}  {role:<6}  {trunc(label, 50):<50}  {chars:>7,}  {chars // 4:>6,}"
+        )
+    total_tokens = total_chars // 4
+    remaining    = num_ctx - total_tokens
+    lines.append("")
+    lines.append(
+        f"  total: {total_chars:,} chars | ~{total_tokens:,} tokens used | "
+        f"~{remaining:,} tokens remaining (budget: {num_ctx:,})"
+    )
+    return "\n".join(lines)
+
+
 # ====================================================================================================
 # MARK: ORCHESTRATION PIPELINE
 # ====================================================================================================
@@ -476,7 +575,11 @@ def orchestrate_prompt(
     # -- Memory --
     _log_file_only("[progress] Storing prompt memories...")
     # Persist any facts in the prompt before tool calls run, so the turn is captured even on failure.
-    memory_store_result = store_prompt_memories(user_prompt=user_prompt)
+    # Skip for slash commands and very short prompts - they cannot contain storable facts.
+    if user_prompt.startswith("/") or len(user_prompt.split()) < 4:
+        memory_store_result = "Memory storage skipped."
+    else:
+        memory_store_result = store_prompt_memories(user_prompt=user_prompt)
     _log_file_only("[progress] Recalling relevant memories...")
     # Pull the most relevant prior memories to inject as context in the system prompt.
     recalled_memories   = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
@@ -532,9 +635,16 @@ def orchestrate_prompt(
 
     # -- Build initial messages list --
     messages: list[dict] = [{"role": "system", "content": system_message}]
+    _context_map: list[dict] = [
+        {"round": 0, "role": "sys", "label": "system prompt", "chars": len(system_message), "auto_key": None, "msg_idx": 0},
+    ]
     if conversation_history:
+        _hist_chars = sum(len(m.get("content") or "") for m in conversation_history)
+        # History spans multiple indices - no single msg_idx; cannot be individually compacted.
+        _context_map.append({"round": 0, "role": "hist", "label": f"history ({len(conversation_history)} msgs)", "chars": _hist_chars, "auto_key": None, "msg_idx": None})
         messages.extend(conversation_history)
     messages.append({"role": "user", "content": user_prompt})
+    _context_map.append({"round": 0, "role": "user", "label": trunc(user_prompt, 50), "chars": len(user_prompt), "auto_key": None, "msg_idx": len(messages) - 1})
 
     # -- Tool calling loop --
     # Build once for the entire run - avoids re-scanning the catalog on every tool invocation.
@@ -549,6 +659,28 @@ def orchestrate_prompt(
     for round_num in range(1, config.max_iterations + 1):
         _log_section(f"TOOL ROUND {round_num}")
         _log_file_only(f"[progress] Round {round_num}: calling model...")
+
+        # -- Compact consumed messages from rounds <= N-2 --
+        # Entries two or more rounds behind have already been processed by the model.
+        # compact_context() replaces each message content with a one-line headline,
+        # freeing token budget while preserving a readable audit trail in the log.
+        if round_num >= 3:
+            cutoff          = round_num - 2
+            compacted_count = sum(
+                1 for cm_idx, entry in enumerate(_context_map)
+                if entry.get("round", 0) <= cutoff
+                and entry.get("msg_idx") is not None
+                and compact_context(_context_map, messages, cm_idx)
+            )
+            if compacted_count:
+                _log_file_only(f"[context] compacted {compacted_count} message(s) from round(s) <= {cutoff}")
+
+        # -- Context budget snapshot before call --
+        _thread_chars = _estimate_thread_chars(messages)
+        _log_file_only(
+            f"[context] thread: {_thread_chars:,} chars (~{_thread_chars // 4:,} tok est.) | "
+            f"window: {config.num_ctx:,} | remaining est.: ~{config.num_ctx - _thread_chars // 4:,}"
+        )
 
         # Send the growing messages thread; the model either answers directly or requests more tool calls.
         try:
@@ -567,7 +699,8 @@ def orchestrate_prompt(
         completion_tokens += result.completion_tokens
         final_tps          = result.tokens_per_second
 
-        _log(f"Round {round_num} TPS: {final_tps:.1f} tok/s  ({result.completion_tokens} tokens)")
+        _log(f"Round {round_num} TPS: {final_tps:.1f} tok/s  ({result.completion_tokens} completion | {result.prompt_tokens:,} prompt tokens)")
+        _log_file_only(f"[context] actual prompt tokens used: {result.prompt_tokens:,} | remaining: ~{config.num_ctx - result.prompt_tokens:,}")
 
         _thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
         if _thinking:
@@ -579,6 +712,8 @@ def orchestrate_prompt(
             run_success    = bool(final_response)
             _log(final_response)
             _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
+            # Final answer is returned directly, not appended to messages - no msg_idx.
+            _context_map.append({"round": round_num, "role": "asst", "label": "final answer", "chars": len(final_response), "auto_key": None, "msg_idx": None})
             break
 
         # -- Execute each requested tool call --
@@ -590,6 +725,7 @@ def orchestrate_prompt(
             "content":    result.response or "",
             "tool_calls": result.tool_calls,
         })
+        _context_map.append({"round": round_num, "role": "asst", "label": f"(tool calls x{len(result.tool_calls)})", "chars": len(result.response or ""), "auto_key": None, "msg_idx": len(messages) - 1})
 
         round_outputs: list[dict] = []
         for tc in result.tool_calls:
@@ -611,9 +747,25 @@ def orchestrate_prompt(
                 result_content = output["result"]
                 if not isinstance(result_content, str):
                     result_content = json.dumps(result_content, default=str)
+                if output.get("is_error"):
+                    result_content = f"[SKILL_ERROR] {result_content}"
             except Exception as exc:
-                result_content = f"Error executing {func_name}: {exc}"
-                output = {"function": func_name, "module": "", "arguments": arguments, "result": result_content}
+                result_content = f"[SKILL_ERROR] Error executing {func_name}: {exc}"
+                output = {"function": func_name, "module": "", "arguments": arguments, "result": result_content, "is_error": True}
+
+            # Auto-save large results to scratchpad; cap message to protect context budget.
+            auto_scratch_key = None
+            if (not output.get("is_error")
+                    and isinstance(result_content, str)
+                    and len(result_content) >= _TOOL_MSG_AUTO_SCRATCH_MIN):
+                safe_name        = func_name.lower()[:24]
+                auto_scratch_key = f"_tc_r{round_num}_{safe_name}"
+                _scratch_auto_save(auto_scratch_key, result_content)
+                if len(result_content) > _TOOL_MSG_MAX_CHARS:
+                    result_content = (
+                        result_content[:_TOOL_MSG_MAX_CHARS]
+                        + f"\n... [truncated - full content auto-saved to scratchpad key: {auto_scratch_key}]"
+                    )
 
             _log(f"     {trunc(str(result_content), 120)}")
             round_outputs.append(output)
@@ -624,6 +776,7 @@ def orchestrate_prompt(
                 "name":         func_name,
                 "content":      result_content,
             })
+            _context_map.append({"round": round_num, "role": "tool", "label": func_name, "chars": len(result_content), "auto_key": auto_scratch_key, "msg_idx": len(messages) - 1})
 
         _log_section_file_only(f"TOOL ROUND {round_num} - EXECUTION FLOW")
         _log_file_only(_format_tool_outputs(round_outputs))
@@ -677,7 +830,14 @@ def orchestrate_prompt(
 
     _log_section_file_only("TOOL CALL SUMMARY")
     _log_file_only(_format_tool_outputs(tool_outputs))
+    _log_section_file_only("CONTEXT MAP")
+    _log_file_only(_format_context_map(_context_map, config.num_ctx))
     _log(f"Total: {prompt_tokens:,} prompt tokens | {completion_tokens:,} completion tokens")
+
+    # Store last-run state for ad-hoc inspection via /compact and other slash commands.
+    global _last_context_map, _last_messages
+    _last_context_map = _context_map
+    _last_messages    = messages
 
     # Archive this turn's skill outputs so later turns can reference prior results without re-running.
     if session_context is not None and run_success and tool_outputs:

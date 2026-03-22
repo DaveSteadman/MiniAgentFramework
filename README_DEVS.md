@@ -21,6 +21,24 @@ Before writing or editing any code in this project, read [CODE_CONVENTIONS.md](C
   - History is stored in `controldata/chathistory.json` (max 500 entries, consecutive duplicates de-duped).
   - Falls back to plain `input()` when `prompt_toolkit` is not installed.
 
+- `code/orchestration.py`
+  - Core tool-calling loop called by `main.py` for every mode.
+  - Builds the messages thread, calls the LLM, dispatches tool calls via `skill_executor`, and loops until the model returns a plain-text answer or `MAX_ITERATIONS` is exhausted.
+  - **Context management constants:** `_TOOL_MSG_AUTO_SCRATCH_MIN = 600` (chars at which a tool result is auto-saved to the scratchpad) and `_TOOL_MSG_MAX_CHARS = 1500` (hard cap applied after the scratchpad save; excess is replaced with a pointer note).
+  - **Context map:** every LLM round appends a `dict` entry to `_context_map` recording `round`, `label`, `chars`, `msg_idx` (index into `messages`), and `compacted` flag. The full map is printed to the log at the end of each run under a `[CONTEXT MAP]` section.
+  - **Context budget logging:** before each LLM call the estimated thread size (chars and token estimate) plus remaining window headroom is logged; after each call the actual `prompt_tokens` from Ollama are logged.
+  - **Auto-compaction:** before round N (N >= 3), any context-map entry from round <= N-2 whose `msg_idx` is not `None` is compacted via `compact_context()`, which replaces the message content in-place with a one-line headline and sets `compacted = True`.
+  - **`compact_context(context_map, messages, idx)`** - public helper; compacts a single context-map entry identified by list index; saves original content to the scratchpad under key `tc_rN_<label>` and returns `True` on success.
+  - **`_estimate_thread_chars(messages)`** - sums `len(content)` for all message dicts in the thread.
+  - **`_format_context_map(context_map, num_ctx)`** - returns a printable diagnostic table; compacted entries are prefixed with `*`.
+  - **Last-run state:** `get_last_context_map()` and `get_last_messages()` return the context map and messages list from the most recent `orchestrate_prompt()` call; used by `/ctx` slash commands.
+
+- `code/slash_commands.py`
+  - Registers and dispatches all `/` commands available in chat, dashboard, and scheduled-task prompts.
+  - Each command is a plain function `_cmd_<name>(arg, ctx)` registered in `_REGISTRY` (handler map) and `_DESCRIPTIONS` (help text map).
+  - `SlashCommandContext` dataclass carries the mutable runtime state (model, num_ctx, host, flags) plus an `output(text, style)` callback so handlers can write to either the console or dashboard UI without knowing which.
+  - **`/ctx` unified subcommand:** bare `/ctx` shows the context map and window size; `/ctx size [<n>]` reads or sets the window; `/ctx item <n>` prints the raw message content for a given map index; `/ctx compact <n>` compacts an entry in place and prints the before/after table.
+
 ### 2) LLM + Ollama client layer
 - `code/ollama_client.py`
   - Supports local Ollama, LAN-hosted Ollama machines, and Ollama Cloud via `configure_host(host, api_key=None)`.
@@ -67,6 +85,12 @@ Before writing or editing any code in this project, read [CODE_CONVENTIONS.md](C
   - Auto-migrates legacy `memory_store.txt` on first run.
 - `code/skills/WebSearch/` - searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
 - `code/skills/TaskManagement/` - CRUD operations on scheduled task JSON files in `controldata/schedules/`. Exposes `list_tasks()`, `get_task(name)`, `create_task(name, schedule, prompt)`, `set_task_enabled(name, enabled)`, `set_task_schedule(name, schedule)`, `set_task_prompt(name, prompt)`, and `delete_task(name)` as skill functions the model can invoke from natural-language prompts. Each task is stored in its own `task_<name>.json` file; the dashboard scheduler hot-reloads changes within its next poll cycle.
+- `code/skills/Scratchpad/`
+  - In-session key/value store backed by the module-level `_STORE` dict in `code/scratchpad.py`.
+  - Does not persist to disk; lives only for the duration of the process.
+  - Skill functions: `scratch_save(key, content)`, `scratch_load(key)`, `scratch_list()`, `scratch_delete(key)`, `scratch_search(substring)`, `scratch_peek(key, substring, context_chars=250)`.
+  - `scratch_peek` returns a windowed excerpt around the first match of `substring` in the stored value for `key`, formatted as `[Match in 'key' at char N / M total]\n...prefix>>>match<<<suffix...`. Useful for large stored outputs where loading the full value would consume excessive context.
+  - Auto-save: tool results >= 600 chars are automatically saved by `orchestration.py` under keys of the form `_tc_r<round>_<func_name>` so the model can retrieve them with `scratch_load` or inspect them with `scratch_peek`.
 
 ### 7) Scheduler
 - `code/scheduler.py`

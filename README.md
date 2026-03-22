@@ -220,7 +220,11 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/models` | List installed Ollama models; the active model is marked with `►` |
 | `/model <name>` | Switch the active model for all subsequent runs (e.g. `/model 8b`). Accepts the same short aliases as `--model`. Clears conversation history. |
 | `/host <target> [api-key]` | Switch the active Ollama host without restarting. Clears conversation history. See [Host targeting](#host-targeting) below. |
-| `/ctx <tokens>` | Set the context window size for all subsequent runs (e.g. `/ctx 16384`). Accepts integers with optional commas or underscores. |
+| `/ctx` | Show the context map for the last run - index, round, label, char count, and compaction state - plus the current window size. |
+| `/ctx size` | Show the current context window size only. |
+| `/ctx size <n>` | Set the context window size for all subsequent runs (e.g. `/ctx size 32768`). Accepts integers with optional commas or underscores. |
+| `/ctx item <n>` | Print the raw message content for context-map entry N. Useful for inspecting what was sent to the model in a specific round. |
+| `/ctx compact <n>` | Compact context-map entry N in place - replaces the message content with a one-line summary and saves the original to the scratchpad. Prints the before/after table. |
 | `/timeout <seconds>` | Set the LLM generation timeout (e.g. `/timeout 1800` for heavy analysis tasks). |
 | `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
 | `/clearmemory` | Delete the memory store file (`memory_store.json`), starting the next session with a blank memory. |

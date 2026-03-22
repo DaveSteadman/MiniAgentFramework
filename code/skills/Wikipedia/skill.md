@@ -24,7 +24,7 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `what is`, `tell me about`, `who is`
 - `look up on Wikipedia`, `Wikipedia article`
 - `background on`, `history of`, `definition of`
-- `bio`, `biography`, `write the bio of`, `write about`
+- `bio`, `biography`, `write the biography of`, `write a biography of`
 
 ## Scratchpad integration
 Article extracts can be several hundred words.  When the content will be used in a downstream

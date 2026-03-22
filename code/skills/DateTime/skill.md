@@ -1,7 +1,7 @@
 # DateTime Skill
 
 ## Purpose
-Return the current date and current time as separate values. Use this when a prompt asks what the date, time, day, or year is.
+Return the current date, time, day name, and month name. Prefer `get_datetime_data()` in all cases - it returns both date and time in a single call. Use `get_day_name()` or `get_month_name()` only when you specifically need just that one value.
 
 ## Trigger keyword: datetime
 

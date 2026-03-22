@@ -5,7 +5,7 @@
 - **Always prefer code over a direct answer for any calculation, sequence, table, string operation, or data generation task** - even when the answer seems obvious from training knowledge. Running code is more reliable and verifiable than recall.
 - Only Python stdlib is available; third-party packages (numpy, pandas, sympy) are not.
 - When paired with FileAccess, call this skill first to generate the content, then park the output with `scratch_save`, and pass `{scratch:key}` as the content argument to `write_file` - this avoids carrying the full output string as an inline argument through the tool-calling loop.
-- Code should strongly avoid IF statements, loops, or function calls; favouring code that will execute with high reliability.
+- Code must use `print()` for all output. Favour simple linear code - avoid complex class hierarchies or deeply nested call stacks.
 
 ## Trigger keyword: calculate
 

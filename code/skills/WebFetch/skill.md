@@ -59,7 +59,7 @@ Page text can be large. Use `scratch_save` to store it under a key and reference
 
 Example chain:
 1. `search_web("python asyncio tutorial")` - returns list of results with URLs
-2. `fetch_page_text("https://example.com/asyncio-guide", max_words=2000)` - returns body prose
+2. `fetch_page_text("https://example.com/asyncio-guide", query="summarise the key asyncio concepts")` - returns extracted answer
 3. `scratch_save("asyncio_article", {result from step 2})` - stores text
 4. LLM synthesizes answer from `{scratch:asyncio_article}`
 

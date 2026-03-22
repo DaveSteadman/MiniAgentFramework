@@ -1,7 +1,7 @@
 # WebSearch Skill
 
 ## Purpose
-Search the web using DuckDuckGo and return ranked results with title, URL, and snippet. No API key required. Use `search_web_text` when results will be read directly by the LLM; use `search_web` when the caller needs structured data. This skill only returns results - it does not persist or save anything.
+Search the web using DuckDuckGo and return ranked results with title, URL, and snippet. No API key required. Use `search_web_text` for direct synthesis - results come back as formatted text ready to read inline. Use `search_web` when you need to iterate over individual result fields (url, title, snippet) programmatically or pass them selectively to another skill. This skill only returns results - it does not persist or save anything.
 
 ## Trigger keyword: search
 

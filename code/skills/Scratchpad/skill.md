@@ -18,6 +18,7 @@ facts that should survive across sessions - use the Memory skill for that.
   - `scratch_dump()`
   - `scratch_delete(key: str)`
   - `scratch_search(substring: str)`
+  - `scratch_peek(key: str, substring: str, context_chars: int = 250)`
 
 ## Parameters
 
@@ -44,6 +45,11 @@ No parameters.  Returns the full content of every key - use this to inspect stor
 ### `scratch_search(substring)`
 - `substring` *(required)* - case-insensitive text to search for within stored values. Returns all keys whose value contains the substring.
 
+### `scratch_peek(key, substring, context_chars = 250)`
+- `key` *(required)* - the scratchpad key to inspect.
+- `substring` *(required)* - case-insensitive text to locate within the stored value.
+- `context_chars` *(optional, default 250)* - characters to include before and after the match.
+
 ## Output
 - `scratch_save(...)` - returns `"Saved to scratchpad key '<key>' (N chars)"` on success, or `"Error: ..."`.
 - `scratch_load(...)` - returns the stored string value, or an error message if the key is not found.
@@ -51,6 +57,7 @@ No parameters.  Returns the full content of every key - use this to inspect stor
 - `scratch_dump()` - returns every key followed by its full stored value. Use to inspect scratchpad contents for debugging.
 - `scratch_delete(...)` - returns confirmation or `"Scratchpad key '<key>' not found - nothing deleted."`.
 - `scratch_search(...)` - returns a formatted list of matching key names and sizes, or `"No scratchpad keys contain the substring '<text>'."` when no match is found.
+- `scratch_peek(...)` - returns `[Match in 'key' at char N / M total]` followed by the surrounding text with `>>>match<<<` highlighting, or an error string when the key or substring is not found.
 
 ## Token substitution
 Any skill argument containing `{scratch:key}` is automatically resolved to the stored value
@@ -66,6 +73,7 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `dump scratchpad`, `show scratchpad contents`, `inspect scratchpad`, `debug scratchpad`
 - `delete from scratchpad`, `clear scratchpad key`
 - `search scratchpad`, `find scratchpad keys containing`, `which scratchpad keys have`
+- `peek at scratchpad`, `show context around`, `find text in scratchpad key`
 
 ## Scratchpad integration
 This is the scratchpad skill itself.  All other skills reference this one for their
@@ -78,6 +86,8 @@ scratchpad integration patterns.  No self-referential use needed.
   - Returns: `"page content here..."`
 - `scratch_list()` - shows key names and sizes only; use `scratch_dump()` to see the actual values
   - Returns: `"Scratchpad keys:\n  webresult  (21 chars)"`
+- `scratch_peek("webresult", "content", 100)` - show 100 chars around first occurrence of "content" in key `webresult`
+  - Returns: `"[Match in 'webresult' at char 5 / 21 total]\nepage>>>content<<<here"`
 - `scratch_dump()` - shows every key and its full content
   - Returns: `"Scratchpad dump:\n\n[webresult]\npage content here..."`
 - `scratch_delete("webresult")` - removes the key

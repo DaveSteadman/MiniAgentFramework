@@ -38,6 +38,7 @@ from scratchpad import scratch_delete
 from scratchpad import scratch_dump
 from scratchpad import scratch_list
 from scratchpad import scratch_load
+from scratchpad import scratch_peek
 from scratchpad import scratch_save
 from scratchpad import scratch_search
 
@@ -54,6 +55,7 @@ __all__ = [
     "scratch_dump",
     "scratch_list",
     "scratch_load",
+    "scratch_peek",
     "scratch_save",
     "scratch_search",
 ]

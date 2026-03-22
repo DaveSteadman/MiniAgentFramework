@@ -21,7 +21,7 @@ Persist and recall durable user-stated facts across sessions - identity, prefere
 ### `recall_relevant_memories(user_prompt, limit = 5, min_score = 0.25)`
 - `user_prompt` *(required)* - current prompt used as the relevance query.
 - `limit` *(optional, default 5)* - maximum number of memories to return.
-- `min_score` *(optional, default 0.25)* - minimum token-overlap relevance threshold; lower values return more results.
+- `min_score` *(optional, default 0.2)* - minimum token-overlap relevance threshold; lower values return more results.
 
 ### `extract_environment_facts(user_prompt)`
 - `user_prompt` *(required)* - raw user text to inspect for environment-specific facts only.

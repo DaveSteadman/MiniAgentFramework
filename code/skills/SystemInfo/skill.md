@@ -41,7 +41,7 @@ summary string with `scratch_save` so it can be included in the final assembled 
 
 ## Examples
 - `get_system_info_dict()` - retrieve all system metrics
-  - Returns: `{"os": "Windows", "python_version": "3.14.2", "ollama_version": "0.17.5", "ram_used_gb": 12.34, "ram_available_gb": 19.66, "disk_used_gb": 110.25, "disk_available_gb": 401.75}`
+  - Returns: `{"os": "Windows", "python_version": "3.10.11", "ollama_version": "0.18.2", "ram_used_gb": 12.34, "ram_available_gb": 19.66, "disk_used_gb": 110.25, "disk_available_gb": 401.75}`
 - "how much RAM is available?" - call `get_system_info_dict()`, read `ram_available_gb`
 - "do we have enough disk space to add a 50 GB file?" - call `get_system_info_dict()`, read `disk_available_gb`, compare to 50
 - "write system info to a file" - call `get_system_info_dict()`, then pass the result to a FileAccess write call

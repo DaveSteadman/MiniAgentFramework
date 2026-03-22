@@ -179,6 +179,33 @@ def scratch_search(substring: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
+def scratch_peek(key: str, substring: str, context_chars: int = 250) -> str:
+    """Return the text around the first occurrence of *substring* in the value stored at *key*.
+
+    Returns *context_chars* characters before and after the match, with '...' markers where the
+    value was clipped and >>>match<<< highlighting around the hit.  Useful for inspecting a
+    specific section of a large stored value without loading the entire content.
+    """
+    validated = _validate_key(key)
+    if validated not in _STORE:
+        return f"Scratchpad key '{validated}' not found. Use scratch_list() to see available keys."
+    value = _STORE[validated]
+    pos   = value.lower().find(substring.lower())
+    if pos == -1:
+        return f"Substring '{substring}' not found in scratchpad key '{validated}'."
+    context_chars = max(0, int(context_chars))
+    start  = max(0, pos - context_chars)
+    end    = min(len(value), pos + len(substring) + context_chars)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(value) else ""
+    match  = value[pos : pos + len(substring)]
+    return (
+        f"[Match in '{validated}' at char {pos} / {len(value)} total]\n"
+        f"{prefix}{value[start:pos]}>>>{match}<<<{value[pos + len(substring):end]}{suffix}"
+    )
+
+
+# ----------------------------------------------------------------------------------------------------
 def scratch_clear() -> str:
     """Remove all keys from the scratchpad (called at session reset or /clear)."""
     count = len(_STORE)

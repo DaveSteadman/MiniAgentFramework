@@ -164,25 +164,116 @@ def _cmd_model(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
+    # Shared helpers used by multiple subcommands.
+    def _get_map_and_messages():
+        from orchestration import get_last_context_map
+        from orchestration import get_last_messages
+        return get_last_context_map(), get_last_messages()
+
+    def _show_map(context_map):
+        from orchestration import _format_context_map
+        ctx.output(_format_context_map(context_map, ctx.config.num_ctx), "item")
+
+    # /ctx - show map + window size.
     if not arg:
-        ctx.output(
-            f"Usage: /ctx <tokens>  |  current: {ctx.config.num_ctx:,}",
-            "dim",
-        )
+        context_map, _ = _get_map_and_messages()
+        if context_map:
+            _show_map(context_map)
+            ctx.output("", "dim")
+        ctx.output(f"Context window size: {ctx.config.num_ctx:,} tokens", "info")
         return
-    try:
-        value = int(arg.strip().replace(",", "").replace("_", ""))
-    except ValueError:
-        ctx.output(f"Invalid value '{arg}' - must be an integer (e.g. /ctx 32768).", "error")
+
+    parts = arg.split(None, 1)
+    sub   = parts[0].lower()
+    rest  = parts[1].strip() if len(parts) > 1 else ""
+
+    # /ctx size [<num>] - show or set window size.
+    if sub == "size":
+        if not rest:
+            ctx.output(f"Context window size: {ctx.config.num_ctx:,} tokens", "info")
+            return
+        try:
+            value = int(rest.replace(",", "").replace("_", ""))
+        except ValueError:
+            ctx.output(f"Invalid value '{rest}' - must be an integer (e.g. /ctx size 32768).", "error")
+            return
+        if value < 512:
+            ctx.output("Context size must be at least 512 tokens.", "error")
+            return
+        old = ctx.config.num_ctx
+        ctx.config.num_ctx = value
+        from ollama_client import register_session_config
+        register_session_config(ctx.config.resolved_model, value)
+        ctx.output(f"Context window size changed: {old:,} \u2192 {value:,}", "success")
         return
-    if value < 512:
-        ctx.output("Context size must be at least 512 tokens.", "error")
+
+    # /ctx item <num> - show raw message content at map index N.
+    if sub == "item":
+        if not rest:
+            ctx.output("Usage: /ctx item <index>", "dim")
+            return
+        context_map, messages = _get_map_and_messages()
+        if not context_map:
+            ctx.output("No run context available - send a prompt first.", "error")
+            return
+        try:
+            idx = int(rest)
+        except ValueError:
+            ctx.output(f"Invalid index '{rest}' - must be an integer.", "error")
+            return
+        if idx < 0 or idx >= len(context_map):
+            ctx.output(f"Index {idx} out of range (0 - {len(context_map) - 1}).", "error")
+            return
+        entry   = context_map[idx]
+        msg_idx = entry.get("msg_idx")
+        ctx.output(f"Entry {idx}: role={entry.get('role')}  label={entry.get('label')}  chars={entry.get('chars'):,}", "info")
+        if msg_idx is None:
+            ctx.output("(no associated message - not individually addressable)", "dim")
+            return
+        content = messages[msg_idx].get("content") or ""
+        ctx.output(content if content else "(empty)", "item")
         return
-    old = ctx.config.num_ctx
-    ctx.config.num_ctx = value
-    from ollama_client import register_session_config
-    register_session_config(ctx.config.resolved_model, value)
-    ctx.output(f"Context size changed: {old:,} \u2192 {value:,}", "success")
+
+    # /ctx compact <num> - compact map entry N showing before/after.
+    if sub == "compact":
+        if not rest:
+            ctx.output("Usage: /ctx compact <index>", "dim")
+            return
+        context_map, messages = _get_map_and_messages()
+        if not context_map:
+            ctx.output("No run context available - send a prompt first.", "error")
+            return
+        try:
+            idx = int(rest)
+        except ValueError:
+            ctx.output(f"Invalid index '{rest}' - must be an integer.", "error")
+            return
+        if idx < 0 or idx >= len(context_map):
+            ctx.output(f"Index {idx} out of range (0 - {len(context_map) - 1}).", "error")
+            return
+        entry = context_map[idx]
+        if entry.get("msg_idx") is None:
+            ctx.output(
+                f"Entry {idx} ({entry.get('role')} / {entry.get('label')}) has no associated message - cannot compact.",
+                "error",
+            )
+            return
+        ctx.output("Before:", "dim")
+        _show_map(context_map)
+        from orchestration import compact_context
+        changed = compact_context(context_map, messages, idx)
+        if not changed:
+            ctx.output(f"Entry {idx} was already compacted.", "dim")
+            return
+        ctx.output("", "dim")
+        ctx.output("After:", "dim")
+        _show_map(context_map)
+        return
+
+    ctx.output(
+        f"Unknown sub-command '{sub}'.  Usage: /ctx | /ctx size [<n>] | /ctx item <n> | /ctx compact <n>",
+        "error",
+    )
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -882,7 +973,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/models":        "List installed Ollama models",
     "/model":         "<name>  Switch active model for all subsequent runs",
     "/host":          "<hostname|url|local> [api-key]  Switch active Ollama host (LAN, cloud, or local)",
-    "/ctx":           "<tokens>  Set context window size (e.g. /ctx 32768)",
+    "/ctx":           "Show context map + window size; sub-cmds: size [<n>], item <n>, compact <n>",
     "/rounds":        "<n>  Set max tool-call rounds per prompt (e.g. /rounds 6)",
     "/timeout":       "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
     "/stopmodel":     "[name]  Unload a running model from VRAM (defaults to active model)",
