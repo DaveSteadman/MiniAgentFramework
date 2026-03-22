@@ -141,7 +141,7 @@ def fetch_page_text(
             model_name=model,
             messages=inner_messages,
             tools=None,
-            num_ctx=min(num_ctx, 16384),
+            num_ctx=num_ctx,
         )
         extracted = (result.response or "").strip()
         return extracted if extracted else f"Could not extract relevant content from: {url}"

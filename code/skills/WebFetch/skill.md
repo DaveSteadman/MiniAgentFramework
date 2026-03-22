@@ -1,9 +1,9 @@
 # WebFetch Skill
 
-## Trigger keyword: fetch
-
 ## Purpose
 Fetch a web page by URL and extract its readable prose content, stripping all HTML markup, navigation, scripts, advertisements, and other non-content noise. Returns clean text ready for LLM synthesis or summarization.
+
+## Trigger keyword: fetch
 
 ## Interface
 - Module: `code/skills/WebFetch/web_fetch_skill.py`
@@ -11,34 +11,11 @@ Fetch a web page by URL and extract its readable prose content, stripping all HT
 
 ## Parameters
 
-### url
-- Type: `str`
-- Required: yes
-- The full HTTP or HTTPS URL to fetch. Local paths and ftp are rejected.
-
-### max_words
-- Type: `int`
-- Required: no
-- Default: `1000`
-- Range: `50` to `4000`
-- Maximum number of words of body prose to return. Content is truncated at this limit.
-
-### timeout_seconds
-- Type: `int`
-- Required: no
-- Default: `15`
-- Range: `5` to `60`
-- Network timeout in seconds.
-
-### query
-- Type: `str | None`
-- Required: no
-- Default: `None`
-- When provided, the full page is fetched and passed through an isolated LLM call that extracts
-  only the facts relevant to the query. The returned answer is compact - typically a short list
-  or paragraph - and does not flood the caller's context window with raw page content.
-  Use this when you already know what you are looking for on the page.
-  When `None`, the raw truncated page text is returned as usual.
+### `fetch_page_text(url, max_words, timeout_seconds, query)`
+- `url` *(required)* - full HTTP or HTTPS URL to fetch. Local paths and ftp:// are rejected.
+- `max_words` *(optional, default 1000)* - maximum words of body prose to return (range 50-4000).
+- `timeout_seconds` *(optional, default 15)* - network timeout in seconds (range 5-60).
+- `query` *(optional)* - when provided, runs an isolated LLM extraction pass and returns only the facts relevant to the query. Use when you know exactly what you are looking for on the page.
 
 ## Output
 Returns a plain `str` containing:

@@ -35,6 +35,8 @@ import sys
 import platform
 from pathlib import Path
 
+from version import __version__ as _FRAMEWORK_VERSION
+
 if sys.platform.startswith("win"):
     import ctypes
 
@@ -165,6 +167,7 @@ def get_system_info_dict() -> dict:
         return round(b / (1024 ** 3), 2) if b is not None else 0.0
 
     return {
+        "framework_version": _FRAMEWORK_VERSION,
         "os":                _get_os_name(),
         "python_version":    _get_python_version(),
         "ollama_version":    _get_ollama_version(),
@@ -176,6 +179,9 @@ def get_system_info_dict() -> dict:
 
 
 # ----------------------------------------------------------------------------------------------------
+
+# return the full system infor string
+
 def get_system_info_string() -> str:
     """Format system info as a human-readable string for ambient prompt context and logging.
 
@@ -183,7 +189,19 @@ def get_system_info_string() -> str:
     """
     d = get_system_info_dict()
     return (
-        f"System info: os={d['os']}; python={d['python_version']}; ollama={d['ollama_version']}; "
+        f"System info: framework={d['framework_version']}; os={d['os']}; python={d['python_version']}; ollama={d['ollama_version']}; "
         f"ram_used={d['ram_used_gb']} GiB; ram_available={d['ram_available_gb']} GiB; "
         f"disk_used={d['disk_used_gb']} GiB; disk_available={d['disk_available_gb']} GiB"
+    )
+
+# return the static system info string, that won't change with RAM use etc
+
+def get_static_system_info_string() -> str:
+    """Format static system info (OS and versions) as a human-readable string for ambient prompt context and logging.
+
+    Internal helper - not exposed as a callable tool.  Use get_system_info_dict() for tool-call access.
+    """
+    d = get_system_info_dict()
+    return (
+        f"System info: framework={d['framework_version']}; os={d['os']}; python={d['python_version']}; ollama={d['ollama_version']}"
     )

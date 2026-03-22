@@ -4,7 +4,7 @@
 <1-3 sentences: what this skill covers and when to reach for it. Include any "prefer this over X"
 or "do not use for Y" guidance so the LLM routes correctly.>
 
-## Trigger keyword: <primary_word>
+## Trigger keyword: <keyword or short phrase describing when to invoke this skill>
 
 ## Interface
 - Module: `code/skills/<Folder>/<module_name>.py`

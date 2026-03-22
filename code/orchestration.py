@@ -39,7 +39,7 @@ from skill_executor import execute_tool_call
 from skill_executor import is_skill_error
 from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
-from skills.SystemInfo.system_info_skill import get_system_info_string
+from skills.SystemInfo.system_info_skill import get_static_system_info_string, get_system_info_string
 from skills_catalog_builder import build_tool_definitions
 from workspace_utils import trunc
 
@@ -330,17 +330,19 @@ def _build_keyword_routing_rules(skills_payload: dict) -> str:
             for f in funcs
             if "(" in f and not f.startswith("list_")
         ]
-        if len(primary_candidates) != 1:
+        if not primary_candidates:
             continue
-        rules.append(
-            f'  - Prompt contains "{kw}": '
-            f"call `{primary_candidates[0]}` with parameters parsed from the prompt. "
-            f"Do NOT use web search or any other tool instead."
+        # Single-function skill: name it explicitly.  Multi-function: name the skill group.
+        call_hint = (
+            f"`{primary_candidates[0]}`"
+            if len(primary_candidates) == 1
+            else f"the appropriate {skill.get('skill_name', 'skill')} function"
         )
+        rules.append(f"  - {kw} \u2192 {call_hint}")
 
     if not rules:
         return ""
-    header = "Keyword routing (follow these rules before choosing any other tool):"
+    header = "Keyword routing (always use these tools directly; never substitute web search):"
     return header + "\n" + "\n".join(rules)
 
 
@@ -588,7 +590,7 @@ def orchestrate_prompt(
     _log(memory_store_result)
     _log(recalled_memories)
 
-    ambient_system_info = get_system_info_string()
+    ambient_system_info = get_static_system_info_string()
     _log_section("AMBIENT SYSTEM INFO")
     _log(ambient_system_info)
 
@@ -612,9 +614,7 @@ def orchestrate_prompt(
         "- The current runtime system info (RAM, disk, OS, etc.) is already provided below - do not call get_system_info_dict unless the user explicitly asks to refresh it.",
     ]
     if ambient_system_info:
-        system_parts.append(f"\nRuntime system context:\n{ambient_system_info}")
-    if recalled_memories and recalled_memories.strip():
-        system_parts.append(f"\nRelevant memories:\n{recalled_memories}")
+        system_parts.append(f"\n{ambient_system_info}")
 
     _prior_inject = session_context.as_inject_block() if session_context else ""
     if _prior_inject:
@@ -712,8 +712,8 @@ def orchestrate_prompt(
             run_success    = bool(final_response)
             _log(final_response)
             _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
-            # Final answer is returned directly, not appended to messages - no msg_idx.
-            _context_map.append({"round": round_num, "role": "asst", "label": "final answer", "chars": len(final_response), "auto_key": None, "msg_idx": None})
+            messages.append({"role": "assistant", "content": final_response})
+            _context_map.append({"round": round_num, "role": "asst", "label": "final answer", "chars": len(final_response), "auto_key": None, "msg_idx": len(messages) - 1})
             break
 
         # -- Execute each requested tool call --

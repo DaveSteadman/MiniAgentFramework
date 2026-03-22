@@ -3,7 +3,7 @@
 ## Purpose
 Provide runtime system information including OS name, Python and Ollama versions, RAM usage, and disk usage. Use this for any prompt about the machine, hardware, runtime environment, available resources, or version details. Do not use this for web or file queries.
 
-## Trigger keyword: systeminfo
+## Trigger keyword: system info, RAM or disk space, available memory, or OS and runtime version details
 
 ## Interface
 - Module: `code/skills/SystemInfo/system_info_skill.py`

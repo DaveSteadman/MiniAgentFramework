@@ -153,6 +153,37 @@ def summarize_with_llm(skill_md_path: Path, model_name: str, num_ctx: int) -> di
 
 
 # ----------------------------------------------------------------------------------------------------
+def _parse_param_descriptions(skill_text: str) -> dict[str, dict[str, str]]:
+    # Returns {func_name: {param_name: description_string}} parsed from the ## Parameters section.
+    # Each ### heading identifies a function; bullet lines beneath it map param names to descriptions.
+    result: dict[str, dict[str, str]] = {}
+    params_match = re.search(r"##\s+Parameters\s*\n(.*?)(?=\n##\s|\Z)", skill_text, re.DOTALL | re.IGNORECASE)
+    if not params_match:
+        return result
+    section = params_match.group(1)
+    blocks  = re.split(r"\n(?=###\s)", "\n" + section)
+    for block in blocks:
+        block = block.strip()
+        if not block.startswith("###"):
+            continue
+        first_nl  = block.find("\n")
+        heading   = block[:first_nl].strip() if first_nl > 0 else block
+        body      = block[first_nl:] if first_nl > 0 else ""
+        func_match = re.match(r"###\s+`?([A-Za-z_][A-Za-z0-9_]*)\s*[\(`]", heading)
+        if not func_match:
+            continue
+        func_name  = func_match.group(1)
+        param_dict: dict[str, str] = {}
+        for line in body.splitlines():
+            pm = re.match(r"\s*-\s+`([A-Za-z_][A-Za-z0-9_]*)`\s*(?:\*[^*]*\*\s*)?-\s+(.*)", line)
+            if pm:
+                param_dict[pm.group(1)] = pm.group(2).strip()
+        if param_dict:
+            result[func_name] = param_dict
+    return result
+
+
+# ----------------------------------------------------------------------------------------------------
 def summarize_locally(skill_md_path: Path) -> dict:
     # utf-8-sig strips the BOM if present, otherwise behaves like utf-8.
     skill_text = skill_md_path.read_text(encoding="utf-8-sig")
@@ -201,14 +232,15 @@ def summarize_locally(skill_md_path: Path) -> dict:
         output_lines = [line.strip(" -") for line in output_section[0][0].splitlines() if line.strip().startswith("-")]
 
     return {
-        "skill_name":      title,
-        "relative_path":   skill_md_path.as_posix(),
-        "purpose":         purpose,
-        "module":          module,
-        "trigger_keyword": trigger_keyword,
-        "functions":       functions,
-        "inputs":          input_lines,
-        "outputs":         output_lines,
+        "skill_name":        title,
+        "relative_path":     skill_md_path.as_posix(),
+        "purpose":           purpose,
+        "module":            module,
+        "trigger_keyword":   trigger_keyword,
+        "functions":         functions,
+        "inputs":            input_lines,
+        "outputs":           output_lines,
+        "param_descriptions": _parse_param_descriptions(skill_text),
     }
 
 
@@ -225,6 +257,10 @@ def summarize_skill(skill_md_path: Path, use_llm: bool, model_name: str, num_ctx
 
     if summary is None:
         summary = summarize_locally(skill_md_path=skill_md_path)
+    elif "param_descriptions" not in summary:
+        # LLM path does not produce param_descriptions - overlay from local parse.
+        skill_text = skill_md_path.read_text(encoding="utf-8-sig")
+        summary["param_descriptions"] = _parse_param_descriptions(skill_text)
 
     return summary
 
@@ -244,6 +280,7 @@ def normalize_summary(summary: dict, skill_md_path: Path) -> dict:
     normalized["relative_path"] = to_workspace_relative_path(skill_md_path)
 
     normalized.setdefault("trigger_keyword", "")
+    normalized.setdefault("param_descriptions", {})
     for field_name in ["functions", "inputs", "outputs"]:
         field_value = normalized.get(field_name, [])
         if isinstance(field_value, list):
@@ -431,6 +468,8 @@ def build_tool_definitions(skills_payload: dict) -> list[dict]:
         if skill_module_path:
             skill_module = _load_module_from_path(skill_module_path)
 
+        skill_param_descriptions = skill.get("param_descriptions", {})
+
         for func_sig in skill.get("functions", []):
             parsed = _parse_tool_signature(func_sig)
             if parsed is None:
@@ -450,11 +489,11 @@ def build_tool_definitions(skills_payload: dict) -> list[dict]:
 
             properties: dict = {}
             required:   list = []
+            func_param_descs = skill_param_descriptions.get(func_name, {})
             for p in params:
                 param_name = p["name"]
-                # Give the model an explicit description naming the parameter to prevent it
-                # from inventing aliases (e.g. "search_query" instead of "query").
-                param_desc = f"Parameter '{param_name}'. Use exactly this name."
+                raw_desc   = func_param_descs.get(param_name, "").strip()
+                param_desc = raw_desc if raw_desc else f"Parameter '{param_name}'."
                 properties[param_name] = {
                     **_python_type_to_json_schema(p["type"]),
                     "description": param_desc,

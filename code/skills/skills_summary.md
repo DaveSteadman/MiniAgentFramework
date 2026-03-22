@@ -22,14 +22,19 @@ Single JSON payload for orchestration planning.
       "inputs": [],
       "outputs": [
         "`run_python_snippet(...)` - returns captured stdout as a plain string. Returns `\"Error: ...\"` if the snippet raises an exception, times out, or produces no output."
-      ]
+      ],
+      "param_descriptions": {
+        "run_python_snippet": {
+          "code": "a complete, self-contained Python snippet as a string. Must use `print()` for all output."
+        }
+      }
     },
     {
       "skill_name": "DateTime Skill",
       "relative_path": "code/skills/DateTime/skill.md",
       "purpose": "Return the current date, time, day name, and month name. Prefer `get_datetime_data()` in all cases - it returns both date and time in a single call. Use `get_day_name()` or `get_month_name()` only when you specifically need just that one value.",
       "module": "code/skills/DateTime/datetime_skill.py",
-      "trigger_keyword": "datetime",
+      "trigger_keyword": "current date, time, day of the week, or month name",
       "functions": [
         "get_datetime_data()",
         "get_day_name()",
@@ -42,7 +47,8 @@ Single JSON payload for orchestration planning.
         "`time` (str) - current time as `\"HH:MM:SS\"`",
         "`get_day_name()` - returns the full name of the current day of the week, e.g. `\"Saturday\"`",
         "`get_month_name()` - returns the full name of the current month, e.g. `\"March\"`"
-      ]
+      ],
+      "param_descriptions": {}
     },
     {
       "skill_name": "FileAccess Skill",
@@ -82,7 +88,29 @@ Single JSON payload for orchestration planning.
         "`read_file(...)` - returns the file content as a string, or `\"File not found: ...\"` if the file does not exist.",
         "`find_files(...)` - returns a newline-separated list of matching workspace-relative paths, or a `\"No files found...\"` message.",
         "`find_folders(...)` - returns a newline-separated list of matching workspace-relative paths, or a `\"No folders found...\"` message."
-      ]
+      ],
+      "param_descriptions": {
+        "write_file": {
+          "path": "workspace-relative path. A bare name like `\"x.txt\"` resolves to `data/x.txt`. A path starting with `\"./\"` resolves from workspace root.",
+          "content": "content to write. Overwrites the file if it exists. Supports `{scratch:key}` token substitution - use `\"{scratch:mykey}\"` to write scratchpad content directly without calling `scratch_load` first."
+        },
+        "append_file": {
+          "path": "same path rules as `write_file`.",
+          "content": "content to append. A newline is added automatically if missing. Supports `{scratch:key}` token substitution - use `\"{scratch:mykey}\"` to append scratchpad content directly."
+        },
+        "read_file": {
+          "path": "same path rules as `write_file`.",
+          "max_chars": "maximum characters to return; content is truncated with `[truncated]` if exceeded."
+        },
+        "find_files": {
+          "keywords": "list of case-insensitive fragments that must ALL appear in the file name, e.g. `[\"pulse\", \"2026\"]`.",
+          "search_root": "workspace-relative directory to restrict the search, e.g. `\"data\"`. Leave empty to search the whole workspace."
+        },
+        "find_folders": {
+          "keywords": "list of case-insensitive fragments that must ALL appear in the folder name.",
+          "search_root": "workspace-relative directory to restrict the search. Leave empty to search the whole workspace."
+        }
+      }
     },
     {
       "skill_name": "Memory Skill",
@@ -111,7 +139,20 @@ Single JSON payload for orchestration planning.
         "`recall_relevant_memories(...)` - returns a formatted ranked list of memories with category and relevance score.",
         "`extract_environment_facts(...)` - returns a list of candidate environment facts extracted from the prompt.",
         "`get_memory_store_text()` - returns the full pretty-printed JSON of the memory store."
-      ]
+      ],
+      "param_descriptions": {
+        "store_prompt_memories": {
+          "user_prompt": "raw user text to extract facts from and store."
+        },
+        "recall_relevant_memories": {
+          "user_prompt": "current prompt used as the relevance query.",
+          "limit": "maximum number of memories to return.",
+          "min_score": "minimum token-overlap relevance threshold; lower values return more results."
+        },
+        "extract_environment_facts": {
+          "user_prompt": "raw user text to inspect for environment-specific facts only."
+        }
+      }
     },
     {
       "skill_name": "Scratchpad Skill",
@@ -152,14 +193,34 @@ Single JSON payload for orchestration planning.
         "`scratch_delete(...)` - returns confirmation or `\"Scratchpad key '<key>' not found - nothing deleted.\"`.",
         "`scratch_search(...)` - returns a formatted list of matching key names and sizes, or `\"No scratchpad keys contain the substring '<text>'.\"` when no match is found.",
         "`scratch_peek(...)` - returns `[Match in 'key' at char N / M total]` followed by the surrounding text with `>>>match<<<` highlighting, or an error string when the key or substring is not found."
-      ]
+      ],
+      "param_descriptions": {
+        "scratch_save": {
+          "key": "short alphanumeric identifier for the value, e.g. `\"webresult\"` or `\"step1_output\"`. Letters, digits, and underscores only. Stored lowercased.",
+          "value": "the string content to store. Overwrites any previous value at that key."
+        },
+        "scratch_load": {
+          "key": "the key to retrieve. Returns an error message when the key does not exist."
+        },
+        "scratch_delete": {
+          "key": "the key to remove from the scratchpad."
+        },
+        "scratch_search": {
+          "substring": "case-insensitive text to search for within stored values. Returns all keys whose value contains the substring."
+        },
+        "scratch_peek": {
+          "key": "the scratchpad key to inspect.",
+          "substring": "case-insensitive text to locate within the stored value.",
+          "context_chars": "characters to include before and after the match."
+        }
+      }
     },
     {
       "skill_name": "SystemInfo Skill",
       "relative_path": "code/skills/SystemInfo/skill.md",
       "purpose": "Provide runtime system information including OS name, Python and Ollama versions, RAM usage, and disk usage. Use this for any prompt about the machine, hardware, runtime environment, available resources, or version details. Do not use this for web or file queries.",
       "module": "code/skills/SystemInfo/system_info_skill.py",
-      "trigger_keyword": "systeminfo",
+      "trigger_keyword": "system info, RAM or disk space, available memory, or OS and runtime version details",
       "functions": [
         "get_system_info_dict()"
       ],
@@ -173,7 +234,8 @@ Single JSON payload for orchestration planning.
         "`ram_available_gb` (float) - RAM free in GiB",
         "`disk_used_gb` (float) - disk used in GiB",
         "`disk_available_gb` (float) - disk free in GiB"
-      ]
+      ],
+      "param_descriptions": {}
     },
     {
       "skill_name": "TaskManagement Skill",
@@ -208,7 +270,32 @@ Single JSON payload for orchestration planning.
         "`list_tasks()` - returns one line per task: `[on/off]  name  schedule  prompt-preview`.",
         "`get_task(...)` - returns a formatted block with all fields of the named task.",
         "All other functions return a confirmation or error string."
-      ]
+      ],
+      "param_descriptions": {
+        "get_task": {
+          "name": "exact task name (case-insensitive)."
+        },
+        "create_task": {
+          "name": "unique task name; alphanumeric, hyphens, underscores only.",
+          "schedule": "interval as a plain integer string, e.g. `\"60\"` = every 60 minutes; OR a daily wall-clock time as `\"HH:MM\"`, e.g. `\"08:30\"` = every day at 08:30.",
+          "prompt": "the natural-language instruction the scheduler will run on each firing."
+        },
+        "set_task_enabled": {
+          "name": "task name.",
+          "enabled": "`true` to enable, `false` to disable."
+        },
+        "set_task_schedule": {
+          "name": "task name.",
+          "schedule": "same format as `create_task`: integer minutes or `\"HH:MM\"`."
+        },
+        "set_task_prompt": {
+          "name": "task name.",
+          "prompt": "replacement prompt text."
+        },
+        "delete_task": {
+          "name": "name of the task to permanently remove."
+        }
+      }
     },
     {
       "skill_name": "WebFetch Skill",
@@ -218,6 +305,7 @@ Single JSON payload for orchestration planning.
       "trigger_keyword": "fetch",
       "functions": [
         "fetch_page_text(\"https://example.com/asyncio-guide\", query=\"summarise the key asyncio concepts\")",
+        "fetch_page_text(url, max_words, timeout_seconds, query)",
         "fetch_page_text(url: str, max_words: int = 1000, timeout_seconds: int = 15, query: str | None = None)"
       ],
       "inputs": [],
@@ -225,7 +313,15 @@ Single JSON payload for orchestration planning.
         "When `query` is None: the readable body text extracted from the page, up to `max_words` words.",
         "When `query` is set: a concise LLM-extracted answer targeted at the query, or `\"Not found on this page.\"`",
         "A string beginning with `\"Error:\"` if the fetch or parse failed. Never raises."
-      ]
+      ],
+      "param_descriptions": {
+        "fetch_page_text": {
+          "url": "full HTTP or HTTPS URL to fetch. Local paths and ftp:// are rejected.",
+          "max_words": "maximum words of body prose to return (range 50-4000).",
+          "timeout_seconds": "network timeout in seconds (range 5-60).",
+          "query": "when provided, runs an isolated LLM extraction pass and returns only the facts relevant to the query. Use when you know exactly what you are looking for on the page."
+        }
+      }
     },
     {
       "skill_name": "WebSearch Skill",
@@ -248,7 +344,19 @@ Single JSON payload for orchestration planning.
       "outputs": [
         "`search_web(...)` - returns `list[dict]`, each entry with `rank` (int), `title` (str), `url` (str), `snippet` (str). On error: single-entry list with `rank=0` and `snippet` describing the failure.",
         "`search_web_text(...)` - returns a plain-text formatted block with rank, title, URL, and snippet per result. Ready for direct LLM consumption."
-      ]
+      ],
+      "param_descriptions": {
+        "search_web": {
+          "query": "search query string.",
+          "max_results": "number of results to return, 1-10.",
+          "timeout_seconds": "network timeout in seconds, 5-30."
+        },
+        "search_web_text": {
+          "query": "search query string.",
+          "max_results": "number of results to return, 1-10.",
+          "timeout_seconds": "network timeout in seconds, 5-30."
+        }
+      }
     },
     {
       "skill_name": "Wikipedia Skill",
@@ -267,7 +375,13 @@ Single JSON payload for orchestration planning.
       "inputs": [],
       "outputs": [
         "`lookup_wikipedia(...)` - returns a plain-text block starting with `\"Wikipedia - <article title>\"` followed by the article extract (up to 400 words). Returns `\"No Wikipedia data found for '<topic>'\"` when no matching article is found. Skips disambiguation pages automatically and tries the next candidate."
-      ]
+      ],
+      "param_descriptions": {
+        "lookup_wikipedia": {
+          "topic": "subject to look up: a name, term, acronym, or short phrase.",
+          "timeout": "network timeout in seconds."
+        }
+      }
     }
   ]
 }
