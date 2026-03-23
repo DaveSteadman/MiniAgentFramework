@@ -85,7 +85,10 @@ Single JSON payload for orchestration planning.
         "write_file(\"notes/meeting.txt\", \"Discuss project timeline\")",
         "write_file(...)",
         "write_file(path, content)",
-        "write_file(path: str, content: str)"
+        "write_file(path: str, content: str)",
+        "write_from_scratch(...)",
+        "write_from_scratch(scratch_key, path)",
+        "write_from_scratch(scratch_key: str, path: str)"
       ],
       "inputs": [],
       "outputs": [
@@ -94,10 +97,15 @@ Single JSON payload for orchestration planning.
         "`read_file(...)` - returns the file content as a string, or `\"File not found: ...\"` if the file does not exist.",
         "`find_files(...)` - returns a newline-separated list of matching workspace-relative paths, or a `\"No files found...\"` message.",
         "`find_folders(...)` - returns a newline-separated list of matching workspace-relative paths, or a `\"No folders found...\"` message.",
+        "`write_from_scratch(...)` - returns `\"Wrote data/file.md (12345 chars from scratch key '_tc_r5_fetch_page_text')\"` on success, or `\"Error: ...\"` on failure.",
         "`create_folder(...)` - returns `\"Created folder: path\"` or `\"Folder already exists: path\"`, or `\"Error: ...\"` on failure.",
         "`folder_exists(...)` - returns `\"yes\"` or `\"no\"`."
       ],
       "param_descriptions": {
+        "write_from_scratch": {
+          "scratch_key": "scratchpad key holding the content to write, e.g. `\"_tc_r5_fetch_page_text\"` (the key shown in a truncation notice). Reads the stored value directly without requiring a separate `scratch_load` call.",
+          "path": "destination path; same resolution rules as `write_file`."
+        },
         "create_folder": {
           "path": "path of the directory to create, resolved under `data/`, e.g. `\"webresearch/01-Mine/2026-03-22\"`. Creates all missing parent directories. Safe to call if the folder already exists."
         },

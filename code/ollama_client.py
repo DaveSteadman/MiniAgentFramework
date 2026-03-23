@@ -28,6 +28,7 @@
 import json
 import re
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -41,7 +42,7 @@ from workspace_utils import trunc
 # ====================================================================================================
 DEFAULT_OLLAMA_HOST   = "http://localhost:11434"
 OLLAMA_CLOUD_HOST     = "https://api.ollama.com"
-_DEFAULT_LLM_TIMEOUT: int = 300   # seconds; updated at runtime by /timeout slash command
+_DEFAULT_LLM_TIMEOUT: int = 600   # seconds; updated at runtime by /timeout slash command
 
 # Active host and optional API key - set once at startup via configure_host().
 # Default to local Ollama; overridden by --ollama-host / OLLAMA_HOST env var.
@@ -189,6 +190,8 @@ class OllamaCallResult:
 # MARK: CORE HTTP + OLLAMA UTILITIES
 # ====================================================================================================
 def _request_json(url: str, method: str = "GET", payload: dict | None = None, timeout: float = 10.0) -> dict:
+    # Thread-based timeout: urllib socket timeouts are unreliable on Windows loopback;
+    # wrapping the call in a daemon thread lets us enforce a hard deadline via join().
     request_data = None
     headers      = {}
 
@@ -206,10 +209,25 @@ def _request_json(url: str, method: str = "GET", payload: dict | None = None, ti
         method=method,
     )
 
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        raw_body = response.read().decode("utf-8")
+    _result: list = [None]
+    _error:  list = [None]
 
-    return json.loads(raw_body)
+    def _worker() -> None:
+        try:
+            with urllib.request.urlopen(request) as response:
+                _result[0] = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            _error[0] = exc
+
+    _thread = threading.Thread(target=_worker, daemon=True)
+    _thread.start()
+    _thread.join(timeout=timeout)
+
+    if _thread.is_alive():
+        raise TimeoutError(f"Request timed out after {timeout:.0f}s")
+    if _error[0] is not None:
+        raise _error[0]
+    return _result[0]
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -528,6 +546,8 @@ def call_ollama_extended(
         raise RuntimeError(f"Ollama HTTP error {error.code}: {error_body}") from error
     except urllib.error.URLError as error:
         raise RuntimeError(f"Unable to reach Ollama at {host}: {error.reason}") from error
+    except TimeoutError as error:
+        raise RuntimeError(f"Ollama call timed out after {effective_timeout}s") from error
     except json.JSONDecodeError as error:
         raise RuntimeError("Ollama returned a non-JSON response") from error
 
@@ -661,6 +681,8 @@ def call_llm_chat(
         raise RuntimeError(f"LLM chat HTTP error {error.code}: {error_body}") from error
     except urllib.error.URLError as error:
         raise RuntimeError(f"Unable to reach server at {host}: {error.reason}") from error
+    except TimeoutError as error:
+        raise RuntimeError(f"LLM chat timed out after {effective_timeout}s") from error
     except json.JSONDecodeError as error:
         raise RuntimeError("LLM chat returned a non-JSON response") from error
 

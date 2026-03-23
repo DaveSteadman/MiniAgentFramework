@@ -64,7 +64,7 @@ from workspace_utils import trunc
 USER_PROMPT              = "output the time"
 REQUESTED_MODEL          = "20b"
 DEFAULT_NUM_CTX          = 131072
-MAX_ITERATIONS           = 20   # safety cap; model exits naturally via native tool calling
+MAX_ITERATIONS           = 25   # safety cap; model exits naturally via native tool calling
 MAX_CHAT_HISTORY_TURNS   = 10     # keep the last N user/assistant pairs; older turns are trimmed
 SKILLS_SUMMARY_PATH      = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
 SCHEDULES_DIR            = get_schedules_dir()

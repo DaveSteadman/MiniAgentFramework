@@ -23,6 +23,7 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
 from skills.SystemInfo.system_info_skill import get_static_system_info_string, get_system_info_string
 from skills_catalog_builder import build_tool_definitions
+from workspace_utils import get_workspace_root
 from workspace_utils import trunc
 
 
@@ -621,6 +623,55 @@ def _build_system_message(
 
 
 # ====================================================================================================
+# MARK: FILE BLOCK WRITER
+# ====================================================================================================
+_WRITE_FILE_BLOCK_RE = re.compile(
+    r"WRITE_FILE:\s*([^\n]+)\n---FILE_START---[ \t]*\n(.*?)\n?---FILE_END---",
+    re.DOTALL,
+)
+
+# ----------------------------------------------------------------------------------------------------
+def _write_file_blocks(response: str) -> list[str]:
+    # Parse WRITE_FILE blocks from the agent's final response and write them to disk.
+    # Expected format (each field on its own line):
+    #
+    #   WRITE_FILE: webresearch/01-Mine/2026-03-22/001-slug.md
+    #   ---FILE_START---
+    #   file content here (multi-line)
+    #   ---FILE_END---
+    #
+    # Relative paths resolve under data/. Strips a leading data/ prefix so either form works.
+    # Silently skips any block whose resolved path escapes the data directory.
+    # Returns workspace-relative posix paths for every file written successfully.
+    workspace_root = get_workspace_root()
+    data_dir       = workspace_root / "data"
+
+    written: list[str] = []
+    for match in _WRITE_FILE_BLOCK_RE.finditer(response):
+        raw_path  = match.group(1).strip()
+        content   = match.group(2)
+
+        normalized = raw_path.replace("\\", "/")
+        if normalized.startswith("data/"):
+            normalized = normalized[5:]
+
+        candidate = Path(normalized)
+        target    = (data_dir / normalized).resolve() if not candidate.is_absolute() else candidate.resolve()
+
+        try:
+            target.relative_to(data_dir)
+        except ValueError:
+            log_to_session(f"[file-blocks] Skipping unsafe path: {raw_path!r}")
+            continue
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        written.append(target.relative_to(workspace_root).as_posix())
+
+    return written
+
+
+# ====================================================================================================
 # MARK: ORCHESTRATION PIPELINE
 # ====================================================================================================
 def orchestrate_prompt(
@@ -885,6 +936,11 @@ def orchestrate_prompt(
             run_success = bool(final_response)
         except Exception as error:
             final_response = f"(synthesis failed: {error})"
+
+    # Extract and write any WRITE_FILE blocks embedded in the model's text response.
+    _file_blocks_written = _write_file_blocks(final_response) if final_response else []
+    if _file_blocks_written:
+        _log_file_only(f"[file-blocks] Wrote {len(_file_blocks_written)} file(s): {', '.join(_file_blocks_written)}")
 
     _log_section_file_only("TOOL CALL SUMMARY")
     _log_file_only(_format_tool_outputs(tool_outputs))

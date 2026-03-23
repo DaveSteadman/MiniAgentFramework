@@ -23,3 +23,8 @@ markdown>=3.6
 # Up/down arrow history navigation in CLI chat mode.
 # Falls back to plain input() if absent, so not strictly required.
 prompt_toolkit>=3.0
+
+# Updated Mozilla CA certificate bundle used by fetch_html() for SSL verification.
+# Ensures sites like arxiv.org whose cert chain is missing from Python's bundled CAs work
+# correctly on Windows without disabling SSL verification.
+certifi>=2024.0

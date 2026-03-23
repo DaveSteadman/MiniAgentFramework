@@ -32,6 +32,7 @@
 import gzip
 import html as _html
 import re
+import ssl
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
@@ -41,6 +42,12 @@ try:
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
+
+try:
+    import certifi as _certifi
+    _SSL_CTX: ssl.SSLContext = ssl.create_default_context(cafile=_certifi.where())
+except ImportError:
+    _SSL_CTX = ssl.create_default_context()
 
 
 # ====================================================================================================
@@ -108,7 +115,7 @@ def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT) -> tuple[str, str]:
     Raises on network error - never silently swallows exceptions.
     """
     request = urllib.request.Request(url=url, headers=HTTP_HEADERS, method="GET")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urllib.request.urlopen(request, timeout=timeout, context=_SSL_CTX) as response:
         final_url    = response.url
         content_type = response.headers.get("Content-Type", "")
         charset      = "utf-8"

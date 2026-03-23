@@ -11,12 +11,19 @@ Interface for all file read, write, append, and search operations. All relative 
   - `write_file(path: str, content: str)`
   - `append_file(path: str, content: str)`
   - `read_file(path: str, max_chars: int = 8000)`
+  - `write_from_scratch(scratch_key: str, path: str)`
   - `find_files(keywords: list[str], search_root: str = "")`
   - `find_folders(keywords: list[str], search_root: str = "")`
   - `create_folder(path: str)`
   - `folder_exists(path: str)`
 
 ## Parameters
+
+### `write_from_scratch(scratch_key, path)`
+- `scratch_key` *(required)* - scratchpad key holding the content to write, e.g. `"_tc_r5_fetch_page_text"` (the key shown in a truncation notice). Reads the stored value directly without requiring a separate `scratch_load` call.
+- `path` *(required)* - destination path; same resolution rules as `write_file`.
+
+Use this when large content was auto-saved to a scratchpad key (e.g. a web page fetch that was truncated in the tool message). Avoids putting large content into tool call arguments where JSON encoding can fail.
 
 ### `create_folder(path)`
 - `path` *(required)* - path of the directory to create, resolved under `data/`, e.g. `"webresearch/01-Mine/2026-03-22"`. Creates all missing parent directories. Safe to call if the folder already exists.
@@ -51,12 +58,14 @@ Interface for all file read, write, append, and search operations. All relative 
 - `read_file(...)` - returns the file content as a string, or `"File not found: ..."` if the file does not exist.
 - `find_files(...)` - returns a newline-separated list of matching workspace-relative paths, or a `"No files found..."` message.
 - `find_folders(...)` - returns a newline-separated list of matching workspace-relative paths, or a `"No folders found..."` message.
+- `write_from_scratch(...)` - returns `"Wrote data/file.md (12345 chars from scratch key '_tc_r5_fetch_page_text')"` on success, or `"Error: ..."` on failure.
 - `create_folder(...)` - returns `"Created folder: path"` or `"Folder already exists: path"`, or `"Error: ..."` on failure.
 - `folder_exists(...)` - returns `"yes"` or `"no"`.
 
 ## Triggers
 Invoke this skill when the prompt contains any of these concepts or phrases:
 - `write to file`, `create file`, `save to file`
+- `write page to file`, `save fetched content to file`, `write from scratch`, `write scratch to file`
 - `append to file`, `add to file`
 - `read file`, `show file`, `open file`, `contents of`
 - `find file`, `find folder`, `locate file`, `search for file`

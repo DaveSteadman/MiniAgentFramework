@@ -260,3 +260,33 @@ def folder_exists(path: str) -> str:
     except ValueError as err:
         return f"Error: {err}"
     return "yes" if folder.exists() and folder.is_dir() else "no"
+
+
+# ----------------------------------------------------------------------------------------------------
+def write_from_scratch(scratch_key: str, path: str) -> str:
+    """Write the content stored in a scratchpad key to a file at path.
+
+    Reads the auto-saved scratchpad key (e.g. _tc_r5_fetch_page_text shown in a truncation
+    notice) and writes it to the given path. The path follows the same resolution rules as
+    write_file. Creates parent directories automatically.
+
+    Use this instead of write_file when the content to write is already in the scratchpad
+    (e.g. a large page fetch that was auto-saved), to avoid putting large content into tool
+    call arguments where JSON encoding can cause errors.
+    """
+    import sys as _sys
+    _code_dir = str(Path(__file__).resolve().parents[2])
+    if _code_dir not in _sys.path:
+        _sys.path.insert(0, _code_dir)
+    from scratchpad import scratch_load as _scratch_load
+
+    content = _scratch_load(scratch_key)
+    if "not found" in content.lower() and len(content) < 200:
+        return f"Error: scratchpad key {scratch_key!r} does not exist"
+    try:
+        target_path = _resolve_safe_path(path)
+    except ValueError as err:
+        return f"Error: {err}"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(content, encoding="utf-8")
+    return f"Wrote {target_path.relative_to(WORKSPACE_ROOT).as_posix()} ({len(content):,} chars from scratch key {scratch_key!r})"
