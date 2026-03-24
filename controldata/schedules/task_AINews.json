@@ -8,7 +8,18 @@
         "time": "07:00"
       },
       "prompts": [
-        "Today is {longdate}. Your goal: fetch the arXiv cs.AI new-submissions listing and write one .md file per qualifying paper. Follow these steps exactly.\n\nSTEP 1 - Fetch the listing. Direct arxiv.org fetches fail with SSL errors on this machine. Always prefix arxiv URLs with 'https://r.jina.ai/' to bypass this. Fetch: https://r.jina.ai/https://browse-export.arxiv.org/list/cs.AI/new with max_words=3000. This returns a list of today's new submissions with arXiv IDs, titles, and abstracts.\n\nSTEP 2 - Extract paper candidates. From the fetched listing, identify up to 10 papers. For each one, note its arXiv ID (e.g. 2603.12345) and title.\n\nSTEP 3 - Evaluate and write. For each candidate paper:\n  a) Fetch the abstract page: https://r.jina.ai/https://arxiv.org/abs/<ID> with max_words=1000.\n  b) KEEP if it describes: a new model, training technique, benchmark, dataset, or novel method with measurable results. DISCARD if it is a survey, position paper, or has no concrete technical contribution.\n  c) For each KEPT paper, immediately write a markdown file to webresearch/01-Mine/{today}/NNN-<short-slug>.md (NNN = zero-padded counter from 001). Do not batch writes - write each file as soon as you decide to keep it. The file must contain: the arXiv URL, the paper title, authors, a technical summary of 300+ words covering the method, results, and key metrics.\n\nDo not do any other searches. Stop after processing 10 candidates or writing 8 files, whichever comes first."
+        "Today is {longdate}. Your goal: save qualifying arXiv cs.AI papers to files for later analysis. Follow these steps EXACTLY.\n\nSTEP 1 - Fetch listing.\n  a) Call fetch_page_text(url=\"https://r.jina.ai/https://arxiv.org/list/cs.AI/new\", max_words=2500) - NO query parameter.\n  b) The result will be truncated. Find the key in the truncation notice (\"auto-saved to scratchpad key: _tc_r...\"). Call scratch_load with that key to get the complete listing.\n\nSTEP 2 - Extract candidates. From the FULL listing, note the arXiv ID (format: 2603.12345) and title of up to 10 papers.\n\nSTEP 3 - Process each candidate. For each of the 10 candidates:\n  a) Call fetch_page_text(url=\"https://r.jina.ai/https://arxiv.org/abs/<ID>\", max_words=1000) - NO query parameter.\n  b) From the truncated content shown in the tool result (do NOT call scratch_load), decide KEEP or DISCARD.\n     KEEP: new model, training technique, benchmark, dataset, or novel method with measurable results.\n     DISCARD: survey, position paper, or no concrete technical contribution.\n  c) If KEEP: call write_from_scratch(scratch_key=\"<key from truncation notice>\", path=\"webresearch/01-Mine/{today}/NNN-<slug>.md\")\n     (NNN = zero-padded counter from 001; slug = 3-5 hyphenated words from title)\n  d) If DISCARD: move to the next candidate.\n\nStop after writing 8 files or processing all 10 candidates. When done, reply with a brief list of the files written. Do NOT call web_search or scratch_load for abstract pages."
+      ]
+    },
+    {
+      "name": "AINews_Mine_Test",
+      "enabled": false,
+      "schedule": {
+        "type": "daily",
+        "time": "07:00"
+      },
+      "prompts": [
+        "Today is {longdate}. The goal is to find new AI News as save for later analysis.\nSTEP 1 - Find links: Search the internet for scientific papers, company announcements, and reports of new architectures. Save the links to an ai_headlines.json file of headlines and URLs."
       ]
     },
     {

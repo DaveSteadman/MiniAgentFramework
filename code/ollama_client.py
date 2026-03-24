@@ -453,6 +453,18 @@ def resolve_model_name(requested_model: str, available_models: list[str]) -> str
 
 
 # ----------------------------------------------------------------------------------------------------
+def is_explicit_model_name(requested_model: str) -> bool:
+    """Return True when *requested_model* looks like a fully qualified model tag.
+
+    This is intentionally lightweight: hosts such as Ollama Cloud may allow models
+    that do not appear in /api/tags, so slash-command model selection should accept
+    an explicit tag override like ``gpt-oss:120b-cloud`` even when discovery is stale.
+    """
+    requested = requested_model.strip()
+    return bool(requested) and ":" in requested and not any(ch.isspace() for ch in requested)
+
+
+# ----------------------------------------------------------------------------------------------------
 def stop_model(
     model_name: str,
     host: str | None = None,

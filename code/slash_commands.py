@@ -136,20 +136,32 @@ def _cmd_model(arg: str, ctx: SlashCommandContext) -> None:
         )
         return
 
-    from ollama_client import list_ollama_models, register_session_config, resolve_model_name
+    from ollama_client import (
+        is_explicit_model_name,
+        list_ollama_models,
+        register_session_config,
+        resolve_model_name,
+    )
     try:
         available = list_ollama_models()
-        if not available:
-            ctx.output("No models installed in Ollama.", "error")
-            return
 
-        resolved = resolve_model_name(arg, available)
+        resolved = resolve_model_name(arg, available) if available else None
         if resolved is None:
-            ctx.output(
-                f"Model '{arg}' not found.  Available: {', '.join(available)}",
-                "error",
-            )
-            return
+            if is_explicit_model_name(arg):
+                resolved = arg.strip()
+                ctx.output(
+                    f"Model '{resolved}' is not in the downloaded model list; using it as an explicit override.",
+                    "dim",
+                )
+            else:
+                if not available:
+                    ctx.output("No models installed in Ollama.", "error")
+                    return
+                ctx.output(
+                    f"Model '{arg}' not found.  Available: {', '.join(available)}",
+                    "error",
+                )
+                return
 
         old = ctx.config.resolved_model
         ctx.config.resolved_model = resolved

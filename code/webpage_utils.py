@@ -250,18 +250,57 @@ def _prune_noise_bs4(soup) -> None:
 
 
 def _extract_structured_bs4(container) -> str:
-    """Walk headings and paragraphs in document order, emitting Markdown headings.
+    """Walk headings, paragraphs, and tables in document order, emitting structured text.
 
     Each <h1>-<h6> becomes a Markdown heading; each <p> becomes a paragraph if it
-    meets MIN_PARA_WORDS.  Walking in document order preserves the heading-then-body
-    structure of multi-article pages so distinct topics are never merged.
+    meets MIN_PARA_WORDS.  Each top-level <table> is emitted as pipe-separated rows
+    so that list/table data (e.g. Wikipedia winners tables) survives the extraction pass
+    and is available to the query-mode LLM filter.  Walking in document order preserves
+    the heading-then-body structure of multi-article pages so distinct topics are never merged.
     """
     _HEADING_NAMES = list(_HEADING_PREFIX.keys())
     items:  list[str] = []
     seen:   set[str]  = set()
 
-    for el in container.find_all(_HEADING_NAMES + ["p"]):
-        tag  = el.name
+    for el in container.find_all(_HEADING_NAMES + ["p", "table"]):
+        tag = el.name
+
+        # ---- TABLE: emit as pipe-separated rows ----
+        if tag == "table":
+            # Skip tables nested inside another table already being processed.
+            if el.find_parent("table"):
+                continue
+
+            rows: list[str] = []
+
+            # Header cells (all <th> in the table, typically the first row).
+            header_cells = [
+                _SPACE_RE.sub(" ", th.get_text(" ", strip=True)).strip()
+                for th in el.find_all("th")
+            ]
+            header_cells = [c for c in header_cells if c]
+            if header_cells:
+                rows.append(" | ".join(header_cells))
+
+            # Data rows.
+            for tr in el.find_all("tr"):
+                cells = [
+                    _SPACE_RE.sub(" ", td.get_text(" ", strip=True)).strip()
+                    for td in tr.find_all("td")
+                ]
+                cells = [c for c in cells if c]
+                if cells:
+                    rows.append(" | ".join(cells))
+
+            if rows:
+                table_text = "\n".join(rows)
+                key = table_text[:80].lower()
+                if key not in seen:
+                    seen.add(key)
+                    items.append(table_text)
+            continue
+
+        # ---- HEADING / PARAGRAPH ----
         text = _SPACE_RE.sub(" ", el.get_text(" ", strip=True)).strip()
         if not text:
             continue

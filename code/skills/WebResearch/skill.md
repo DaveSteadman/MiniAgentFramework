@@ -1,0 +1,44 @@
+# WebResearch Skill
+
+## Purpose
+Search the web, visit multiple relevant pages, extract the useful text, optionally follow promising links, and return a compact evidence-led research bundle.
+
+Use this when the answer is unlikely to be found reliably from a single search result or single page extract.
+This skill is designed to reduce orchestration thrash by owning the search frontier internally.
+
+## Interface
+- Module: `code/skills/WebResearch/web_research_skill.py`
+- Functions:
+  - `research_traverse(query: str, max_search_results: int = 5, max_pages: int = 6, max_hops: int = 1, same_domain_only_for_hops: bool = True, timeout_seconds: int = 15, max_words_per_page: int = 450, max_evidence_quotes: int = 3)`
+
+## Parameters
+
+### `research_traverse(query, max_search_results = 5, max_pages = 6, max_hops = 1, same_domain_only_for_hops = True, timeout_seconds = 15, max_words_per_page = 450, max_evidence_quotes = 3)`
+- `query` *(required)* - the research question or investigation prompt.
+- `max_search_results` *(optional, default 5)* - number of search results to seed the frontier from.
+- `max_pages` *(optional, default 6)* - maximum total number of pages to visit.
+- `max_hops` *(optional, default 1)* - how many link-following hops beyond the initial search results are allowed.
+- `same_domain_only_for_hops` *(optional, default True)* - when following links found inside pages, stay on the same domain unless set false.
+- `timeout_seconds` *(optional, default 15)* - network timeout per fetch.
+- `max_words_per_page` *(optional, default 450)* - truncate extracted page text per page to control size.
+- `max_evidence_quotes` *(optional, default 3)* - number of best evidence snippets to keep per useful page.
+
+## Output
+- returns a dict with:
+- `query` - original query
+- `summary` - short synthesis of the strongest evidence found
+- `answer_confidence` - `high`, `medium`, or `low`
+- `visited_count` - number of fetched pages
+- `seed_results` - initial search results used to seed the traversal
+- `best_pages` - compact list of the most relevant pages with URL, title, score, and evidence snippets
+- `exploration_log` - per-page log showing what was visited and why
+- `unvisited_candidates` - discovered but not visited URLs
+- `full_report` - larger text block suitable for scratchpad storage
+
+## Scratchpad integration
+This skill is intended to return a compact top-level summary plus a large `full_report`.
+The orchestration layer can keep the compact summary inline and auto-park the full result in scratchpad for later `scratch_load`.
+
+## Examples
+- `research_traverse("Which Ferrari drivers have won the Monaco Grand Prix?")`
+- `research_traverse("What changed in Python 3.14 packaging guidance?", max_pages=8, max_hops=1)`

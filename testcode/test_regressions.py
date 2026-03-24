@@ -58,6 +58,5 @@ class RegressionTests(unittest.TestCase):
             self.assertIn("parameters", tool["function"])
             self.assertEqual(tool["function"]["parameters"]["type"], "object")
 
-
 if __name__ == "__main__":
     unittest.main()

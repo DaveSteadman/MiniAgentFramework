@@ -346,6 +346,44 @@ Single JSON payload for orchestration planning.
       }
     },
     {
+      "skill_name": "WebResearch Skill",
+      "relative_path": "code/skills/WebResearch/skill.md",
+      "purpose": "Search the web, visit multiple relevant pages, extract the useful text, optionally follow promising links, and return a compact evidence-led research bundle.",
+      "module": "code/skills/WebResearch/web_research_skill.py",
+      "trigger_keyword": "",
+      "functions": [
+        "research_traverse(\"What changed in Python 3.14 packaging guidance?\", max_pages=8, max_hops=1)",
+        "research_traverse(\"Which Ferrari drivers have won the Monaco Grand Prix?\")",
+        "research_traverse(query, max_search_results = 5, max_pages = 6, max_hops = 1, same_domain_only_for_hops = True, timeout_seconds = 15, max_words_per_page = 450, max_evidence_quotes = 3)",
+        "research_traverse(query: str, max_search_results: int = 5, max_pages: int = 6, max_hops: int = 1, same_domain_only_for_hops: bool = True, timeout_seconds: int = 15, max_words_per_page: int = 450, max_evidence_quotes: int = 3)"
+      ],
+      "inputs": [],
+      "outputs": [
+        "returns a dict with:",
+        "`query` - original query",
+        "`summary` - short synthesis of the strongest evidence found",
+        "`answer_confidence` - `high`, `medium`, or `low`",
+        "`visited_count` - number of fetched pages",
+        "`seed_results` - initial search results used to seed the traversal",
+        "`best_pages` - compact list of the most relevant pages with URL, title, score, and evidence snippets",
+        "`exploration_log` - per-page log showing what was visited and why",
+        "`unvisited_candidates` - discovered but not visited URLs",
+        "`full_report` - larger text block suitable for scratchpad storage"
+      ],
+      "param_descriptions": {
+        "research_traverse": {
+          "query": "the research question or investigation prompt.",
+          "max_search_results": "number of search results to seed the frontier from.",
+          "max_pages": "maximum total number of pages to visit.",
+          "max_hops": "how many link-following hops beyond the initial search results are allowed.",
+          "same_domain_only_for_hops": "when following links found inside pages, stay on the same domain unless set false.",
+          "timeout_seconds": "network timeout per fetch.",
+          "max_words_per_page": "truncate extracted page text per page to control size.",
+          "max_evidence_quotes": "number of best evidence snippets to keep per useful page."
+        }
+      }
+    },
+    {
       "skill_name": "WebSearch Skill",
       "relative_path": "code/skills/WebSearch/skill.md",
       "purpose": "Search the web using DuckDuckGo and return ranked results with title, URL, and snippet. No API key required. Use `search_web_text` for direct synthesis - results come back as formatted text ready to read inline. Use `search_web` when you need to iterate over individual result fields (url, title, snippet) programmatically or pass them selectively to another skill. This skill only returns results - it does not persist or save anything.",

@@ -317,39 +317,47 @@ def resolve_execution_model(requested_model: str) -> str:
 # ====================================================================================================
 # MARK: ROUTING HELPERS
 # ====================================================================================================
-def _build_keyword_routing_rules(skills_payload: dict) -> str:
-    """Build explicit routing rules from skills that have a trigger_keyword field.
-
-    Returns a formatted string suitable for inclusion in the system prompt,
-    or an empty string when no keyword-routed skills are present.
-    """
-    rules: list[str] = []
+def _build_skill_selection_guidance(skills_payload: dict) -> str:
+    # Build a skill selection guidance block from the catalog's purpose descriptions.
+    # Produces a natural-language menu that lets the LLM reason about which tool
+    # best fits the task. Each entry shows the primary function name(s) and a
+    # concise description derived from the skill's purpose field.
+    lines: list[str] = []
     for skill in skills_payload.get("skills", []):
-        # Use the dedicated trigger_keyword field.
-        kw = skill.get("trigger_keyword", "").strip()
-        if not kw:
+        purpose = (skill.get("purpose") or "").strip()
+        if not purpose:
             continue
 
-        funcs              = skill.get("functions", [])
-        primary_candidates = [
-            f.split("(")[0].strip()
-            for f in funcs
-            if "(" in f and not f.startswith("list_")
-        ]
-        if not primary_candidates:
-            continue
-        # Single-function skill: name it explicitly.  Multi-function: name the skill group.
-        call_hint = (
-            f"`{primary_candidates[0]}`"
-            if len(primary_candidates) == 1
-            else f"the appropriate {skill.get('skill_name', 'skill')} function"
-        )
-        rules.append(f"  - {kw} -> {call_hint}")
+        funcs = skill.get("functions", [])
 
-    if not rules:
+        # Collect unique function names in order of appearance; skip list_ helpers.
+        seen_names: set[str]    = set()
+        unique_funcs: list[str] = []
+        for f in funcs:
+            if "(" not in f:
+                continue
+            name = f.split("(")[0].strip()
+            if name and name not in seen_names and not name.startswith("list_"):
+                seen_names.add(name)
+                unique_funcs.append(name)
+
+        if not unique_funcs:
+            continue
+
+        # First sentence of purpose only. Regex requires whitespace after .!? so
+        # decimal numbers like 3.14.2 are preserved. Strip any leading list-marker
+        # that leaked through from skill.md bullet formatting.
+        sentences   = re.split(r"(?<=[.!?])\s+", purpose)
+        description = sentences[0].lstrip("- ").strip()
+        if len(description) > 160:
+            description = description[:157] + "..."
+
+        func_label = " / ".join(f"`{f}`" for f in unique_funcs[:3])
+        lines.append(f"- {func_label}: {description}")
+
+    if not lines:
         return ""
-    header = "Keyword routing (always use these tools directly; never substitute web search):"
-    return header + "\n" + "\n".join(rules)
+    return "Available tools - select based on what the task requires:\n" + "\n".join(lines)
 
 
 # ====================================================================================================
@@ -585,7 +593,7 @@ def _build_system_message(
     """Assemble the full system prompt from all runtime context sources.
 
     Combines core behavioural rules, ambient system info, prior-turn context injection,
-    keyword routing rules, and active scratchpad hints into a single system message string.
+    skill selection guidance, and active scratchpad hints into a single system message string.
     Called once per orchestration run, before the tool-calling loop begins.
     """
     system_parts = [
@@ -595,7 +603,8 @@ def _build_system_message(
         "- Never claim a tool action succeeded unless the tool output explicitly confirms it.",
         "- Do not add explanatory preamble - respond with direct answers only.",
         "- Complete ALL steps in the user's request. If the user asks for output to be written to a file, that write must happen as a tool call before you give your final answer.",
-        "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research skill (lookup_wikipedia or web_search) to fetch the content first. Never generate biographical, historical, or factual content from memory.",
+        "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research skill (lookup_wikipedia, research_traverse, or search_web_text) to fetch the content first. Never generate biographical, historical, or factual content from memory.",
+        "- Web tool preference order: (1) use `lookup_wikipedia` for stable general-knowledge topics - people, places, concepts, history, science; (2) use `research_traverse` when the answer requires examining multiple pages or following evidence across sources; (3) use `search_web_text` for a single quick lookup where one result is enough; (4) use `search_web` + `fetch_page_text` only when you need to select and fetch specific URLs manually. Do not skip to a lower-preference tool when a higher one is appropriate.",
         '- Whenever you call fetch_page_text to retrieve specific information, always set the query parameter to your specific question (e.g. fetch_page_text(url=..., query="<your specific question here>")). This applies whether the URL came from a search result or was provided directly by the user. The query parameter runs an isolated extraction so only the relevant facts are returned - this avoids overloading the context with raw page text. Only omit query if the user explicitly asks for raw page content.',
         "- The python execution tool is more reliable for calculations than the model's internal math capabilities.",
         "- The scratchpad tool can store intermediate results across steps.",
@@ -608,9 +617,9 @@ def _build_system_message(
     if prior_inject:
         system_parts.append(f"\nPrior session context:\n{prior_inject}")
 
-    routing_rules = _build_keyword_routing_rules(skills_payload)
-    if routing_rules:
-        system_parts.append(f"\n{routing_rules}")
+    skill_guidance = _build_skill_selection_guidance(skills_payload)
+    if skill_guidance:
+        system_parts.append(f"\n{skill_guidance}")
 
     scratch_keys = get_scratchpad_key_names()
     if scratch_keys:
