@@ -4,8 +4,8 @@
 # HTTP client and server-management utilities for Ollama inference services.
 #
 # Supports local Ollama, LAN-hosted Ollama machines, and Ollama Cloud. The active host
-# and optional API key are configured once at startup via configure_host(); all subsequent
-# calls use the configured values without requiring callers to thread them through.
+# is configured once at startup via configure_host(); all subsequent calls use the
+# configured value without requiring callers to thread it through.
 #
 # Provides a thin layer over Ollama's REST API, covering:
 #   - Host configuration and connectivity checking.
@@ -44,10 +44,9 @@ DEFAULT_OLLAMA_HOST   = "http://localhost:11434"
 OLLAMA_CLOUD_HOST     = "https://api.ollama.com"
 _DEFAULT_LLM_TIMEOUT: int = 600   # seconds; updated at runtime by /timeout slash command
 
-# Active host and optional API key - set once at startup via configure_host().
+# Active host - set once at startup via configure_host().
 # Default to local Ollama; overridden by --ollama-host / OLLAMA_HOST env var.
-_active_host:    str        = DEFAULT_OLLAMA_HOST
-_active_api_key: str | None = None
+_active_host: str = DEFAULT_OLLAMA_HOST
 
 # Active session model and context window - set once at startup via register_session_config().
 # Skills use get_active_model() / get_active_num_ctx() instead of accepting these as parameters.
@@ -128,36 +127,25 @@ HOST_ALIASES: dict[str, str] = {
 }
 
 
-def configure_host(host: str, api_key: str | None = None) -> None:
-    """Set the active Ollama host and optional API key for all subsequent LLM calls.
-
-    - Local Ollama (default): http://localhost:11434  - no API key needed.
-    - LAN machine:            http://<ip>:11434       - no API key needed.
-    - Ollama Cloud:           https://api.ollama.com  - requires an API key.
+def configure_host(host: str) -> None:
+    """Set the active Ollama host for all subsequent LLM calls.
 
     Accepts well-known aliases ('local', 'localhost') and bare hostnames/IPs;
     bare values (no '://') are expanded to http://<host>:11434 automatically.
 
     Stored as module-level state; mirrors the pattern used by set_llm_timeout().
     """
-    global _active_host, _active_api_key
+    global _active_host
     resolved = HOST_ALIASES.get(host.strip().lower(), host.strip())
     if "://" not in resolved:
         resolved = f"http://{resolved}:11434"
-    _active_host    = resolved.rstrip("/")
-    _active_api_key = api_key or None
+    _active_host = resolved.rstrip("/")
 
 
 # ----------------------------------------------------------------------------------------------------
 def get_active_host() -> str:
     """Return the currently configured Ollama host URL."""
     return _active_host
-
-
-# ----------------------------------------------------------------------------------------------------
-def get_active_api_key() -> str | None:
-    """Return the currently configured Ollama API key, or None for local/LAN hosts."""
-    return _active_api_key
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -198,9 +186,6 @@ def _request_json(url: str, method: str = "GET", payload: dict | None = None, ti
     if payload is not None:
         request_data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
-
-    if _active_api_key:
-        headers["Authorization"] = f"Bearer {_active_api_key}"
 
     request = urllib.request.Request(
         url=url,

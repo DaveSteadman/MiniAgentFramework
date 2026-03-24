@@ -29,7 +29,7 @@
 #   python testcode/test_wrapper.py --prompts "output the time" "what is today's date"
 #   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/test_chat_exchanges.json
 #   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/default_prompts.json --ollama-host http://MONTBLANC:11434
-#   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/default_prompts.json --ollama-host https://api.ollama.com --ollama-api-key <key>
+#   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/default_prompts.json --ollama-host https://api.ollama.com
 # ====================================================================================================
 
 
@@ -98,7 +98,6 @@ def invoke_framework(
     prompt: str,
     model: str | None = None,
     ollama_host: str | None = None,
-    ollama_api_key: str | None = None,
 ) -> tuple[float, int, str, str]:
     """Invoke code/main.py with the given prompt and return (duration, exit_code, stdout, stderr).
 
@@ -110,7 +109,6 @@ def invoke_framework(
         [prompt],
         model=model,
         ollama_host=ollama_host,
-        ollama_api_key=ollama_api_key,
     )
 
 
@@ -119,7 +117,6 @@ def invoke_exchange(
     turn_prompts: list[str],
     model: str | None = None,
     ollama_host: str | None = None,
-    ollama_api_key: str | None = None,
 ) -> tuple[float, int, str, str]:
     """Run a list of prompts as a shared-history exchange via --chat-sequence-file.
 
@@ -139,8 +136,6 @@ def invoke_exchange(
             cmd += ["--model", model]
         if ollama_host:
             cmd += ["--ollama-host", ollama_host]
-        if ollama_api_key:
-            cmd += ["--ollama-api-key", ollama_api_key]
 
         result = subprocess.run(
             cmd,
@@ -293,7 +288,6 @@ def run_tests(
     output_dir: Path,
     model: str | None = None,
     ollama_host: str | None = None,
-    ollama_api_key: str | None = None,
 ) -> Path:
     output_path = build_output_path(output_dir)
     initialize_csv(output_path)
@@ -310,14 +304,14 @@ def run_tests(
         if isinstance(item, dict):   # exchange
             passed = _run_exchange_item(
                 item, index, total_items, output_path,
-                model=model, ollama_host=ollama_host, ollama_api_key=ollama_api_key,
+                model=model, ollama_host=ollama_host,
             )
             if passed:
                 tests_passed += 1
         else:                        # plain string
             interrupted, passed = _run_single_item(
                 str(item), index, total_items, output_path,
-                model=model, ollama_host=ollama_host, ollama_api_key=ollama_api_key,
+                model=model, ollama_host=ollama_host,
             )
             if passed:
                 tests_passed += 1
@@ -335,7 +329,7 @@ def _run_single_item(
     index: int,
     total_items: int,
     output_path: Path,
-    model, ollama_host, ollama_api_key,
+    model, ollama_host,
 ) -> tuple[bool, bool]:
     """Run a single standalone prompt.  Returns True if the run was interrupted."""
     run_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -344,7 +338,7 @@ def _run_single_item(
     row = _base_row(run_timestamp, prompt)
     try:
         duration, exit_code, stdout, stderr = invoke_framework(
-            prompt, model=model, ollama_host=ollama_host, ollama_api_key=ollama_api_key,
+            prompt, model=model, ollama_host=ollama_host,
         )
         log_file     = extract_log_file(stdout_text=stdout)
         final_output = extract_final_output(stdout_text=stdout)
@@ -375,7 +369,7 @@ def _run_exchange_item(
     index: int,
     total_items: int,
     output_path: Path,
-    model, ollama_host, ollama_api_key,
+    model, ollama_host,
 ) -> bool:
     """Run a multi-turn exchange.  Writes one CSV row per turn."""
     name   = exchange.get("exchange", f"exchange_{index}")
@@ -389,7 +383,7 @@ def _run_exchange_item(
 
     try:
         duration, exit_code, stdout, stderr = invoke_exchange(
-            turn_prompts, model=model, ollama_host=ollama_host, ollama_api_key=ollama_api_key,
+            turn_prompts, model=model, ollama_host=ollama_host,
         )
     except subprocess.TimeoutExpired as e:
         duration, exit_code = float(SUBPROCESS_TIMEOUT_SECONDS * n), 124
@@ -467,12 +461,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Ollama host URL to pass to main.py (e.g. http://MONTBLANC:11434).",
     )
-    parser.add_argument(
-        "--ollama-api-key",
-        type=str,
-        default=None,
-        help="Ollama API key to pass to main.py (for Ollama Cloud).",
-    )
     return parser.parse_args()
 
 
@@ -494,5 +482,4 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         model=args.model,
         ollama_host=args.ollama_host,
-        ollama_api_key=args.ollama_api_key,
     )

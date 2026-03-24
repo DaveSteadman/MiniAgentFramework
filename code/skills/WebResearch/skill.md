@@ -35,6 +35,16 @@ This skill is designed to reduce orchestration thrash by owning the search front
 - `unvisited_candidates` - discovered but not visited URLs
 - `full_report` - larger text block suitable for scratchpad storage
 
+## Triggers
+Invoke this skill when the prompt contains any of these concepts or phrases:
+- `research this`
+- `investigate`
+- `look into`
+- `search and examine`
+- `find the answer across multiple pages`
+- `follow the links`
+- `gather evidence from the web`
+
 ## Scratchpad integration
 This skill is intended to return a compact top-level summary plus a large `full_report`.
 The orchestration layer can keep the compact summary inline and auto-park the full result in scratchpad for later `scratch_load`.

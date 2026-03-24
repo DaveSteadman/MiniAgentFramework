@@ -15,19 +15,20 @@ The project uses a local [Ollama](https://ollama.com) runtime and focuses on tra
 | **This file** | Modes, commands, task management, usage reference |
 | [README_GETTING_STARTED.md](README_GETTING_STARTED.md) | First-time setup: Python, Ollama, venv, first run |
 | [README_DEVS.md](README_DEVS.md) | Module architecture, design notes, internal flow |
+| [ChangeLog.md](ChangeLog.md) | Report of main changes per version |
 ---
 
 ## Modes of Operation
 
 | Mode | Purpose | Typical command |
 |---|---|---|
-| **User Prompt** | Run one prompt through the full pipeline and exit | `python .\code\main.py --user-prompt "what time is it"` |
-| **Chat** | Interactive multi-turn REPL | `python .\code\main.py --chat` |
-| **Scheduler** | Run scheduled prompt tasks from `controldata/schedules/` unattended | `python .\code\main.py --scheduler` |
-| **Scheduled Item** | Run one named scheduled task immediately (debugging aid) | `python .\code\main.py --scheduled-item <name>` |
-| **Dashboard** | Full terminal UI: schedule timeline, live log tail, and chat combined | `python .\code\main.py --dashboard` |
-| **Test Wrapper** | Run a prompt suite as subprocesses and capture results to a CSV | `python .\testcode\test_wrapper.py` |
-| **Test Analyzer** | Classify outcomes and produce diagnostics from a test results CSV | `python .\code\main.py --analysetest <csv>` |
+| [**Single-Shot Mode**](#running-single-shot-mode) | Run one prompt through the full pipeline and exit | `python .\code\main.py --user-prompt "what time is it"` |
+| [**Chat**](#running-chat-mode) | Interactive multi-turn REPL | `python .\code\main.py --chat` |
+| [**Scheduler**](#running-scheduler-mode) | Run scheduled prompt tasks from `controldata/schedules/` unattended | `python .\code\main.py --scheduler` |
+| [**Scheduled Item**](#running-schedule-item-mode) | Run one named scheduled task immediately (debugging aid) | `python .\code\main.py --scheduled-item <name>` |
+| [**Dashboard**](#running-dashboard-mode) | Full terminal UI: schedule timeline, live log tail, and chat combined | `python .\code\main.py --dashboard` |
+| [**Test Wrapper**](#running-test-wrapper) | Run a prompt suite as subprocesses and capture results to a CSV | `python .\testcode\test_wrapper.py` |
+| [**Test Analyzer**](#running-test-analyzer) | Classify outcomes and produce diagnostics from a test results CSV | `python .\code\main.py --analysetest <csv>` |
 
 ---
 
@@ -57,7 +58,6 @@ python .\code\main.py --user-prompt "what version of ollama is in use"
 | `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` are resolved to the first installed model whose tag contains that string. |
 | `--num-ctx N` | `131072` | Context window size (tokens) passed to Ollama for all LLM calls. |
 | `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address (e.g. `http://MONTBLANC:11434`) or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. Connectivity is checked lazily on the first LLM call, so slash commands work even when the host is unreachable. |
-| `--ollama-api-key KEY` | *(none)* | API key for authenticated hosts (Ollama Cloud). Falls back to `OLLAMA_API_KEY` env var. Applies to all modes. |
 
 **Example - specify model and context window:**
 ```powershell
@@ -206,7 +206,7 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/exit` | Exit dashboard mode |
 | `/models` | List installed Ollama models; the active model is marked with `►` |
 | `/model <name>` | Switch the active model for all subsequent runs (e.g. `/model 8b`). Accepts the same short aliases as `--model`. Clears conversation history. |
-| `/host <target> [api-key]` | Switch the active Ollama host without restarting. Clears conversation history. See [Host targeting](#host-targeting) below. |
+| `/host <target>` | Switch the active Ollama host without restarting. Clears conversation history. See [Host targeting](#host-targeting) below. |
 | `/ctx` | Show the context map for the last run - index, round, label, char count, and compaction state - plus the current window size. |
 | `/ctx size` | Show the current context window size only. |
 | `/ctx size <n>` | Set the context window size for all subsequent runs (e.g. `/ctx size 32768`). Accepts integers with optional commas or underscores. |
@@ -216,10 +216,10 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
 | `/clearmemory` | Delete the memory store file (`memory_store.json`), starting the next session with a blank memory. |
 | `/reskill` | Rebuild the skills catalog from `skill.md` files using the LLM and hot-reload into the current session. The catalog is also rebuilt automatically (fast local path) at startup whenever any `skill.md` is newer than `skills_summary.md`. |
-| `/finalgen <on\|off>` | Control the final LLM synthesis call. `off` returns skill output directly (useful for web mining or data-collection steps). Bare `/finalgen` shows the current state. |
 | `/sandbox <on\|off>` | Toggle the Python sandbox for `CodeExecute` skill. `on` (default) enforces the built-in allow-list; `off` removes restrictions (use with care). |
 | `/deletelogs <days>` | Delete log date-folders under `controldata/logs/` older than N days. Each folder is named `YYYY-MM-DD` and contains all runs from that day. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
 | `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. The argument is matched as a case-insensitive substring, so `/test web` matches `test_web_skill_prompts.json`. |
+| `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. Prints a progress line after each file completes, then a final summary with host, model, elapsed time, and cumulative pass/fail count. |
 | `/tasks` | List all scheduled tasks with their status (on/off), schedule, and prompt preview. |
 | `/task enable <name>` | Enable a task by name. The dashboard scheduler picks up the change on its next reload cycle. |
 | `/task disable <name>` | Disable a task without deleting it. |
@@ -237,7 +237,7 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/host MONTBLANC` | `http://MONTBLANC:11434` |
 | `/host 192.168.1.169` | `http://192.168.1.169:11434` |
 | `/host http://192.168.1.169:11434` | `http://192.168.1.169:11434` (unchanged) |
-| `/host https://api.ollama.com myapikey` | `https://api.ollama.com` with API key |
+| `/host https://api.ollama.com` | `https://api.ollama.com` (unchanged) |
 
 Any bare hostname or IP address (no `://`) is automatically wrapped as `http://<name>:11434` - the standard Ollama default port. Full URLs are passed through unchanged, so custom ports and HTTPS cloud endpoints work too.
 
@@ -325,7 +325,6 @@ python .\testcode\test_wrapper.py
 | `--output-dir PATH` | `controldata/test_results/` | Directory where the CSV results file is written. |
 | `--model ALIAS` | `"20b"` | Ollama model alias passed to each `main.py` subprocess invocation. |
 | `--ollama-host URL` | *(local)* | Ollama host for all subprocess invocations (e.g. `http://MONTBLANC:11434`). Connectivity is checked lazily, so prompts that are pure slash commands never require Ollama to be reachable. |
-| `--ollama-api-key KEY` | *(none)* | API key forwarded to each subprocess invocation. |
 
 Each row in the CSV captures: `timestamp`, `prompt`, `final_output`, `duration_seconds`, `exit_code`, `log_file`, `stderr`.
 

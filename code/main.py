@@ -135,13 +135,6 @@ def parse_main_args() -> argparse.Namespace:
         help="Ollama host URL. Defaults to http://localhost:11434. Also read from OLLAMA_HOST env var.",
     )
     parser.add_argument(
-        "--ollama-api-key",
-        type=str,
-        default=os.environ.get("OLLAMA_API_KEY", ""),
-        metavar="KEY",
-        help="API key for Ollama Cloud or authenticated hosts. Also read from OLLAMA_API_KEY env var.",
-    )
-    parser.add_argument(
         "--chat-sequence-file",
         type=Path,
         default=None,
@@ -601,8 +594,8 @@ def main() -> None:
     logger   = SessionLogger(log_path)
     register_llm_call_logger(logger.log_file_only)
 
-    # Set the active host and optional API key once; all subsequent Ollama calls use these values.
-    ollama_client.configure_host(args.ollama_host, args.ollama_api_key or None)
+    # Set the active host once; all subsequent Ollama calls use this value.
+    ollama_client.configure_host(args.ollama_host)
 
     # Resolve the alias (e.g. "20b") to a concrete installed model name before any LLM calls.
     # Connectivity is checked lazily at the first actual LLM call, so slash-command-only

@@ -48,9 +48,9 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 
 ### 2) LLM + Ollama client layer
 - `code/ollama_client.py`
-  - Supports local Ollama, LAN-hosted Ollama machines, and Ollama Cloud via `configure_host(host, api_key=None)`.
-  - The active host and optional API key are module-level state (same pattern as `_DEFAULT_LLM_TIMEOUT`); all public functions resolve to them automatically so no caller needs to pass a host.
-  - `configure_host` is called from `main()` at startup using `--ollama-host` / `OLLAMA_HOST` env var and `--ollama-api-key` / `OLLAMA_API_KEY` env var.
+  - Supports local Ollama, LAN-hosted Ollama machines, and Ollama Cloud via `configure_host(host)`.
+  - The active host is module-level state (same pattern as `_DEFAULT_LLM_TIMEOUT`); all public functions resolve to it automatically so no caller needs to pass a host.
+  - `configure_host` is called from `main()` at startup using `--ollama-host` / `OLLAMA_HOST` env var.
   - `_is_local_host()` guards features that only make sense locally: `ensure_ollama_running` will not attempt to auto-start `ollama serve` for remote/cloud hosts, and `get_ollama_ps_rows` returns `[]` (since `ollama ps` is a local subprocess).
   - Model discovery and alias resolution (`list_ollama_models`, `resolve_model_name`). Short aliases like `"20b"` resolve to the first installed model whose tag contains that string.
   - Primary LLM interface: `call_llm_chat` calls `/v1/chat/completions` with optional tool definitions and returns a `ChatCallResult` with token metrics and any tool call requests.
@@ -123,7 +123,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - Invokes `code/main.py` as a subprocess for each prompt in a configurable test suite.
   - Records timing, exit code, final LLM output, and log file path to a timestamped CSV in `controldata/test_results/`.
   - Prompt suites are JSON files in `controldata/test_prompts/` and are loaded via `--prompts-file`.
-  - Accepts `--ollama-host` and `--ollama-api-key` to run the full suite against a LAN or cloud Ollama host.
+  - Accepts `--ollama-host` to run the full suite against a LAN or cloud Ollama host.
 
 - `testcode/test_analyzer.py`
   - Reads a test results CSV and parses each run's log file for structured diagnostics.
@@ -356,17 +356,15 @@ Pass the host as a CLI argument or set the environment variable before launching
 
 ```
 python code/main.py --ollama-host http://MONTBLANC:11434
-python code/main.py --ollama-host https://api.ollama.com --ollama-api-key <key>
-# or via env vars:
+# or via env var:
 set OLLAMA_HOST=http://MONTBLANC:11434
-set OLLAMA_API_KEY=<key>
 ```
 
 | Name | URL | Models | Notes |
 |------|-----|--------|-------|
 | Local | `http://localhost:11434` | *(locally installed)* | Default; `ollama serve` auto-started if not running |
-| MONTBLANC (LAN) | `http://192.168.1.169:11434` | `qwen3-coder:480b-cloud`, `gpt-oss:20b` | LAN machine; no API key required |
-| Ollama Cloud | `https://api.ollama.com` | *(cloud catalogue)* | Requires `--ollama-api-key` or `OLLAMA_API_KEY` |
+| MONTBLANC (LAN) | `http://192.168.1.169:11434` | `qwen3-coder:480b-cloud`, `gpt-oss:20b` | LAN machine |
+| Ollama Cloud | `https://api.ollama.com` | *(cloud catalogue)* | HTTPS endpoint; no local auto-start |
 
 **Behaviour differences for non-local hosts:**
 - `ensure_ollama_running` skips the auto-start attempt and raises a clean error if the host is unreachable.

@@ -91,7 +91,6 @@ class OrchestratorConfig:
     skills_payload:       dict
     skills_summary_path:  Path | None = None   # set to enable auto-reload on catalog change
     _catalog_mtime:       float       = 0.0    # last-seen mtime of skills_summary.md
-    skip_final_llm:       bool        = False  # /skip-final sets True; /run-final resets to False
 
 
 # ====================================================================================================
@@ -898,13 +897,6 @@ def orchestrate_prompt(
 
         _log_section_file_only(f"TOOL ROUND {round_num} - EXECUTION FLOW")
         _log_file_only(_format_tool_outputs(round_outputs))
-
-        if config.skip_final_llm:
-            _log("[skip-final] skip_final_llm set - returning last tool output directly.")
-            last           = round_outputs[-1]["result"] if round_outputs else ""
-            final_response = last if isinstance(last, str) else json.dumps(last, default=str)
-            run_success    = True
-            break
 
     else:
         # Exhausted all rounds without a plain-text answer - request a final synthesis.

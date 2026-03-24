@@ -393,21 +393,6 @@ def _cmd_scratchdump(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
-def _cmd_finalgen(arg: str, ctx: SlashCommandContext) -> None:
-    sub = arg.strip().lower()
-    if sub == "on":
-        ctx.config.skip_final_llm = False
-        ctx.output("Final LLM synthesis enabled - skill output will be synthesised by the LLM.", "success")
-    elif sub == "off":
-        ctx.config.skip_final_llm = True
-        ctx.output("Final LLM synthesis disabled - skill output will be returned directly.", "success")
-    else:
-        state = "off" if ctx.config.skip_final_llm else "on"
-        ctx.output(f"Usage: /finalgen <on|off>  |  current: {state}", "dim")
-
-
-# ----------------------------------------------------------------------------------------------------
-
 def _cmd_newchat(arg: str, ctx: SlashCommandContext) -> None:
     ctx.clear_history()
     ctx.output("Conversation history cleared - starting a new chat.", "success")
@@ -506,19 +491,16 @@ def _cmd_host(arg: str, ctx: SlashCommandContext) -> None:
 
     if not arg:
         ctx.output(
-            f"Usage: /host <hostname|url|local> [api-key]  |  current: {get_active_host()}",
+            f"Usage: /host <hostname|url|local>  |  current: {get_active_host()}",
             "dim",
         )
         return
 
-    parts   = arg.split(None, 1)
-    raw     = parts[0].strip()
-    api_key = parts[1].strip() if len(parts) > 1 else None
-
+    raw      = arg.strip()
     old_host = get_active_host()
 
     try:
-        configure_host(raw, api_key)
+        configure_host(raw)
         new_host = get_active_host()
         models   = list_ollama_models()
         ctx.clear_history()
@@ -534,18 +516,76 @@ def _cmd_host(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _run_one_test_file(
+    candidate,
+    ctx,
+    wrapper,
+    model: str,
+    active_host: str,
+    re_mod,
+    subprocess_mod,
+    sys_mod,
+) -> tuple[int, int]:
+    # Run a single test file via test_wrapper.py and stream output to ctx.
+    # Returns (passed, total) - both 0 if summary line was not emitted.
+    cmd = [
+        sys_mod.executable, str(wrapper),
+        "--prompts-file", str(candidate),
+        "--model", model,
+    ]
+    if "localhost" not in active_host and "127.0.0.1" not in active_host:
+        cmd += ["--ollama-host", active_host]
+
+    _summary_re = re_mod.compile(r"^\[TEST_SUMMARY\] passed=(\d+) total=(\d+)$")
+    test_passed = test_total = None
+    try:
+        proc = subprocess_mod.Popen(
+            cmd,
+            stdout=subprocess_mod.PIPE,
+            stderr=subprocess_mod.STDOUT,
+            text=True,
+            encoding="utf-8",
+        )
+        for line in proc.stdout:
+            stripped = line.rstrip()
+            m = _summary_re.match(stripped)
+            if m:
+                test_passed = int(m.group(1))
+                test_total  = int(m.group(2))
+            else:
+                ctx.output(stripped, "dim")
+        proc.wait()
+    except Exception as exc:
+        ctx.output(f"Error running {candidate.name}: {exc}", "error")
+        return 0, 0
+
+    if test_passed is not None:
+        level = "success" if test_passed == test_total else "error"
+        ctx.output(f"[Test: {candidate.name}  Passed {test_passed}/{test_total}]", level)
+        return test_passed, test_total
+    elif proc.returncode == 0:
+        ctx.output(f"[Test: {candidate.name}  completed (no summary)]", "dim")
+    else:
+        ctx.output(f"[Test: {candidate.name}  exited with code {proc.returncode}]", "error")
+    return 0, 0
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
     import re
     import subprocess
     import sys
+    import time
     from pathlib import Path
-    from ollama_client import get_active_api_key, get_active_host
+    from ollama_client import get_active_host
 
     test_prompts_dir = Path(__file__).resolve().parent.parent / "controldata" / "test_prompts"
+    wrapper          = Path(__file__).resolve().parent.parent / "testcode" / "test_wrapper.py"
 
     if not arg:
         ctx.output(
-            "Usage: /test <prompts-file>  (filename from controldata/test_prompts/ or full path)",
+            "Usage: /test <prompts-file|all>  (filename from controldata/test_prompts/ or full path)",
             "dim",
         )
         if test_prompts_dir.exists():
@@ -556,6 +596,56 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
                     ctx.output(f"  {f.name}", "item")
         return
 
+    active_host = get_active_host()
+
+    # ---- /test all ----
+    if arg.strip().lower() == "all":
+        if not test_prompts_dir.exists():
+            ctx.output("Test prompts directory not found.", "error")
+            return
+        all_files = sorted(test_prompts_dir.glob("*.json"))
+        if not all_files:
+            ctx.output("No test files found.", "error")
+            return
+
+        model = ctx.config.resolved_model
+        ctx.output(
+            f"Running all {len(all_files)} test file(s) - host: {active_host}  model: {model}",
+            "info",
+        )
+        if ctx.lock_input:
+            ctx.lock_input()
+
+        total_passed = 0
+        total_tests  = 0
+        wall_start   = time.monotonic()
+
+        try:
+            for idx, candidate in enumerate(all_files, start=1):
+                ctx.output(
+                    f"[{idx}/{len(all_files)}] Starting: {candidate.name}",
+                    "info",
+                )
+                p, t = _run_one_test_file(
+                    candidate, ctx, wrapper, model, active_host, re, subprocess, sys,
+                )
+                total_passed += p
+                total_tests  += t
+        finally:
+            elapsed   = time.monotonic() - wall_start
+            mins, sec = divmod(int(elapsed), 60)
+            time_str  = f"{mins}m {sec}s" if mins else f"{sec}s"
+            level     = "success" if total_passed == total_tests and total_tests > 0 else "error"
+            ctx.output(
+                f"[ALL TESTS COMPLETE]  host={active_host}  model={model}  "
+                f"elapsed={time_str}  passed={total_passed}/{total_tests}",
+                level,
+            )
+            if ctx.unlock_input:
+                ctx.unlock_input()
+        return
+
+    # ---- single file ----
     candidate = Path(arg)
     if not candidate.is_absolute():
         candidate = test_prompts_dir / arg
@@ -576,50 +666,13 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
             ctx.output(f"Prompts file not found: {candidate}", "error")
             return
 
-    wrapper = Path(__file__).resolve().parent.parent / "testcode" / "test_wrapper.py"
-    cmd = [
-        sys.executable, str(wrapper),
-        "--prompts-file", str(candidate),
-        "--model", ctx.config.resolved_model,
-    ]
-    active_host = get_active_host()
-    if "localhost" not in active_host and "127.0.0.1" not in active_host:
-        cmd += ["--ollama-host", active_host]
-    active_key = get_active_api_key()
-    if active_key:
-        cmd += ["--ollama-api-key", active_key]
-
     ctx.output(f"Running test suite: {candidate.name} …", "info")
     if ctx.lock_input:
         ctx.lock_input()
-    _summary_re = re.compile(r"^\[TEST_SUMMARY\] passed=(\d+) total=(\d+)$")
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
+        _run_one_test_file(
+            candidate, ctx, wrapper, ctx.config.resolved_model, active_host, re, subprocess, sys,
         )
-        test_passed = test_total = None
-        for line in proc.stdout:
-            stripped = line.rstrip()
-            m = _summary_re.match(stripped)
-            if m:
-                test_passed = int(m.group(1))
-                test_total  = int(m.group(2))
-            else:
-                ctx.output(stripped, "dim")
-        proc.wait()
-        if test_passed is not None:
-            level = "success" if test_passed == test_total else "error"
-            ctx.output(f"[Test: {candidate.name}  Passed {test_passed}/{test_total}]", level)
-        elif proc.returncode == 0:
-            ctx.output("Test suite completed.", "success")
-        else:
-            ctx.output(f"Test suite exited with code {proc.returncode}.", "error")
-    except Exception as exc:
-        ctx.output(f"Error running test wrapper: {exc}", "error")
     finally:
         if ctx.unlock_input:
             ctx.unlock_input()
@@ -948,7 +1001,7 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
         import subprocess
         import sys
         from pathlib import Path
-        from ollama_client import get_active_api_key, get_active_host
+        from ollama_client import get_active_host
         if not rest:
             ctx.output("Usage: /task run <name>", "dim")
             return
@@ -976,9 +1029,6 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
         active_host = get_active_host()
         if "localhost" not in active_host and "127.0.0.1" not in active_host:
             cmd += ["--ollama-host", active_host]
-        active_key = get_active_api_key()
-        if active_key:
-            cmd += ["--ollama-api-key", active_key]
         ctx.output(f"Running task '{rest}' …", "info")
         if ctx.lock_input:
             ctx.lock_input()
@@ -1024,7 +1074,6 @@ _REGISTRY: dict[str, Callable] = {
     "/clearmemory":   _cmd_clearmemory,
     "/newchat":       _cmd_newchat,
     "/reskill":       _cmd_reskills,
-    "/finalgen":      _cmd_finalgen,
     "/sandbox":       _cmd_sandbox,
     "/scratchdump":   _cmd_scratchdump,
     "/deletelogs":    _cmd_deletelogs,
@@ -1039,7 +1088,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/exit":          "Exit dashboard mode",
     "/models":        "List installed Ollama models",
     "/model":         "<name>  Switch active model for all subsequent runs",
-    "/host":          "<hostname|url|local> [api-key]  Switch active Ollama host (LAN, cloud, or local)",
+    "/host":          "<hostname|url|local>  Switch active Ollama host (LAN, cloud, or local)",
     "/ctx":           "Show context map + window size; sub-cmds: size [<n>], item <n>, compact <n>",
     "/rounds":        "<n>  Set max tool-call rounds per prompt (e.g. /rounds 6)",
     "/timeout":       "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
@@ -1047,11 +1096,10 @@ _DESCRIPTIONS: dict[str, str] = {
     "/clearmemory":   "Delete the memory store file, starting with a blank memory next session",
     "/newchat":       "Clear conversation history and session context, starting a fresh chat",
     "/reskill":       "Rebuild the skills catalog from skill.md files and hot-reload into session",
-    "/finalgen":      "<on|off>  Enable/disable final LLM synthesis of skill output (default: on)",
     "/sandbox":       "<on|off>  Enable/disable Python code execution sandbox (import whitelist + blocked builtins)",
     "/scratchdump":   "<on|off>  Write scratchpad contents to controldata/scratchpad_dump.txt on every change (default: off)",
     "/deletelogs":    "<days>  Delete log and chatsession date-folders older than N days (e.g. /deletelogs 10)",
-    "/test":          "<prompts-file>  Run test_wrapper on a prompts file; streams results live",
+    "/test":          "<prompts-file|all>  Run test_wrapper on a prompts file (or all files); streams results live",
     "/recall":        "Show a summary of prior skill outputs stored in this session's context",
     "/tasks":         "List all scheduled tasks with status, schedule, and first prompt",
     "/task":          "enable|disable|add|delete|run <name> [schedule] [prompt]  Manage scheduled tasks; /task run <name> executes a task immediately",
