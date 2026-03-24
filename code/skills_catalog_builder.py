@@ -184,6 +184,32 @@ def _parse_param_descriptions(skill_text: str) -> dict[str, dict[str, str]]:
 
 
 # ----------------------------------------------------------------------------------------------------
+def _parse_triggers(skill_text: str) -> list[str]:
+    # Extract trigger phrases from the ## Triggers section body.
+    # When a bullet contains backtick-quoted items (possibly comma-separated), each quoted
+    # phrase is extracted individually. Plain-text bullets are taken as-is after stripping
+    # the leading "- " marker. Either way, the "Invoke this skill when..." descriptor line
+    # is excluded since it is a header, not a trigger phrase.
+    triggers: list[str] = []
+    block_match = re.search(r"##\s+Triggers\s*\n(.*?)(?=\n##\s|\Z)", skill_text, re.DOTALL | re.IGNORECASE)
+    if not block_match:
+        return triggers
+    for line in block_match.group(1).splitlines():
+        bullet_match = re.match(r"\s*-\s+(.*)", line)
+        if not bullet_match:
+            continue
+        content = bullet_match.group(1).strip()
+        if content.lower().startswith("invoke this skill"):
+            continue
+        backtick_phrases = re.findall(r"`([^`]+)`", content)
+        if backtick_phrases:
+            triggers.extend(backtick_phrases)
+        elif content:
+            triggers.append(content)
+    return triggers
+
+
+# ----------------------------------------------------------------------------------------------------
 def summarize_locally(skill_md_path: Path) -> dict:
     # utf-8-sig strips the BOM if present, otherwise behaves like utf-8.
     skill_text = skill_md_path.read_text(encoding="utf-8-sig")
@@ -237,6 +263,7 @@ def summarize_locally(skill_md_path: Path) -> dict:
         "purpose":           purpose,
         "module":            module,
         "trigger_keyword":   trigger_keyword,
+        "triggers":          _parse_triggers(skill_text),
         "functions":         functions,
         "inputs":            input_lines,
         "outputs":           output_lines,
@@ -258,9 +285,11 @@ def summarize_skill(skill_md_path: Path, use_llm: bool, model_name: str, num_ctx
     if summary is None:
         summary = summarize_locally(skill_md_path=skill_md_path)
     elif "param_descriptions" not in summary:
-        # LLM path does not produce param_descriptions - overlay from local parse.
+        # LLM path does not produce param_descriptions or triggers - overlay from local parse.
         skill_text = skill_md_path.read_text(encoding="utf-8-sig")
         summary["param_descriptions"] = _parse_param_descriptions(skill_text)
+        if "triggers" not in summary:
+            summary["triggers"] = _parse_triggers(skill_text)
 
     return summary
 
@@ -280,6 +309,7 @@ def normalize_summary(summary: dict, skill_md_path: Path) -> dict:
     normalized["relative_path"] = to_workspace_relative_path(skill_md_path)
 
     normalized.setdefault("trigger_keyword", "")
+    normalized.setdefault("triggers", [])
     normalized.setdefault("param_descriptions", {})
     for field_name in ["functions", "inputs", "outputs"]:
         field_value = normalized.get(field_name, [])

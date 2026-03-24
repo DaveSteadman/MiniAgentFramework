@@ -1,7 +1,7 @@
 
 # Version 0.1+dev #
-- Addition of WebResearch skill, to better navigate web search and analysis prompts.
 
-# Version 0.1 - Initial baseline #
-- A running framework with web search and python execution skills.
-- README documentation for general and developer audiences.
+[ALL TESTS COMPLETE]  host=http://localhost:11434  model=gpt-oss:20b  elapsed=16m 38s  passed=44/45
+- Framework Desktop
+- Failed: LLM emitted invalid JSON for the tool invocation
+

@@ -352,7 +352,10 @@ def _build_skill_selection_guidance(skills_payload: dict) -> str:
             description = description[:157] + "..."
 
         func_label = " / ".join(f"`{f}`" for f in unique_funcs[:3])
-        lines.append(f"- {func_label}: {description}")
+        triggers   = [t for t in (skill.get("triggers") or []) if t]
+        when_str   = ", ".join(f'"{t}"' for t in triggers[:5])
+        suffix     = f" (use when: {when_str})" if when_str else ""
+        lines.append(f"- {func_label}: {description}{suffix}")
 
     if not lines:
         return ""
@@ -602,8 +605,7 @@ def _build_system_message(
         "- Never claim a tool action succeeded unless the tool output explicitly confirms it.",
         "- Do not add explanatory preamble - respond with direct answers only.",
         "- Complete ALL steps in the user's request. If the user asks for output to be written to a file, that write must happen as a tool call before you give your final answer.",
-        "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research skill (lookup_wikipedia, research_traverse, or search_web_text) to fetch the content first. Never generate biographical, historical, or factual content from memory.",
-        "- Web tool preference order: (1) use `lookup_wikipedia` for stable general-knowledge topics - people, places, concepts, history, science; (2) use `research_traverse` when the answer requires examining multiple pages or following evidence across sources; (3) use `search_web_text` for a single quick lookup where one result is enough; (4) use `search_web` + `fetch_page_text` only when you need to select and fetch specific URLs manually. Do not skip to a lower-preference tool when a higher one is appropriate.",
+        "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research or lookup skill to fetch the content first. Never generate biographical, historical, or factual content from memory.",
         '- Whenever you call fetch_page_text to retrieve specific information, always set the query parameter to your specific question (e.g. fetch_page_text(url=..., query="<your specific question here>")). This applies whether the URL came from a search result or was provided directly by the user. The query parameter runs an isolated extraction so only the relevant facts are returned - this avoids overloading the context with raw page text. Only omit query if the user explicitly asks for raw page content.',
         "- The python execution tool is more reliable for calculations than the model's internal math capabilities.",
         "- The scratchpad tool can store intermediate results across steps.",
