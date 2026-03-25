@@ -7,9 +7,9 @@
 # defaults for relative paths.
 #
 # Path behavior:
-#   - bare file name like "x.txt" resolves to ./data/x.txt
-#   - path starting with "./" resolves from workspace root
-#   - absolute paths are allowed only when they remain inside workspace root
+#   - bare file name or relative path resolves under data/
+#   - path starting with "./" resolves from workspace root (but still must be inside data/)
+#   - absolute paths are allowed only when they resolve inside the data/ directory
 # ====================================================================================================
 
 

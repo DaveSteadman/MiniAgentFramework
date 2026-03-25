@@ -29,6 +29,7 @@ The project uses a local [Ollama](https://ollama.com) runtime and focuses on tra
 | [**Dashboard**](#running-dashboard-mode) | Full terminal UI: schedule timeline, live log tail, and chat combined | `python .\code\main.py --dashboard` |
 | [**Test Wrapper**](#running-test-wrapper) | Run a prompt suite as subprocesses and capture results to a CSV | `python .\testcode\test_wrapper.py` |
 | [**Test Analyzer**](#running-test-analyzer) | Classify outcomes and produce diagnostics from a test results CSV | `python .\code\main.py --analysetest <csv>` |
+| [**Chat Sequence**](#running-chat-sequence-mode) | Run a pre-defined sequence of prompts sharing a single conversation history | `python .\code\main.py --chat-sequence-file <file.json>` |
 
 ---
 
@@ -100,6 +101,36 @@ Slash commands (see [Slash Commands](#slash-commands) below) are available at th
 ```powershell
 python .\code\main.py --chat --model "20b" --num-ctx 16384
 ```
+
+---
+
+## Running: Chat Sequence Mode
+
+Runs a pre-defined sequence of prompts through a shared conversation history - each prompt sees all prior turns in the sequence. Used by the test wrapper to execute multi-turn test scenarios where later steps depend on earlier results.
+
+The sequence file is a JSON array of prompt strings:
+
+```json
+["What is the current date?", "Write that date to data/date.txt", "Confirm the file was created."]
+```
+
+```powershell
+python .\code\main.py --chat-sequence-file controldata/test_prompts/my_sequence.json
+```
+
+Output lines are tagged so the test wrapper can parse per-turn results:
+
+```
+[TURN 1] User: <prompt>
+[TURN 1] Agent: <response>
+[TURN 1] tokens=<n> tps=<f>
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--chat-sequence-file PATH` | *(required)* | JSON file containing an array of prompt strings. |
+| `--model ALIAS` | `"20b"` | Ollama model alias or tag. |
+| `--num-ctx N` | `131072` | Context window size in tokens. |
 
 ---
 
@@ -215,11 +246,13 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/timeout <seconds>` | Set the LLM generation timeout (e.g. `/timeout 1800` for heavy analysis tasks). |
 | `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
 | `/clearmemory` | Delete the memory store file (`memory_store.json`), starting the next session with a blank memory. |
+| `/newchat` | Clear conversation history and session context, starting a fresh chat without restarting. |
 | `/reskill` | Rebuild the skills catalog from `skill.md` files using the LLM and hot-reload into the current session. The catalog is also rebuilt automatically (fast local path) at startup whenever any `skill.md` is newer than `skills_summary.md`. |
 | `/sandbox <on\|off>` | Toggle the Python sandbox for `CodeExecute` skill. `on` (default) enforces the built-in allow-list; `off` removes restrictions (use with care). |
 | `/deletelogs <days>` | Delete log date-folders under `controldata/logs/` older than N days. Each folder is named `YYYY-MM-DD` and contains all runs from that day. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
 | `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. The argument is matched as a case-insensitive substring, so `/test web` matches `test_web_skill_prompts.json`. |
 | `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. Prints a progress line after each file completes, then a final summary with host, model, elapsed time, and cumulative pass/fail count. |
+| `/recall` | Show a summary of all skill outputs stored in the current session context (URLs fetched, files written, search results, etc.). |
 | `/tasks` | List all scheduled tasks with their status (on/off), schedule, and prompt preview. |
 | `/task enable <name>` | Enable a task by name. The dashboard scheduler picks up the change on its next reload cycle. |
 | `/task disable <name>` | Disable a task without deleting it. |

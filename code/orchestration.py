@@ -41,7 +41,7 @@ from skill_executor import execute_tool_call
 from skill_executor import is_skill_error
 from skills.Memory.memory_skill import recall_relevant_memories
 from skills.Memory.memory_skill import store_prompt_memories
-from skills.SystemInfo.system_info_skill import get_static_system_info_string, get_system_info_string
+from skills.SystemInfo.system_info_skill import get_static_system_info_string
 from skills_catalog_builder import build_tool_definitions
 from workspace_utils import get_workspace_root
 from workspace_utils import trunc
@@ -134,11 +134,11 @@ class ConversationHistory:
 # MARK: SESSION CONTEXT
 # ====================================================================================================
 def _truncate_words(text: str, max_words: int) -> str:
-    """Truncate *text* to at most *max_words* words, appending ' …' when cut."""
+    """Truncate *text* to at most *max_words* words, appending ' ...' when cut."""
     words = text.split()
     if len(words) <= max_words:
         return text
-    return " ".join(words[:max_words]) + " …"
+    return " ".join(words[:max_words]) + " ..."
 
 
 class SessionContext:

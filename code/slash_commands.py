@@ -430,7 +430,7 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
     skills_root = DEFAULT_SKILLS_ROOT
     output_path = DEFAULT_OUTPUT_FILE
 
-    ctx.output("Rebuilding skills catalog (local extraction, no LLM)…", "dim")
+    ctx.output("Rebuilding skills catalog (local extraction, no LLM)...", "dim")
     try:
         skill_files = find_skill_files(skills_root=skills_root)
         if not skill_files:
@@ -666,7 +666,7 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
             ctx.output(f"Prompts file not found: {candidate}", "error")
             return
 
-    ctx.output(f"Running test suite: {candidate.name} …", "info")
+    ctx.output(f"Running test suite: {candidate.name} ...", "info")
     if ctx.lock_input:
         ctx.lock_input()
     try:
@@ -1029,7 +1029,7 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
         active_host = get_active_host()
         if "localhost" not in active_host and "127.0.0.1" not in active_host:
             cmd += ["--ollama-host", active_host]
-        ctx.output(f"Running task '{rest}' …", "info")
+        ctx.output(f"Running task '{rest}' ...", "info")
         if ctx.lock_input:
             ctx.lock_input()
         try:

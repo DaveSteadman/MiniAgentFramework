@@ -29,9 +29,8 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - **Context map:** every LLM round appends a `dict` entry to `_context_map` recording `round`, `label`, `chars`, `msg_idx` (index into `messages`), and `compacted` flag. The full map is printed to the log at the end of each run under a `[CONTEXT MAP]` section.
   - **Context budget logging:** before each LLM call the estimated thread size (chars and token estimate) plus remaining window headroom is logged; after each call the actual `prompt_tokens` from Ollama are logged.
   - **Auto-compaction:** before round N (N >= 3), any context-map entry from round <= N-2 whose `msg_idx` is not `None` is compacted via `compact_context()`, which replaces the message content in-place with a one-line headline and sets `compacted = True`.
-  - **`_build_system_message(ambient_system_info, session_context, skills_payload)`** - module-level helper extracted from `orchestrate_prompt`. Assembles all runtime context sources (behavioural rules, ambient system info, prior-turn inject block, keyword routing rules, and scratchpad hints) into the single system message string sent on each round.
-  - **`_build_keyword_routing_rules(skills_payload)`** - Converts skills with a `trigger_keyword` field into explicit routing instructions included in the system prompt, formatted as `  - <keyword> -> <function_name>`. Guiding the model's tool selection this way avoids unnecessary web searches for locally-resolved lookups.
-  - **`compact_context(context_map, messages, idx)`** - public helper; compacts a single context-map entry identified by list index; saves original content to the scratchpad under key `tc_rN_<label>` and returns `True` on success.
+  - **`_build_system_message(ambient_system_info, session_context, skills_payload)`** - module-level helper extracted from `orchestrate_prompt`. Assembles all runtime context sources (behavioural rules, ambient system info, prior-turn inject block, skill selection guidance, and scratchpad hints) into the single system message string sent on each round.
+  - **`compact_context(context_map, messages, idx)`** - public helper; compacts a single context-map entry identified by list index; replaces the message content in-place with a one-line placeholder (referencing any auto-saved scratchpad key if present) and returns `True` on success.
 
 - **`SessionContext`** - per-session cache of skill outputs for cross-turn and cross-task context injection.
   - Accumulates one entry per completed turn via `add_turn(user_prompt, assistant_response, skill_outputs)`.
@@ -146,15 +145,6 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 | `get_test_prompts_dir()` | `<repo_root>/controldata/test_prompts/` |
 | `get_test_results_dir()` | `<repo_root>/controldata/test_results/` |
 | `get_chatsessions_dir()` | `<repo_root>/controldata/chatsessions/` |
-
-| Accessor | Path |
-|---|---|
-| `get_webresearch_root()` | `<repo_root>/webresearch/` |
-| `get_stage_dir(stage)` | `<repo_root>/webresearch/<stage>/` |
-| `get_domain_dir(stage, domain)` | `<repo_root>/webresearch/<stage>/<domain>/` |
-| `get_date_dir(stage, domain)` | `<repo_root>/webresearch/<stage>/<domain>/yyyy/mm/dd/` |
-| `ensure_date_dir(stage, domain)` | Creates and returns the `yyyy/mm/dd/` directory |
-| `alloc_mine_file(stage, domain, slug)` | Creates date dir and returns next `NNN-slug.md` path |
 
 - `code/webpage_utils.py`
   - Shared HTTP fetching, HTML extraction, and text utilities used by web skill modules.
