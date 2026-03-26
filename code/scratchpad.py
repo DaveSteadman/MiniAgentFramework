@@ -206,6 +206,75 @@ def scratch_peek(key: str, substring: str, context_chars: int = 250) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
+def scratch_query(key: str, query: str, save_result_key: str = "") -> str:
+    """Apply a natural-language query to stored scratchpad content via an isolated LLM call.
+
+    Loads the full value stored at `key`, passes it to a clean-context LLM call together
+    with `query`, and returns only the compact extracted answer.  The raw content never
+    enters the caller's context window - this acts as a subroutine with its own stack.
+    If `save_result_key` is provided the result is also saved under that key.
+    """
+    try:
+        validated = _validate_key(key)
+    except ValueError as exc:
+        return f"Error: {exc}"
+    if validated not in _STORE:
+        return f"Scratchpad key '{validated}' not found.  Use scratch_list() to see available keys."
+    if not query or not query.strip():
+        return "Error: query cannot be empty."
+
+    content = _STORE[validated]
+
+    # Lazy imports to avoid circular deps at module load time.
+    try:
+        from ollama_client import call_llm_chat as _call_llm_chat
+        from ollama_client import get_active_model as _get_active_model
+        from ollama_client import get_active_num_ctx as _get_active_num_ctx
+    except Exception as exc:
+        return f"Error importing LLM client: {exc}"
+
+    model   = _get_active_model()
+    num_ctx = _get_active_num_ctx()
+    if not model:
+        return "Error: no active model available.  Run a prompt first."
+
+    inner_messages = [
+        {
+            "role":    "system",
+            "content": (
+                "You are a precise information extractor running in an isolated context. "
+                "Read the question and the content below, then respond with ONLY the answer:\n"
+                "- If filtering a list or table: include every matching row in full, one per line. "
+                "  Never group or summarise rows into ranges.\n"
+                "- If extracting facts: pull only the directly relevant sentences, concisely.\n"
+                "- If the answer is not present, respond with exactly: Not found in content."
+            ),
+        },
+        {
+            "role":    "user",
+            "content": f"Question: {query}\n\nContent:\n{content}",
+        },
+    ]
+
+    try:
+        result    = _call_llm_chat(model_name=model, messages=inner_messages, tools=None, num_ctx=num_ctx)
+        extracted = (result.response or "").strip()
+        if not extracted:
+            return f"LLM returned an empty response for query on key '{validated}'."
+        if save_result_key:
+            try:
+                validated_save = _validate_key(save_result_key)
+            except ValueError as exc:
+                return f"Error in save_result_key: {exc}"
+            _STORE[validated_save] = extracted
+            _flush_to_file()
+            return f"[Result saved to '{validated_save}']\n{extracted}"
+        return extracted
+    except Exception as exc:
+        return f"Error during isolated LLM query: {exc}"
+
+
+# ----------------------------------------------------------------------------------------------------
 def scratch_clear() -> str:
     """Remove all keys from the scratchpad (called at session reset or /clear)."""
     count = len(_STORE)

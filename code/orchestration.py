@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ollama_client import call_llm_chat
+from ollama_client import is_explicit_model_name
 from ollama_client import list_ollama_models
 from ollama_client import log_to_session
 from ollama_client import resolve_model_name
@@ -45,6 +46,24 @@ from skills.SystemInfo.system_info_skill import get_static_system_info_string
 from skills_catalog_builder import build_tool_definitions
 from workspace_utils import get_workspace_root
 from workspace_utils import trunc
+
+
+# ====================================================================================================
+# MARK: SKILL GUIDANCE FLAG
+# ====================================================================================================
+# Controls whether the skill selection guidance block is included in the system prompt.
+# min (False) = lean prompt; relies on JSON Schema tool descriptions only (~350 tok baseline).
+# max (True)  = full guidance block injected; adds ~925 tok per call for comparison testing.
+_SKILL_GUIDANCE_ENABLED: bool = False
+
+
+def get_skill_guidance_enabled() -> bool:
+    return _SKILL_GUIDANCE_ENABLED
+
+
+def set_skill_guidance_enabled(enabled: bool) -> None:
+    global _SKILL_GUIDANCE_ENABLED
+    _SKILL_GUIDANCE_ENABLED = enabled
 
 
 # ====================================================================================================
@@ -297,6 +316,11 @@ def resolve_execution_model(requested_model: str) -> str:
 
     Falls back to the first available model (with a printed warning) rather than
     crashing, so a machine with no "20b" model still starts cleanly.
+
+    If the requested name looks like an explicit fully-qualified tag (contains ':'
+    with no whitespace) and is not in the local model list, it is returned as-is so
+    that cloud or remote models (e.g. gpt-oss:120b-cloud) are not silently replaced
+    with a local fallback.
     """
     available_models = list_ollama_models()
     if not available_models:
@@ -304,6 +328,9 @@ def resolve_execution_model(requested_model: str) -> str:
 
     resolved = resolve_model_name(requested_model, available_models)
     if resolved is None:
+        # Explicit tag (e.g. "gpt-oss:120b-cloud") - trust the caller; don't fall back locally.
+        if is_explicit_model_name(requested_model):
+            return requested_model.strip()
         fallback = available_models[0]
         print(
             f"[model] '{requested_model}' not found - falling back to '{fallback}'.\n"
@@ -618,9 +645,10 @@ def _build_system_message(
     if prior_inject:
         system_parts.append(f"\nPrior session context:\n{prior_inject}")
 
-    skill_guidance = _build_skill_selection_guidance(skills_payload)
-    if skill_guidance:
-        system_parts.append(f"\n{skill_guidance}")
+    if _SKILL_GUIDANCE_ENABLED:
+        skill_guidance = _build_skill_selection_guidance(skills_payload)
+        if skill_guidance:
+            system_parts.append(f"\n{skill_guidance}")
 
     scratch_keys = get_scratchpad_key_names()
     if scratch_keys:

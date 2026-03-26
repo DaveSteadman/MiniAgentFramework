@@ -9,10 +9,11 @@
 # creating a circular dependency through the skill loader.
 #
 # Functions exposed to the tool-calling pipeline:
-#   scratch_save(key, value)  -- store a named string value
-#   scratch_load(key)         -- retrieve a stored value
-#   scratch_list()            -- list active keys and sizes
-#   scratch_delete(key)       -- remove one key
+#   scratch_save(key, value)           -- store a named string value
+#   scratch_load(key)                  -- retrieve a stored value
+#   scratch_list()                     -- list active keys and sizes
+#   scratch_delete(key)                -- remove one key
+#   scratch_query(key, query, ...)     -- run an isolated LLM call on stored content, returns compact result
 #
 # Related modules:
 #   - code/scratchpad.py                -- owns the module-level _STORE dict and all logic
@@ -39,6 +40,7 @@ from scratchpad import scratch_dump
 from scratchpad import scratch_list
 from scratchpad import scratch_load
 from scratchpad import scratch_peek
+from scratchpad import scratch_query
 from scratchpad import scratch_save
 from scratchpad import scratch_search
 
@@ -56,6 +58,7 @@ __all__ = [
     "scratch_list",
     "scratch_load",
     "scratch_peek",
+    "scratch_query",
     "scratch_save",
     "scratch_search",
 ]

@@ -283,7 +283,12 @@ Single JSON payload for orchestration planning.
         "which scratchpad keys have",
         "peek at scratchpad",
         "show context around",
-        "find text in scratchpad key"
+        "find text in scratchpad key",
+        "query scratchpad",
+        "ask scratchpad",
+        "extract from scratchpad",
+        "filter scratchpad",
+        "run query on scratchpad key"
       ],
       "functions": [
         "scratch_delete(\"webresult\")",
@@ -300,6 +305,11 @@ Single JSON payload for orchestration planning.
         "scratch_peek(...)",
         "scratch_peek(key, substring, context_chars = 250)",
         "scratch_peek(key: str, substring: str, context_chars: int = 250)",
+        "scratch_query(\"racedata\", \"List only Ferrari wins\", \"ferrari_wins\")",
+        "scratch_query(\"racedata\", \"Which drivers won at Monaco?\")",
+        "scratch_query(...)",
+        "scratch_query(key, query, save_result_key = \"\")",
+        "scratch_query(key: str, query: str, save_result_key: str = \"\")",
         "scratch_save(\"webresult\", \"page content here...\")",
         "scratch_save(...)",
         "scratch_save(key, value)",
@@ -317,7 +327,8 @@ Single JSON payload for orchestration planning.
         "`scratch_dump()` - returns every key followed by its full stored value. Use to inspect scratchpad contents for debugging.",
         "`scratch_delete(...)` - returns confirmation or `\"Scratchpad key '<key>' not found - nothing deleted.\"`.",
         "`scratch_search(...)` - returns a formatted list of matching key names and sizes, or `\"No scratchpad keys contain the substring '<text>'.\"` when no match is found.",
-        "`scratch_peek(...)` - returns `[Match in 'key' at char N / M total]` followed by the surrounding text with `>>>match<<<` highlighting, or an error string when the key or substring is not found."
+        "`scratch_peek(...)` - returns `[Match in 'key' at char N / M total]` followed by the surrounding text with `>>>match<<<` highlighting, or an error string when the key or substring is not found.",
+        "`scratch_query(...)` - returns the compact extracted answer from the isolated LLM call, or `\"Not found in content.\"` when the query cannot be answered from the stored value.  When `save_result_key` is provided, prepends `[Result saved to '<key>']` to the output."
       ],
       "param_descriptions": {
         "scratch_save": {
@@ -337,6 +348,11 @@ Single JSON payload for orchestration planning.
           "key": "the scratchpad key to inspect.",
           "substring": "case-insensitive text to locate within the stored value.",
           "context_chars": "characters to include before and after the match."
+        },
+        "scratch_query": {
+          "key": "the scratchpad key whose full content will be used as input.",
+          "query": "natural-language question or instruction to apply to the stored content.",
+          "save_result_key": "if provided, the extracted answer is also saved to this scratchpad key."
         }
       }
     },

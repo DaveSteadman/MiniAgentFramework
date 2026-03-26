@@ -12,18 +12,19 @@
 # Three background threads run concurrently while the UI is active:
 #   dash-ollama      polls 'ollama ps' every 10 s and updates the model panel
 #   dash-log-tail    streams new log lines every 2 s into the log panel
-#   dash-scheduler   fires tasks from controldata/schedules/ on their schedules,
-#                    respecting the shared llm_lock for single-LLM exclusivity
+#   dash-scheduler   detects due tasks and enqueues them into task_queue
 #
-# Chat submissions dispatch orchestrate_prompt on a short-lived thread.
-# Slash commands (/help, /model, /ctx, …) bypass orchestration entirely.
+# Chat submissions and scheduled tasks are both routed through scheduler.task_queue,
+# which serialises them on a single worker thread.  Chat prompts are enqueued immediately;
+# scheduled tasks are deduplicated so a task already in the queue is not added again.
+# Slash commands (/help, /test, /task run, …) are also enqueued via task_queue.
 #
 # Conversation history for the chat panel is managed via ConversationHistory.
 # Per-task history inside the scheduler loop is a fresh ConversationHistory per run.
 #
 # Related modules:
 #   - orchestration.py       -- orchestrate_prompt, OrchestratorConfig, ConversationHistory
-#   - scheduler.py           -- load_schedules_dir, is_task_due, llm_lock
+#   - scheduler.py           -- load_schedules_dir, is_task_due, task_queue
 #   - ui/dashboard_app.py    -- DashboardApp TUI application
 #   - slash_commands.py      -- handle(), SlashCommandContext
 #   - runtime_logger.py      -- SessionLogger, create_log_file_path
@@ -49,13 +50,14 @@ from orchestration import orchestrate_prompt
 from runtime_logger import SessionLogger
 from runtime_logger import create_log_file_path
 from scheduler import initial_last_run, is_task_due
-from scheduler import llm_lock
 from scheduler import load_schedules_dir
+from scheduler import task_queue
 from slash_commands import SlashCommandContext
 from slash_commands import handle as handle_slash
 from ui import colors as ui_colors
 from ui.dashboard_app import DashboardApp
 from workspace_utils import get_chatsessions_day_dir
+from workspace_utils import get_chatsessions_dir
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
 from workspace_utils import get_workspace_root
@@ -128,40 +130,28 @@ def run_dashboard_mode(
             chat_history.clear()
             chat_session.clear()
 
-        def _lock_input() -> None:
-            llm_lock.acquire(blocking=True)
-
-        def _unlock_input() -> None:
-            try:
-                llm_lock.release()
-            except RuntimeError:
-                pass
-
         dash_ctx = SlashCommandContext(
             config         = config,
             output         = _dash_output,
             clear_history  = _dash_clear_history,
             request_exit   = shutdown.set,
             session_context= chat_session,
-            lock_input     = _lock_input,
-            unlock_input   = _unlock_input,
         )
         if text.strip().startswith("/"):
-            threading.Thread(
-                target=handle_slash,
-                args=(text, dash_ctx),
-                daemon=True,
-                name="slash-dispatch",
-            ).start()
+            cmd_word   = text.strip().split()[0].lstrip("/")
+            slash_name = f"slash_{cmd_word}_{datetime.now().strftime('%H%M%S%f')}"
+
+            def _run_slash(_t: str = text, _ctx: SlashCommandContext = dash_ctx) -> None:
+                handle_slash(_t, _ctx)
+
+            state_now = task_queue.get_state()
+            was_busy  = bool(state_now["active"] or state_now["pending"])
+            if task_queue.enqueue(slash_name, "slash", _run_slash) and was_busy:
+                active_name = state_now["active"]["name"] if state_now["active"] else "pending task"
+                app.add_chat_line(f"Agent\u25b6 [queued - {active_name} in progress]", ui_colors.DIM)
             return
 
-        def _run() -> None:
-            if not llm_lock.acquire(blocking=False):
-                app.add_chat_line(
-                    "Agent\u25b6 [LLM busy please wait]",
-                    ui_colors.RED,
-                )
-                return
+        def _run(_captured_text: str = text) -> None:
             app.add_chat_line(f"Agent\u25b6 [thinking... timeout {get_llm_timeout()}s]", ui_colors.DIM)
             response = ""
             p_tokens = 0
@@ -170,11 +160,11 @@ def run_dashboard_mode(
                 run_log_path = create_log_file_path(log_dir=_LOG_DIR)
                 run_logger   = SessionLogger(run_log_path)
                 run_logger.log_section_file_only("DASHBOARD CHAT")
-                run_logger.log_file_only(f"User: {text}")
+                run_logger.log_file_only(f"User: {_captured_text}")
 
                 hist = chat_history.as_list() or None
                 response, p_tokens, _c, _ok, tps = orchestrate_prompt(
-                    user_prompt=text,
+                    user_prompt=_captured_text,
                     config=config,
                     logger=run_logger,
                     conversation_history=hist,
@@ -188,15 +178,17 @@ def run_dashboard_mode(
             except Exception as exc:
                 app.add_chat_line(f"Agent\u25b6 [Error: {exc}]", ui_colors.RED)
                 return
-            finally:
-                llm_lock.release()
 
-            chat_history.add(text, response)
-
+            chat_history.add(_captured_text, response)
             app.add_chat_line(f"Agent\u25b6 {response}", ui_colors.NORMAL)
             app.add_chat_line(f"      [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
 
-        threading.Thread(target=_run, daemon=True, name="chat-dispatch").start()
+        turn_name = f"chat_turn_{datetime.now().strftime('%H%M%S%f')}"
+        state_now = task_queue.get_state()
+        was_busy  = bool(state_now["active"] or state_now["pending"])
+        if task_queue.enqueue(turn_name, "interactive", _run) and was_busy:
+            active_name = state_now["active"]["name"] if state_now["active"] else "pending task"
+            app.add_chat_line(f"Agent\u25b6 [queued - {active_name} in progress]", ui_colors.DIM)
 
     # ---------------------------------------------------------------------------
     _chat_history = _load_chat_history()
@@ -205,7 +197,7 @@ def run_dashboard_mode(
         last_run=last_run,
         on_submit=on_chat_submit,
         shutdown_event=shutdown,
-        llm_lock=llm_lock,
+        task_queue=task_queue,
         chat_history_entries=_chat_history,
     )
 
@@ -307,66 +299,63 @@ def run_dashboard_mode(
                 if not is_task_due(task, last_run[name], now):
                     continue
 
-                if not llm_lock.acquire(blocking=False):
-                    app.add_log_line(f"[SCHED] '{name}' due but LLM busy - will retry next cycle", ui_colors.DIM)
-                    continue
-
-                # Lock is now held - record start time and run the task.
-                last_run[name] = now
-                app.record_run(name, now)
-                app.add_log_line(f"[SCHED] Starting: {name}", ui_colors.MAGENTA)
-                app.add_chat_line(f"Sched▶ Task started: {name}", ui_colors.MAGENTA)
-
-                task_log_path = create_log_file_path(log_dir=_LOG_DIR)
-                task_logger   = SessionLogger(task_log_path)
-                task_logger.log_section_file_only(f"SCHEDULER TASK (dashboard): {name}")
-
-                try:
-                    task_hist  = ConversationHistory()
-                    task_ctx   = SessionContext(
-                        session_id   = f"task_{name}",
-                        persist_path = get_chatsessions_dir() / f"task_{name}.json",
-                    )
-                    sched_ctx  = SlashCommandContext(
-                        config         = config,
-                        output         = lambda text, level='info': task_logger.log_file_only(f"[slash/{level}] {text}"),
-                        clear_history  = task_hist.clear,
-                        session_context= task_ctx,
-                    )
-                    for step_index, prompt_text in enumerate(prompts, start=1):
-                        if shutdown.is_set():
-                            break
-                        app.add_log_line(f"  [Step {step_index}] {trunc(prompt_text, 70)}", ui_colors.DIM)
-                        task_logger.log_file_only(f"[Step {step_index}] {prompt_text}")
-
-                        if handle_slash(prompt_text, sched_ctx):
-                            app.add_log_line(f"  [slash command handled]", ui_colors.DIM)
-                            continue
-
-                        hist = task_hist.as_list() or None
-                        response, p_tokens, _c, _ok, tps = orchestrate_prompt(
-                            user_prompt=prompt_text,
-                            config=config,
-                            logger=task_logger,
-                            conversation_history=hist,
-                            session_context=task_ctx,
-                            quiet=True,
+                # Enqueue the task; the worker thread runs it when the LLM is free.
+                # Use default-arg capture so loop variables are frozen at enqueue time.
+                def _make_dash_task(_name=name, _prompts=list(prompts), _when=now) -> None:
+                    app.record_run(_name, _when)
+                    app.add_log_line(f"[SCHED] Starting: {_name}", ui_colors.MAGENTA)
+                    app.add_chat_line(f"Sched\u25b6 Task started: {_name}", ui_colors.MAGENTA)
+                    task_log_path = create_log_file_path(log_dir=_LOG_DIR)
+                    task_logger   = SessionLogger(task_log_path)
+                    task_logger.log_section_file_only(f"SCHEDULER TASK (dashboard): {_name}")
+                    try:
+                        task_hist  = ConversationHistory()
+                        task_ctx   = SessionContext(
+                            session_id   = f"task_{_name}",
+                            persist_path = get_chatsessions_dir() / f"task_{_name}.json",
                         )
-                        task_hist.add(prompt_text, response)
-
-                        tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
-                        task_logger.log_file_only(f"[Step {step_index}] Agent: {response}")
-                        task_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
-                        app.add_log_line(f"  \u2713 [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
-                        app.add_chat_line(
-                            f"Sched\u25b6 [{name} step {step_index}] {trunc(response, 100)}",
-                            ui_colors.BLUE,
+                        sched_ctx  = SlashCommandContext(
+                            config          = config,
+                            output          = lambda text, level="info": task_logger.log_file_only(f"[slash/{level}] {text}"),
+                            clear_history   = task_hist.clear,
+                            session_context = task_ctx,
                         )
+                        for step_index, prompt_text in enumerate(_prompts, start=1):
+                            if shutdown.is_set():
+                                break
+                            app.add_log_line(f"  [Step {step_index}] {trunc(prompt_text, 70)}", ui_colors.DIM)
+                            task_logger.log_file_only(f"[Step {step_index}] {prompt_text}")
+                            if handle_slash(prompt_text, sched_ctx):
+                                app.add_log_line("  [slash command handled]", ui_colors.DIM)
+                                continue
+                            hist = task_hist.as_list() or None
+                            response, p_tokens, _c, _ok, tps = orchestrate_prompt(
+                                user_prompt=prompt_text,
+                                config=config,
+                                logger=task_logger,
+                                conversation_history=hist,
+                                session_context=task_ctx,
+                                quiet=True,
+                            )
+                            task_hist.add(prompt_text, response)
+                            tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
+                            task_logger.log_file_only(f"[Step {step_index}] Agent: {response}")
+                            task_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
+                            app.add_log_line(f"  \u2713 [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
+                            app.add_chat_line(
+                                f"Sched\u25b6 [{_name} step {step_index}] {trunc(response, 100)}",
+                                ui_colors.BLUE,
+                            )
+                        task_logger.log_file_only(f"[DASHBOARD] Task '{_name}' completed.")
+                        app.add_log_line(f"[SCHED] Done: {_name}", ui_colors.MAGENTA)
+                    except Exception as exc:
+                        app.add_log_line(f"[SCHED] Error in '{_name}': {exc}", ui_colors.RED)
 
-                    task_logger.log_file_only(f"[DASHBOARD] Task '{name}' completed.")
-                    app.add_log_line(f"[SCHED] Done: {name}", ui_colors.MAGENTA)
-                finally:
-                    llm_lock.release()
+                if task_queue.enqueue(name, "scheduled", _make_dash_task):
+                    last_run[name] = now
+                    app.add_log_line(f"[SCHED] Queued: {name}", ui_colors.MAGENTA)
+                else:
+                    app.add_log_line(f"[SCHED] '{name}' already queued - skipping", ui_colors.DIM)
 
             for _ in range(_SCHEDULER_POLL_SECS * 2):
                 if shutdown.is_set():

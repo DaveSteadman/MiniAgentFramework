@@ -69,12 +69,13 @@ class DashboardApp:
     TAB_CHAT = 'Chat'
 
     # ----------------------------------------------------------------------------------------------------
-    def __init__(self, tasks=None, last_run=None, on_submit=None, shutdown_event=None, llm_lock=None, chat_history_entries=None):
+    def __init__(self, tasks=None, last_run=None, on_submit=None, shutdown_event=None, task_queue=None, chat_history_entries=None):
         """
         tasks                list of enabled task dicts from task_schedule.json
         last_run             mutable dict {task_name: datetime|None} shared with the scheduler thread
         on_submit            callable(text: str) invoked when the user presses Enter in the input bar
         shutdown_event       threading.Event; when set the UI loop exits cleanly on the next frame
+        task_queue           TaskQueue singleton from scheduler; used to show running indicator
         chat_history_entries mutable list[str] of prior inputs (oldest-first); shared with caller
         """
         self.tasks          = tasks or []
@@ -82,7 +83,7 @@ class DashboardApp:
         self.run_history: list = []    # (task_name, datetime) for each run completed this session
         self.on_submit      = on_submit
         self.shutdown_event = shutdown_event
-        self._llm_lock      = llm_lock
+        self._task_queue    = task_queue
 
         self.ollama_log = ScrollLog(max_lines=50)
         self.chat_log   = ScrollLog(max_lines=2000)
@@ -210,14 +211,7 @@ class DashboardApp:
             while self._running:
                 now     = datetime.now()
                 now_min = now.replace(second=0, microsecond=0)
-                task_running = bool(self._llm_lock and self._llm_lock.locked())
-                mins_next    = TimelineWidget._minutes_to_next(self.tasks, self.last_run, now_min)
-                due_soon     = (mins_next is not None and mins_next <= 1)
-                self.input_edit.locked = task_running or due_soon
-                if task_running:
-                    self.input_edit.lock_msg = ' [LLM busy please wait]'
-                elif due_soon:
-                    self.input_edit.lock_msg = ' [chat locked - scheduled task due soon]'
+                mins_next = TimelineWidget._minutes_to_next(self.tasks, self.last_run, now_min)
 
                 resized = self._screen.begin_frame()
                 if resized:
@@ -233,9 +227,39 @@ class DashboardApp:
 
                 # Vertical timeline
                 iy, ix, ih, iw = self._panels['timeline'].inner_rect()
-                self._timeline.draw(self._screen, iy, ix, ih, iw,
-                                    self.tasks, self.last_run, now, running=task_running,
+
+                # Build queue display lines (bottom of the timeline column, expands/contracts).
+                if self._task_queue:
+                    qs            = self._task_queue.get_state()
+                    active_item   = qs.get("active")
+                    pending_items = qs.get("pending", [])
+                else:
+                    active_item   = None
+                    pending_items = []
+
+                queue_lines: list[tuple[str, str]] = []
+                if active_item:
+                    name = active_item.get("name", "?")
+                    queue_lines.append((f"\u25b6 {name}", colors.TIMELINE_NOW))
+                for item in pending_items:
+                    name = item.get("name", "?")
+                    queue_lines.append((f"  \u00b7 {name}", colors.TIMELINE_TASK))
+
+                # When there are queue items, reserve an extra row for the separator line.
+                sep_rows    = 1 if queue_lines else 0
+                queue_rows  = len(queue_lines)
+                timeline_h  = max(ih - queue_rows - sep_rows, 1)
+                self._timeline.draw(self._screen, iy, ix, timeline_h, iw,
+                                    self.tasks, self.last_run, now, running=False,
                                     run_history=self.run_history)
+                if sep_rows:
+                    sep_row   = iy + timeline_h
+                    label     = " Queue "
+                    fill_l    = max(iw - len(label), 0)
+                    sep_text  = ("\u2500" * (fill_l // 2) + label + "\u2500" * (fill_l - fill_l // 2))[:iw]
+                    self._screen.put_str(sep_row, ix, sep_text.ljust(iw)[:iw], colors.TIMELINE_TICK, clip_w=iw)
+                for i, (line, attr) in enumerate(queue_lines):
+                    self._screen.put_str(iy + timeline_h + sep_rows + i, ix, line.ljust(iw)[:iw], attr, clip_w=iw)
 
                 # Main area (active tab)
                 iy, ix, ih, iw = self._panels['main'].inner_rect()

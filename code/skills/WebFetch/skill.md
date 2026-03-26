@@ -31,6 +31,22 @@ Returns a plain `str` containing:
 - read this URL
 - what does the page say
 
+## Tool selection guidance
+
+**Always use `query=` unless storing raw content for later processing.**
+
+Raw mode (no `query`) injects up to 4,000 words directly into the main context window.  That
+content must then be processed by the model in the very next round, compounding token cost.
+Query mode runs an isolated throwaway LLM call and returns only a compact extracted answer -
+the raw page text never enters the main context at all.
+
+Use raw mode only when the explicit intent is to park the full page content into the scratchpad
+via an immediate `scratch_save`, so it can be queried later with `scratch_query`.
+
+Rule of thumb:
+- Fetching a page to answer a question -> always use `query=`
+- Fetching a page to store for later inspection -> use raw mode, then `scratch_save` immediately
+
 ## Scratchpad integration
 Page text can be large. Use `scratch_save` to store it under a key and reference it with `{scratch:key}` in follow-up steps rather than repeating the full text inline.
 

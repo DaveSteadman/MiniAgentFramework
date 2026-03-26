@@ -4,8 +4,13 @@
 # Lightweight schedule management utilities for MiniAgentFramework scheduler mode.
 #
 # Provides:
-#   llm_lock           -- module-level threading.Lock that any LLM-calling code acquires while active.
-#                         Enforces single-LLM exclusivity: only one task runs at a time.
+#   task_queue   -- module-level TaskQueue that serialises all LLM calls sequentially.
+#                  Enqueue a callable with task_queue.enqueue(name, kind, fn); the worker
+#                  thread executes items one at a time, preventing concurrent LLM calls.
+#                  Tasks with a name already queued or active are silently deduplicated.
+#   llm_lock     -- the raw threading.Lock exposed by task_queue; held for the duration of
+#                  each task.  Slash commands use this via lock_input / unlock_input to pause
+#                  the queue while /test or /task run executes.
 #   load_schedules_dir -- scans a directory for *.json schedule files and merges all tasks lists.
 #   is_task_due        -- pure function; tests whether a task should fire given current time.
 #
@@ -16,6 +21,9 @@
 # Schedule types:
 #   interval   fires every N minutes  {"type": "interval", "minutes": N}
 #   daily      fires once per day at a fixed wall-clock time  {"type": "daily", "time": "HH:MM"}
+#
+# Queue state is persisted to controldata/task_queue.json on every enqueue/dequeue so the
+# dashboard and other tooling can observe pending and active tasks.
 #
 # The run_scheduler_mode function lives in main.py alongside run_chat_mode so that
 # orchestrate_prompt is accessible without a circular import.
@@ -31,16 +39,157 @@
 import json
 import sys
 import threading
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
 
 # ====================================================================================================
-# MARK: LLM LOCK
+# MARK: TASK QUEUE
 # ====================================================================================================
-# Acquire this lock before any LLM call; release when done.
-# The scheduler loop checks .locked() before starting a new task and skips if busy.
-llm_lock: threading.Lock = threading.Lock()
+# task_queue is the module-level singleton that serialises all LLM calls.
+#
+# Enqueue a task with task_queue.enqueue(name, kind, fn) -- returns False if a task with the
+# same name is already queued or running (deduplication).  The queue worker executes items
+# sequentially on its own daemon thread, holding run_lock for the duration of each item.
+#
+# llm_lock exposes the raw threading.Lock so existing code that calls acquire/release
+# (primarily slash-command lock_input / unlock_input wiring) continues to work unchanged.
+# Acquiring llm_lock directly lets /test and /task run hold the serialisation token outside
+# the queue, which is intentional: those are explicit user-initiated commands.
+class TaskQueue:
+    """Sequential LLM-call queue with deduplication and state-file visibility.
+
+    One item executes at a time.  Enqueueing a name that is already queued or active
+    is a no-op (returns False) to prevent backlog from repeated schedule triggers.
+    """
+
+    def __init__(self) -> None:
+        self._run_lock   = threading.Lock()    # held while a task executes
+        self._state_lock = threading.Lock()    # protects _deque / _queued_names / _active
+        self._has_work   = threading.Event()
+        self._shutdown   = threading.Event()
+        self._deque:         deque      = deque()
+        self._queued_names:  set[str]   = set()
+        self._active:        dict | None = None
+        self._worker         = threading.Thread(
+            target = self._worker_loop,
+            daemon = True,
+            name   = "task-queue-worker",
+        )
+        self._worker.start()
+
+    # ----------------------------------------------------------------------------------------------------
+    @property
+    def run_lock(self) -> threading.Lock:
+        """The raw serialisation lock.  Acquire this to pause the queue (e.g. /test commands)."""
+        return self._run_lock
+
+    # ----------------------------------------------------------------------------------------------------
+    def enqueue(self, name: str, kind: str, fn) -> bool:
+        """Append *fn* to the execution queue.
+
+        Returns False without enqueueing if *name* already appears in the queue or is
+        currently active (deduplication guard for repeated schedule triggers).
+        """
+        with self._state_lock:
+            if name in self._queued_names or (self._active and self._active["name"] == name):
+                return False
+            self._deque.append({
+                "name":      name,
+                "kind":      kind,
+                "queued_at": datetime.now().isoformat(timespec="seconds"),
+                "fn":        fn,
+            })
+            self._queued_names.add(name)
+        self._has_work.set()
+        self._write_state()
+        return True
+
+    # ----------------------------------------------------------------------------------------------------
+    def get_state(self) -> dict:
+        """Return a JSON-serialisable snapshot of current queue state."""
+        with self._state_lock:
+            pending = [
+                {"name": item["name"], "kind": item["kind"], "queued_at": item["queued_at"]}
+                for item in self._deque
+            ]
+            active = dict(self._active) if self._active else None
+        return {
+            "active":     active,
+            "pending":    pending,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    # ----------------------------------------------------------------------------------------------------
+    def stop(self) -> None:
+        """Request worker shutdown.  The in-flight task runs to completion."""
+        self._shutdown.set()
+        self._has_work.set()
+
+    # ----------------------------------------------------------------------------------------------------
+    def _write_state(self) -> None:
+        try:
+            from workspace_utils import get_controldata_dir
+            path = get_controldata_dir() / "task_queue.json"
+            path.write_text(
+                json.dumps(self.get_state(), indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    # ----------------------------------------------------------------------------------------------------
+    def _worker_loop(self) -> None:
+        while not self._shutdown.is_set():
+            self._has_work.wait(timeout=1.0)
+            self._has_work.clear()
+
+            while not self._shutdown.is_set():
+                # Bail if nothing to do.
+                with self._state_lock:
+                    if not self._deque:
+                        break
+
+                # Block here while /test or /task run holds the lock.
+                self._run_lock.acquire(blocking=True)
+
+                if self._shutdown.is_set():
+                    self._run_lock.release()
+                    return
+
+                # Dequeue under state lock; re-check in case the queue was cleared while waiting.
+                with self._state_lock:
+                    if not self._deque:
+                        self._run_lock.release()
+                        break
+                    item             = self._deque.popleft()
+                    self._queued_names.discard(item["name"])
+                    self._active     = {
+                        "name":       item["name"],
+                        "kind":       item["kind"],
+                        "started_at": datetime.now().isoformat(timespec="seconds"),
+                    }
+
+                self._write_state()
+                try:
+                    item["fn"]()
+                except Exception:
+                    pass
+                finally:
+                    self._run_lock.release()
+                    with self._state_lock:
+                        self._active = None
+                    self._write_state()
+
+
+# ====================================================================================================
+# MARK: MODULE INSTANCES
+# ====================================================================================================
+# task_queue is the shared singleton used by all scheduler and dashboard code.
+# llm_lock is a back-compat alias so slash commands (lock_input / unlock_input) work unchanged.
+task_queue: TaskQueue    = TaskQueue()
+llm_lock:   threading.Lock = task_queue.run_lock
 
 
 # ====================================================================================================

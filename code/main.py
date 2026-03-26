@@ -16,7 +16,7 @@
 #   - modes/dashboard.py   -- run_dashboard_mode
 #   - ollama_client.py     -- Ollama server management and LLM calls
 #   - skills_catalog_builder.py -- load_skills_payload, tool definitions
-#   - scheduler.py         -- load_schedules_dir, is_task_due, llm_lock
+#   - scheduler.py         -- load_schedules_dir, is_task_due, task_queue
 #   - runtime_logger.py    -- SessionLogger, create_log_file_path
 # ====================================================================================================
 
@@ -46,7 +46,7 @@ from skills_catalog_builder import load_skills_payload
 from runtime_logger import create_log_file_path
 from runtime_logger import SessionLogger
 from scheduler import initial_last_run, is_task_due
-from scheduler import llm_lock
+from scheduler import task_queue
 from scheduler import load_schedules_dir
 from slash_commands import SlashCommandContext
 from slash_commands import handle as handle_slash
@@ -100,13 +100,6 @@ def parse_main_args() -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Start an interactive multi-turn chat session instead of a single-shot run.",
-    )
-    parser.add_argument(
-        "--analysetest",
-        type=Path,
-        default=None,
-        metavar="CSV_FILE",
-        help="Analyse a test results CSV produced by test_wrapper.py and exit.",
     )
     parser.add_argument(
         "--scheduler",
@@ -408,7 +401,7 @@ def run_scheduler_mode(
 ) -> None:
     """Scheduled-task loop: fires prompt sequences according to task_schedule.json.
 
-    Only one task runs at a time (single-LLM constraint enforced by llm_lock).
+    Only one task runs at a time (single-LLM constraint enforced by task_queue).
     If a task becomes due while another is in progress it is skipped for that poll cycle.
 
     Each task's prompt sequence shares a growing conversation_history so later prompts
@@ -484,35 +477,34 @@ def run_scheduler_mode(
                 if not is_task_due(task, last_run[name], now):
                     continue
 
-                if not llm_lock.acquire(blocking=False):
-                    logger.log(f"[SCHEDULER] Task '{name}' is due but LLM is busy - will retry next cycle")
-                    continue
-
-                # Lock is now held - record start time and run the task.
-                last_run[name] = now
-                logger.log_section(f"SCHEDULER TASK: {name}")
-                print(f"[SCHEDULER] Starting task: {name} ({len(prompts)} prompt(s)) at {now.strftime('%H:%M:%S')}")
-
-                try:
+                # Enqueue the task; the worker thread runs it when the LLM is free.
+                # Use default-arg capture so loop variables are frozen at enqueue time.
+                def _run_task(_name=name, _prompts=list(prompts), _when=now) -> None:
+                    logger.log_section(f"SCHEDULER TASK: {_name}")
+                    print(f"[SCHEDULER] Starting task: {_name} ({len(_prompts)} prompt(s)) at {_when.strftime('%H:%M:%S')}")
                     task_hist, task_ctx = _make_task_session(
-                        session_id   = f"task_{name}",
-                        persist_path = get_chatsessions_day_dir() / f"task_{name}.json",
+                        session_id   = f"task_{_name}",
+                        persist_path = get_chatsessions_day_dir() / f"task_{_name}.json",
                     )
                     sched_ctx = _make_scheduler_slash_ctx(config, logger, task_hist, task_ctx)
                     _run_task_prompts(
-                        prompts=prompts,
-                        config=config,
-                        logger=logger,
-                        history=task_hist,
-                        session_ctx=task_ctx,
-                        slash_ctx=sched_ctx,
-                        shutdown=shutdown,
-                        task_label=name,
+                        prompts     = _prompts,
+                        config      = config,
+                        logger      = logger,
+                        history     = task_hist,
+                        session_ctx = task_ctx,
+                        slash_ctx   = sched_ctx,
+                        shutdown    = shutdown,
+                        task_label  = _name,
                     )
-                    print(f"[SCHEDULER] Task '{name}' completed.\n")
-                    logger.log(f"[SCHEDULER] Task '{name}' completed.")
-                finally:
-                    llm_lock.release()
+                    print(f"[SCHEDULER] Task '{_name}' completed.\n")
+                    logger.log(f"[SCHEDULER] Task '{_name}' completed.")
+
+                if task_queue.enqueue(name, "scheduled", _run_task):
+                    last_run[name] = now
+                    logger.log(f"[SCHEDULER] Task '{name}' queued.")
+                else:
+                    logger.log(f"[SCHEDULER] Task '{name}' already queued - skipping duplicate.")
 
             # Sleep in short increments so a shutdown request is noticed promptly.
             for _ in range(SCHEDULER_POLL_SECS * 2):  # 0.5s steps
@@ -581,14 +573,6 @@ def run_schedule_item_mode(
 # ====================================================================================================
 def main() -> None:
     args = parse_main_args()
-
-    # Analysis mode: parse a results CSV and exit without starting Ollama.
-    if args.analysetest is not None:
-        import sys
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "testcode"))
-        from test_analyzer import run_analysis
-        run_analysis(args.analysetest)
-        return
 
     log_path = create_log_file_path(log_dir=LOG_DIR)
     logger   = SessionLogger(log_path)

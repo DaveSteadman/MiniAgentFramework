@@ -19,6 +19,7 @@ facts that should survive across sessions - use the Memory skill for that.
   - `scratch_delete(key: str)`
   - `scratch_search(substring: str)`
   - `scratch_peek(key: str, substring: str, context_chars: int = 250)`
+  - `scratch_query(key: str, query: str, save_result_key: str = "")`
 
 ## Parameters
 
@@ -50,6 +51,15 @@ No parameters.  Returns the full content of every key - use this to inspect stor
 - `substring` *(required)* - case-insensitive text to locate within the stored value.
 - `context_chars` *(optional, default 250)* - characters to include before and after the match.
 
+### `scratch_query(key, query, save_result_key = "")`
+- `key` *(required)* - the scratchpad key whose full content will be used as input.
+- `query` *(required)* - natural-language question or instruction to apply to the stored content.
+- `save_result_key` *(optional)* - if provided, the extracted answer is also saved to this scratchpad key.
+
+  Runs the query against the stored content in a **clean, isolated LLM context** - the raw content
+  never enters the caller's context window.  Use this instead of `scratch_load` when the stored
+  value is large and you only need a compact extracted answer.
+
 ## Output
 - `scratch_save(...)` - returns `"Saved to scratchpad key '<key>' (N chars)"` on success, or `"Error: ..."`.
 - `scratch_load(...)` - returns the stored string value, or an error message if the key is not found.
@@ -58,6 +68,7 @@ No parameters.  Returns the full content of every key - use this to inspect stor
 - `scratch_delete(...)` - returns confirmation or `"Scratchpad key '<key>' not found - nothing deleted."`.
 - `scratch_search(...)` - returns a formatted list of matching key names and sizes, or `"No scratchpad keys contain the substring '<text>'."` when no match is found.
 - `scratch_peek(...)` - returns `[Match in 'key' at char N / M total]` followed by the surrounding text with `>>>match<<<` highlighting, or an error string when the key or substring is not found.
+- `scratch_query(...)` - returns the compact extracted answer from the isolated LLM call, or `"Not found in content."` when the query cannot be answered from the stored value.  When `save_result_key` is provided, prepends `[Result saved to '<key>']` to the output.
 
 ## Token substitution
 Any skill argument containing `{scratch:key}` is automatically resolved to the stored value
@@ -74,6 +85,7 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `delete from scratchpad`, `clear scratchpad key`
 - `search scratchpad`, `find scratchpad keys containing`, `which scratchpad keys have`
 - `peek at scratchpad`, `show context around`, `find text in scratchpad key`
+- `query scratchpad`, `ask scratchpad`, `extract from scratchpad`, `filter scratchpad`, `run query on scratchpad key`
 
 ## Scratchpad integration
 This is the scratchpad skill itself.  All other skills reference this one for their
@@ -88,6 +100,10 @@ scratchpad integration patterns.  No self-referential use needed.
   - Returns: `"Scratchpad keys:\n  webresult  (21 chars)"`
 - `scratch_peek("webresult", "content", 100)` - show 100 chars around first occurrence of "content" in key `webresult`
   - Returns: `"[Match in 'webresult' at char 5 / 21 total]\nepage>>>content<<<here"`
+- `scratch_query("racedata", "Which drivers won at Monaco?")` - extract Monaco winners from a large stored result in an isolated context
+  - Returns: the compact LLM-extracted answer, never the full raw value
+- `scratch_query("racedata", "List only Ferrari wins", "ferrari_wins")` - same but also saves result to key `ferrari_wins`
+  - Returns: `"[Result saved to 'ferrari_wins']\n<extracted text>"`
 - `scratch_dump()` - shows every key and its full content
   - Returns: `"Scratchpad dump:\n\n[webresult]\npage content here..."`
 - `scratch_delete("webresult")` - removes the key

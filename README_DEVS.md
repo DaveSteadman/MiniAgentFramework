@@ -123,13 +123,14 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - Records timing, exit code, final LLM output, and log file path to a timestamped CSV in `controldata/test_results/`.
   - Prompt suites are JSON files in `controldata/test_prompts/` and are loaded via `--prompts-file`.
   - Accepts `--ollama-host` to run the full suite against a LAN or cloud Ollama host.
+  - Invoked by the `/test` slash command; not intended for direct use.
 
 - `testcode/test_analyzer.py`
   - Reads a test results CSV and parses each run's log file for structured diagnostics.
   - Classifies every prompt as `PASS`, `FAIL`, `TIMEOUT`, or `GAP` (capability gap admission).
   - Extracts: tools called (`skills_selected`), tool-calling mode (`TOOL_CALLS` / `DIRECT` / `UNKNOWN`), tool round count, validation result.
   - Produces a `<name>_analysis.csv` and a `<name>_gaps.txt` gap report alongside the source CSV.
-  - Invoked via `python code/main.py --analysetest <csv>` or directly as a CLI script.
+  - Invoked directly as a CLI script.
 
 ### 10) Workspace path management
 - `code/workspace_utils.py`

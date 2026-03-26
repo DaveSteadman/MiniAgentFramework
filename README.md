@@ -27,8 +27,6 @@ The project uses a local [Ollama](https://ollama.com) runtime and focuses on tra
 | [**Scheduler**](#running-scheduler-mode) | Run scheduled prompt tasks from `controldata/schedules/` unattended | `python .\code\main.py --scheduler` |
 | [**Scheduled Item**](#running-schedule-item-mode) | Run one named scheduled task immediately (debugging aid) | `python .\code\main.py --scheduled-item <name>` |
 | [**Dashboard**](#running-dashboard-mode) | Full terminal UI: schedule timeline, live log tail, and chat combined | `python .\code\main.py --dashboard` |
-| [**Test Wrapper**](#running-test-wrapper) | Run a prompt suite as subprocesses and capture results to a CSV | `python .\testcode\test_wrapper.py` |
-| [**Test Analyzer**](#running-test-analyzer) | Classify outcomes and produce diagnostics from a test results CSV | `python .\code\main.py --analysetest <csv>` |
 | [**Chat Sequence**](#running-chat-sequence-mode) | Run a pre-defined sequence of prompts sharing a single conversation history | `python .\code\main.py --chat-sequence-file <file.json>` |
 
 ---
@@ -106,7 +104,7 @@ python .\code\main.py --chat --model "20b" --num-ctx 16384
 
 ## Running: Chat Sequence Mode
 
-Runs a pre-defined sequence of prompts through a shared conversation history - each prompt sees all prior turns in the sequence. Used by the test wrapper to execute multi-turn test scenarios where later steps depend on earlier results.
+Runs a pre-defined sequence of prompts through a shared conversation history - each prompt sees all prior turns in the sequence. Used by the `/test` slash command to execute multi-turn test scenarios where later steps depend on earlier results.
 
 The sequence file is a JSON array of prompt strings:
 
@@ -343,67 +341,6 @@ Each task lives in its own `controldata/schedules/task_<name>.json` file and can
 
 ---
 
-## Running: Test Wrapper
-
-Runs a suite of prompts through `code/main.py` as a subprocess and records results to a timestamped CSV.
-
-```powershell
-python .\testcode\test_wrapper.py
-```
-
-| Option | Default | Description |
-|---|---|---|
-| `--prompts TEXT [TEXT ...]` | - | One or more prompt strings (overrides `--prompts-file`). |
-| `--prompts-file PATH` | `controldata/test_prompts/default_prompts.json` | JSON file containing an array of prompt strings. |
-| `--output-dir PATH` | `controldata/test_results/` | Directory where the CSV results file is written. |
-| `--model ALIAS` | `"20b"` | Ollama model alias passed to each `main.py` subprocess invocation. |
-| `--ollama-host URL` | *(local)* | Ollama host for all subprocess invocations (e.g. `http://MONTBLANC:11434`). Connectivity is checked lazily, so prompts that are pure slash commands never require Ollama to be reachable. |
-
-Each row in the CSV captures: `timestamp`, `prompt`, `final_output`, `duration_seconds`, `exit_code`, `log_file`, `stderr`.
-
-**Example - run a named prompts file:**
-```powershell
-python .\testcode\test_wrapper.py --prompts-file controldata/test_prompts/test_web_skill_prompts.json
-```
-
-**Example - run a custom set of prompts inline:**
-```powershell
-python .\testcode\test_wrapper.py --prompts "output the time" "what is today's date" "how much RAM is available"
-```
-
----
-
-## Running: Test Analyzer
-
-Analyzes a test results CSV without touching Ollama - reads each row's log file and classifies outcomes.
-
-```powershell
-python .\code\main.py --analysetest controldata\test_results\test_results_<timestamp>.csv
-```
-
-Or run the analyzer directly:
-```powershell
-python .\testcode\test_analyzer.py controldata\test_results\test_results_<timestamp>.csv
-```
-
-Produces two files alongside the source CSV:
-
-| File | Contents |
-|---|---|
-| `<name>_analysis.csv` | Per-prompt row with: outcome, failure reason, tools called, tool-calling mode, round count, validation result. |
-| `<name>_gaps.txt` | Summary report: pass rate, tool-calling mode breakdown, tool round histogram, skill usage frequency, failing prompts, capability gap signals. |
-
-Outcome labels:
-
-| Label | Meaning |
-|---|---|
-| `PASS` | Exit 0, non-empty output, no failure signals detected. |
-| `FAIL` | Non-zero exit code, empty output, or validation failure in log. |
-| `TIMEOUT` | Subprocess exceeded the 300 s timeout (exit code 124). |
-| `GAP` | Output contained a capability gap admission (e.g. "I cannot access the internet"). |
-
----
-
 ## Other Utilities
 
 ### Inspect tool definitions
@@ -437,7 +374,7 @@ python .\code\system_check.py --num-ctx 4096
 |---|---|
 | `controldata/logs/YYYY-MM-DD/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) - one file per run, grouped into dated subfolders. |
 | `controldata/schedules/` | Schedule definition files (`*.json`) consumed by Scheduler and Dashboard modes. |
-| `controldata/test_prompts/` | Prompt suite JSON files used by the Test Wrapper. |
-| `controldata/test_results/` | Timestamped CSV results and analysis files produced by the Test Wrapper and Analyzer. |
+| `controldata/test_prompts/` | Prompt suite JSON files used by the `/test` slash command. |
+| `controldata/test_results/` | Timestamped CSV results and analysis files produced by `/test`. |
 
 Each log file contains full evidence for its run: resolved model, memory recall, tool rounds, tool call outputs, final LLM response, and per-call token throughput.

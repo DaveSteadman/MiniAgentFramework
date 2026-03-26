@@ -52,8 +52,6 @@ class SlashCommandContext:
     clear_history:   Callable[[], None]            # resets conversation history + session context
     request_exit:    Callable[[], None] | None = None   # optional: signals the host to shut down
     session_context: object | None = None               # SessionContext; None in non-interactive modes
-    lock_input:      Callable[[], None] | None = None   # acquire run lock (blocks until free)
-    unlock_input:    Callable[[], None] | None = None   # release run lock
 
 
 # ====================================================================================================
@@ -421,16 +419,42 @@ def _cmd_clearmemory(arg: str, ctx: SlashCommandContext) -> None:
 
 def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
     from pathlib import Path
+    from orchestration import get_skill_guidance_enabled, set_skill_guidance_enabled
     from skills_catalog_builder import (
         find_skill_files, summarize_skill, normalize_summary,
         render_summary_document, DEFAULT_SKILLS_ROOT, DEFAULT_OUTPUT_FILE,
         load_skills_payload,
     )
 
+    sub = arg.strip().lower()
+
+    # Handle mode-only calls (no rebuild needed).
+    if sub == "max":
+        set_skill_guidance_enabled(True)
+        ctx.output("Skill guidance mode: max (tool selection block included in system prompt).", "success")
+        ctx.output("  ~925 extra tokens per call.  Good for comparison testing.", "dim")
+        return
+    if sub == "min":
+        set_skill_guidance_enabled(False)
+        ctx.output("Skill guidance mode: min (tool selection block omitted from system prompt).", "success")
+        ctx.output("  Relies on JSON Schema tool descriptions only.", "dim")
+        return
+    if sub and sub not in ("min", "max", ""):
+        current = "max" if get_skill_guidance_enabled() else "min"
+        ctx.output(f"Usage: /reskill [min|max]  |  current mode: {current}", "dim")
+        ctx.output("  min  - lean system prompt; no tool selection guidance block (default)", "dim")
+        ctx.output("  max  - full guidance block injected for comparison testing", "dim")
+        return
+
+    # No arg (or empty): rebuild catalog and default to min.
+    if not sub:
+        set_skill_guidance_enabled(False)
+
     skills_root = DEFAULT_SKILLS_ROOT
     output_path = DEFAULT_OUTPUT_FILE
 
-    ctx.output("Rebuilding skills catalog (local extraction, no LLM)...", "dim")
+    current_mode = "max" if get_skill_guidance_enabled() else "min"
+    ctx.output(f"Rebuilding skills catalog (local extraction, no LLM) - mode: {current_mode}...", "dim")
     try:
         skill_files = find_skill_files(skills_root=skills_root)
         if not skill_files:
@@ -451,7 +475,7 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
         # Hot-reload into the live config so this session immediately picks up the changes.
         ctx.config.skills_payload = load_skills_payload(output_path)
         ctx.output(
-            f"Skills catalog rebuilt: {len(summaries)} skill(s) registered.",
+            f"Skills catalog rebuilt: {len(summaries)} skill(s) registered.  Mode: {current_mode}.",
             "success",
         )
     except Exception as exc:
@@ -579,6 +603,7 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
     import time
     from pathlib import Path
     from ollama_client import get_active_host
+    from scheduler import task_queue
 
     test_prompts_dir = Path(__file__).resolve().parent.parent / "controldata" / "test_prompts"
     wrapper          = Path(__file__).resolve().parent.parent / "testcode" / "test_wrapper.py"
@@ -596,8 +621,6 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
                     ctx.output(f"  {f.name}", "item")
         return
 
-    active_host = get_active_host()
-
     # ---- /test all ----
     if arg.strip().lower() == "all":
         if not test_prompts_dir.exists():
@@ -608,41 +631,41 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
             ctx.output("No test files found.", "error")
             return
 
-        model = ctx.config.resolved_model
-        ctx.output(
-            f"Running all {len(all_files)} test file(s) - host: {active_host}  model: {model}",
-            "info",
-        )
-        if ctx.lock_input:
-            ctx.lock_input()
-
-        total_passed = 0
-        total_tests  = 0
-        wall_start   = time.monotonic()
-
-        try:
-            for idx, candidate in enumerate(all_files, start=1):
-                ctx.output(
-                    f"[{idx}/{len(all_files)}] Starting: {candidate.name}",
-                    "info",
-                )
+        def _run_all(
+            _files=list(all_files),
+            _wrapper=wrapper,
+            _ctx=ctx,
+        ) -> None:
+            _model = _ctx.config.resolved_model
+            _host  = get_active_host()
+            _ctx.output(
+                f"Running all {len(_files)} test file(s) - host: {_host}  model: {_model}",
+                "info",
+            )
+            total_passed = 0
+            total_tests  = 0
+            wall_start   = time.monotonic()
+            for idx, candidate in enumerate(_files, start=1):
+                _ctx.output(f"[{idx}/{len(_files)}] Starting: {candidate.name}", "info")
                 p, t = _run_one_test_file(
-                    candidate, ctx, wrapper, model, active_host, re, subprocess, sys,
+                    candidate, _ctx, _wrapper, _model, _host, re, subprocess, sys,
                 )
                 total_passed += p
                 total_tests  += t
-        finally:
             elapsed   = time.monotonic() - wall_start
             mins, sec = divmod(int(elapsed), 60)
             time_str  = f"{mins}m {sec}s" if mins else f"{sec}s"
             level     = "success" if total_passed == total_tests and total_tests > 0 else "error"
-            ctx.output(
-                f"[ALL TESTS COMPLETE]  host={active_host}  model={model}  "
+            _ctx.output(
+                f"[ALL TESTS COMPLETE]  host={_host}  model={_model}  "
                 f"elapsed={time_str}  passed={total_passed}/{total_tests}",
                 level,
             )
-            if ctx.unlock_input:
-                ctx.unlock_input()
+
+        if task_queue.enqueue("test_all", "test", _run_all):
+            ctx.output("Test run queued.", "dim")
+        else:
+            ctx.output("A test run is already queued or in progress.", "error")
         return
 
     # ---- single file ----
@@ -666,16 +689,23 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
             ctx.output(f"Prompts file not found: {candidate}", "error")
             return
 
-    ctx.output(f"Running test suite: {candidate.name} ...", "info")
-    if ctx.lock_input:
-        ctx.lock_input()
-    try:
+    def _run_single(
+        _candidate=candidate,
+        _wrapper=wrapper,
+        _ctx=ctx,
+    ) -> None:
+        _model = _ctx.config.resolved_model
+        _host  = get_active_host()
+        _ctx.output(f"Running test suite: {_candidate.name} ...", "info")
         _run_one_test_file(
-            candidate, ctx, wrapper, ctx.config.resolved_model, active_host, re, subprocess, sys,
+            _candidate, _ctx, _wrapper, _model, _host, re, subprocess, sys,
         )
-    finally:
-        if ctx.unlock_input:
-            ctx.unlock_input()
+
+    queue_name = f"test_{candidate.stem}"
+    if task_queue.enqueue(queue_name, "test", _run_single):
+        ctx.output(f"Test queued: {candidate.name}", "dim")
+    else:
+        ctx.output(f"Test '{candidate.name}' is already queued or in progress.", "error")
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -1030,29 +1060,37 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
         if "localhost" not in active_host and "127.0.0.1" not in active_host:
             cmd += ["--ollama-host", active_host]
         ctx.output(f"Running task '{rest}' ...", "info")
-        if ctx.lock_input:
-            ctx.lock_input()
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            for line in proc.stdout:
-                ctx.output(line.rstrip(), "dim")
-            proc.wait()
-            if proc.returncode == 0:
-                ctx.output(f"Task '{rest}' completed.", "success")
-            else:
-                ctx.output(f"Task '{rest}' exited with code {proc.returncode}.", "error")
-        except Exception as exc:
-            ctx.output(f"Error running task: {exc}", "error")
-        finally:
-            if ctx.unlock_input:
-                ctx.unlock_input()
+
+        def _run_task(
+            _rest=rest,
+            _cmd=list(cmd),
+            _ctx=ctx,
+        ) -> None:
+            try:
+                proc = subprocess.Popen(
+                    _cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                for line in proc.stdout:
+                    _ctx.output(line.rstrip(), "dim")
+                proc.wait()
+                if proc.returncode == 0:
+                    _ctx.output(f"Task '{_rest}' completed.", "success")
+                else:
+                    _ctx.output(f"Task '{_rest}' exited with code {proc.returncode}.", "error")
+            except Exception as exc:
+                _ctx.output(f"Error running task: {exc}", "error")
+
+        from scheduler import task_queue
+        queue_name = f"task_run_{rest}"
+        if task_queue.enqueue(queue_name, "task_run", _run_task):
+            ctx.output(f"Task '{rest}' queued.", "dim")
+        else:
+            ctx.output(f"Task '{rest}' is already queued or in progress.", "error")
         return
 
     ctx.output(f"Unknown sub-command '{sub}'. Use: enable, disable, add, delete, run", "error")
@@ -1095,7 +1133,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/stopmodel":     "[name]  Unload a running model from VRAM (defaults to active model)",
     "/clearmemory":   "Delete the memory store file, starting with a blank memory next session",
     "/newchat":       "Clear conversation history and session context, starting a fresh chat",
-    "/reskill":       "Rebuild the skills catalog from skill.md files and hot-reload into session",
+    "/reskill":       "[min|max]  Rebuild skills catalog and set system prompt guidance mode (default: min)",
     "/sandbox":       "<on|off>  Enable/disable Python code execution sandbox (import whitelist + blocked builtins)",
     "/scratchdump":   "<on|off>  Write scratchpad contents to controldata/scratchpad_dump.txt on every change (default: off)",
     "/deletelogs":    "<days>  Delete log and chatsession date-folders older than N days (e.g. /deletelogs 10)",

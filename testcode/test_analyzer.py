@@ -21,10 +21,7 @@
 #   <source>_analysis.csv   -- one row per prompt with richer diagnostics
 #   <source>_gaps.txt       -- summary of inferred missing or weak skill coverage
 #
-# Usage (via main.py):
-#   python code/main.py --analysetest controldata/test_results/test_results_<timestamp>.csv
-#
-# Or directly:
+# Usage:
 #   python testcode/test_analyzer.py controldata/test_results/test_results_<timestamp>.csv
 # ====================================================================================================
 
