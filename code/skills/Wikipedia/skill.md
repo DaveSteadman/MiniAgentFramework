@@ -26,6 +26,23 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `background on`, `history of`, `definition of`
 - `bio`, `biography`, `life of`, `biography of`
 
+## Tool selection guidance
+
+**Check the scratchpad before calling Wikipedia.**
+If a Wikipedia article or related content was already fetched earlier in this session, it will
+be stored in the scratchpad. Use `scratch_query(key, question)` to extract the needed
+information from the stored article rather than fetching again.
+
+**Prefer Wikipedia over WebSearch for stable reference topics.**
+`lookup_wikipedia` is a single fast call that returns an authoritative, structured summary.
+For questions about a person, place, concept, event, or technology with a well-known Wikipedia
+article - always try Wikipedia first before issuing a web search.
+
+**When to use WebSearch instead:**
+- The topic is current news or a recent event (Wikipedia may not be updated).
+- The question is about a very specific niche where Wikipedia coverage is thin.
+- The topic requires cross-source corroboration.
+
 ## Scratchpad integration
 Article extracts can be several hundred words.  When the content will be used in a downstream
 step (write to file, summarise, compare with another result), park it with `scratch_save` first.

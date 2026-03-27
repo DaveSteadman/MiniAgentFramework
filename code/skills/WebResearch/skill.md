@@ -45,6 +45,26 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `follow the links`
 - `gather evidence from the web`
 
+## Tool selection guidance
+
+**This is the most expensive web skill - use it only when simpler tools cannot settle the question.**
+
+`research_traverse` owns its own search frontier: it searches, fetches multiple pages, follows
+links, and synthesises evidence internally. This makes it powerful but slow and context-heavy.
+Prefer a cheaper alternative whenever one of the following applies:
+
+| Situation | Prefer instead |
+|---|---|
+| Data already stored this session | `scratch_query` / `scratch_load` |
+| Stable factual topic (person, place, concept) | `lookup_wikipedia` |
+| Answer likely on one known page | `fetch_page_text(url=..., query=...)` |
+| Answer likely on one unknown page | `search_web_text` + `fetch_page_text(query=...)` |
+| Multi-source investigation needed | **use `research_traverse`** |
+
+**Check the scratchpad before researching.**
+If related content is already stored from an earlier step, use `scratch_query` to extract the
+specific answer rather than launching a fresh web investigation.
+
 ## Scratchpad integration
 This skill is intended to return a compact top-level summary plus a large `full_report`.
 The orchestration layer can keep the compact summary inline and auto-park the full result in scratchpad for later `scratch_load`.

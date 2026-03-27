@@ -33,6 +33,11 @@ Returns a plain `str` containing:
 
 ## Tool selection guidance
 
+**Check the scratchpad before fetching.**
+If active scratchpad keys are listed in the system prompt, check whether the page content
+already exists there before making a network request. Use `scratch_query(key, question)` to
+extract a specific answer from stored content without re-fetching.
+
 **Always use `query=` unless storing raw content for later processing.**
 
 Raw mode (no `query`) injects up to 4,000 words directly into the main context window.  That

@@ -78,6 +78,7 @@ class TaskQueue:
             name   = "task-queue-worker",
         )
         self._worker.start()
+        self._write_state()
 
     # ----------------------------------------------------------------------------------------------------
     @property
@@ -126,6 +127,16 @@ class TaskQueue:
         """Request worker shutdown.  The in-flight task runs to completion."""
         self._shutdown.set()
         self._has_work.set()
+        self._delete_state()
+
+    # ----------------------------------------------------------------------------------------------------
+    def _delete_state(self) -> None:
+        try:
+            from workspace_utils import get_controldata_dir
+            path = get_controldata_dir() / "task_queue.json"
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     # ----------------------------------------------------------------------------------------------------
     def _write_state(self) -> None:

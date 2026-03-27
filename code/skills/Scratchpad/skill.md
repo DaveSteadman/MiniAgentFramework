@@ -70,6 +70,28 @@ No parameters.  Returns the full content of every key - use this to inspect stor
 - `scratch_peek(...)` - returns `[Match in 'key' at char N / M total]` followed by the surrounding text with `>>>match<<<` highlighting, or an error string when the key or substring is not found.
 - `scratch_query(...)` - returns the compact extracted answer from the isolated LLM call, or `"Not found in content."` when the query cannot be answered from the stored value.  When `save_result_key` is provided, prepends `[Result saved to '<key>']` to the output.
 
+## Tool selection guidance
+
+**Check the scratchpad before making any web or file request.**
+
+If the system prompt lists active scratchpad keys, always consider whether the data needed to
+answer the current question might already be stored there from an earlier step in this session.
+Re-fetching data that is already in the scratchpad wastes an entire LLM call and a network round-trip.
+
+Decision tree when data may already be stored:
+1. Call `scratch_list()` if the keys are not already visible.
+2. If a relevant key exists and you need a specific answer from it - use `scratch_query(key, question)`. The query runs in an isolated context; the raw content never enters the main window.
+3. If a relevant key exists and you need the full content (e.g. to write it to a file) - use `scratch_load(key)` or `{scratch:key}` token substitution.
+4. If a relevant key exists and you need to locate a specific passage - use `scratch_peek(key, substring)`.
+5. Only proceed to a web or file skill if the data is confirmed to not be in the scratchpad.
+
+Tool selection hierarchy (prefer earlier options when they can provide the answer):
+- `scratch_query` / `scratch_load` - data already in session, zero network cost
+- `lookup_wikipedia` - stable factual reference, single fast call
+- `fetch_page_text(query=...)` - known URL, isolated extraction
+- `search_web_text` + `fetch_page_text(query=...)` - URL unknown, single page answer
+- `research_traverse` - multi-source investigation, most expensive; use only when simpler tools cannot settle the question
+
 ## Token substitution
 Any skill argument containing `{scratch:key}` is automatically resolved to the stored value
 before the skill function is called.  This lets you write:
