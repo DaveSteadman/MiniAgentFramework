@@ -245,11 +245,11 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
 | `/clearmemory` | Delete the memory store file (`memory_store.json`), starting the next session with a blank memory. |
 | `/newchat` | Clear conversation history and session context, starting a fresh chat without restarting. |
-| `/reskill` | Rebuild the skills catalog from `skill.md` files using the LLM and hot-reload into the current session. The catalog is also rebuilt automatically (fast local path) at startup whenever any `skill.md` is newer than `skills_summary.md`. |
+| `/reskill` | Rebuild the skills catalog from `skill.md` files (fast local path) and hot-reload into the current session. The catalog is also rebuilt automatically at startup whenever any `skill.md` is newer than `skills_summary.md`. |
 | `/sandbox <on\|off>` | Toggle the Python sandbox for `CodeExecute` skill. `on` (default) enforces the built-in allow-list; `off` removes restrictions (use with care). |
 | `/deletelogs <days>` | Delete log date-folders under `controldata/logs/` older than N days. Each folder is named `YYYY-MM-DD` and contains all runs from that day. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
 | `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. The argument is matched as a case-insensitive substring, so `/test web` matches `test_web_skill_prompts.json`. |
-| `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. Prints a progress line after each file completes, then a final summary with host, model, elapsed time, and cumulative pass/fail count. |
+| `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. All results are written to a single combined CSV file (`test_results_<timestamp>_all.csv`) with a banner printed between each suite. Prints a final summary with host, model, elapsed time, and cumulative pass/fail count. |
 | `/recall` | Show a summary of all skill outputs stored in the current session context (URLs fetched, files written, search results, etc.). |
 | `/tasks` | List all scheduled tasks with their status (on/off), schedule, and prompt preview. |
 | `/task enable <name>` | Enable a task by name. The dashboard scheduler picks up the change on its next reload cycle. |
@@ -311,7 +311,7 @@ The `TaskManagement` skill exposes the same operations as proper skill functions
 | `"update the DailyWeather prompt to ask about London"` | `set_task_prompt("DailyWeather", "...")` |
 | `"delete the OldTask task"` | `delete_task("OldTask")` |
 
-The skills catalog (`code/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` is newer than the summary - so newly added skills are always available to the model without any manual step. Use `/reskill` to force an LLM-quality rebuild (better descriptions) during an active session.
+The skills catalog (`code/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` is newer than the summary - so newly added skills are always available to the model without any manual step. Use `/reskill` to force a rebuild during an active session.
 
 ### 3. Direct JSON editing
 

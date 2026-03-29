@@ -443,6 +443,9 @@ def run_scheduler_mode(
 
                 added   = [n for n in fresh_by_name if n not in current_by_name]
                 removed = [n for n in current_by_name if n not in fresh_by_name]
+                # Note: task dicts are compared by value; schedule fields like "cron" trigger a reload
+                # but `last_run` is preserved so already-fired tasks are not re-run on the same tick.
+                # Assumes schedule names are stable identifiers - a rename appears as remove+add.
                 changed = [
                     n for n in fresh_by_name
                     if n in current_by_name and fresh_by_name[n] != current_by_name[n]
@@ -575,11 +578,28 @@ def main() -> None:
     args = parse_main_args()
 
     log_path = create_log_file_path(log_dir=LOG_DIR)
-    logger   = SessionLogger(log_path)
+    with SessionLogger(log_path) as logger:
+        _run(args, logger, log_path)
+
+
+def _run(args, logger, log_path) -> None:
     register_llm_call_logger(logger.log_file_only)
 
     # Set the active host once; all subsequent Ollama calls use this value.
     ollama_client.configure_host(args.ollama_host)
+
+    # Check Ollama reachability up-front so the console shows clear feedback before the UI starts.
+    # For local hosts, ollama serve is auto-started if it is not running (same logic that
+    # call_llm_chat uses, but surfaced early so the user can see what is happening).
+    # For remote/cloud hosts, a warning is printed but startup continues - slash-command-only
+    # runs and read-only skills work even when the LLM host is temporarily unreachable.
+    if not ollama_client.is_ollama_running():
+        print(f"Ollama is not reachable at {ollama_client.get_active_host()}.", flush=True)
+        try:
+            ollama_client.ensure_ollama_running()
+            print("Ollama is ready.", flush=True)
+        except RuntimeError as exc:
+            print(f"Warning: {exc}  LLM calls will fail until Ollama is reachable.", flush=True)
 
     # Resolve the alias (e.g. "20b") to a concrete installed model name before any LLM calls.
     # Connectivity is checked lazily at the first actual LLM call, so slash-command-only
@@ -601,7 +621,7 @@ def main() -> None:
         max_iterations=MAX_ITERATIONS,
         skills_payload=skills_payload,
         skills_summary_path=SKILLS_SUMMARY_PATH,
-        _catalog_mtime=catalog_mtime,
+        catalog_mtime=catalog_mtime,
     )
 
     # Publish model and context to ollama_client so thick skills read the same values

@@ -3,9 +3,12 @@
 # ====================================================================================================
 # External test wrapper for MiniAgentFramework.
 #
-# Invokes the framework as a full system via subprocess (as a user would) and captures each
-# prompt-response cycle with accurate timing. Results are written to a structured CSV file that
-# uses proper quoting so that fields containing commas or newlines do not cause parsing errors.
+# Invokes the framework as a full system via subprocess and captures each prompt-response cycle
+# with accurate timing. Results are written to a structured CSV file that uses proper quoting
+# so that fields containing commas or newlines do not cause parsing errors.
+#
+# This module is invoked as a subprocess by the /test slash command in slash_commands.py.
+# It is not intended to be run interactively from the command line.
 #
 # Prompts files are JSON arrays whose elements are either:
 #   - A plain string        -- single standalone prompt (original format, unchanged)
@@ -22,14 +25,6 @@
 #       not_contains|<text> -- final_output must NOT contain <text> (case-insensitive)
 #       not_empty         -- final_output must be non-empty
 #       exit_code|<n>     -- overall exchange exit code must equal <n>
-#
-# Usage:
-#   python testcode/test_wrapper.py
-#   python testcode/test_wrapper.py --output-dir controldata/test_results
-#   python testcode/test_wrapper.py --prompts "output the time" "what is today's date"
-#   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/test_chat_exchanges.json
-#   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/default_prompts.json --ollama-host http://MONTBLANC:11434
-#   python testcode/test_wrapper.py --prompts-file controldata/test_prompts/default_prompts.json --ollama-host https://api.ollama.com
 # ====================================================================================================
 
 
@@ -53,18 +48,15 @@ from pathlib import Path
 # ====================================================================================================
 REPO_ROOT            = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "code"))
-from workspace_utils import get_test_prompts_dir, get_test_results_dir  # noqa: E402
+from workspace_utils import get_test_results_dir  # noqa: E402
 
-MAIN_SCRIPT          = REPO_ROOT / "code" / "main.py"
-DEFAULT_OUTPUT_DIR   = get_test_results_dir()
-DEFAULT_PROMPTS_FILE = get_test_prompts_dir() / "default_prompts.json"
-
-DEFAULT_PROMPTS = None  # Loaded from DEFAULT_PROMPTS_FILE at runtime.
+MAIN_SCRIPT        = REPO_ROOT / "code" / "main.py"
+DEFAULT_OUTPUT_DIR = get_test_results_dir()
 
 # Maximum time in seconds to wait for a single framework invocation before aborting.
 SUBPROCESS_TIMEOUT_SECONDS = 300
 
-CSV_FIELDS = ["timestamp", "prompt", "exchange_name", "turn_index",
+CSV_FIELDS = ["timestamp", "source_file", "prompt", "exchange_name", "turn_index",
               "final_output", "assert_result", "duration_seconds", "exit_code", "log_file", "stderr"]
 
 
@@ -233,14 +225,17 @@ def build_output_path(output_dir: Path) -> Path:
 # ----------------------------------------------------------------------------------------------------
 def initialize_csv(output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with output_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(
-            csv_file,
-            fieldnames=CSV_FIELDS,
-            quoting=csv.QUOTE_ALL,
-        )
-        writer.writeheader()
+    # Only write the header row when the file is new or empty so that
+    # multiple test files can be appended to one shared results file.
+    is_new = not output_path.exists() or output_path.stat().st_size == 0
+    with output_path.open("a", newline="", encoding="utf-8") as csv_file:
+        if is_new:
+            writer = csv.DictWriter(
+                csv_file,
+                fieldnames=CSV_FIELDS,
+                quoting=csv.QUOTE_ALL,
+            )
+            writer.writeheader()
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -264,10 +259,11 @@ def append_csv_row(output_path: Path, row: dict) -> None:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _base_row(run_timestamp: str, prompt: str, exchange_name: str = "", turn_index: int = 0) -> dict:
+def _base_row(run_timestamp: str, source_file: str, prompt: str, exchange_name: str = "", turn_index: int = 0) -> dict:
     """Return a pre-populated CSV row dict with all fields at safe defaults."""
     return {
         "timestamp":        run_timestamp,
+        "source_file":      source_file,
         "prompt":           prompt,
         "exchange_name":    exchange_name,
         "turn_index":       turn_index,
@@ -288,8 +284,11 @@ def run_tests(
     output_dir: Path,
     model: str | None = None,
     ollama_host: str | None = None,
+    output_path: Path | None = None,
+    source_file: str = "",
 ) -> Path:
-    output_path = build_output_path(output_dir)
+    if output_path is None:
+        output_path = build_output_path(output_dir)
     initialize_csv(output_path)
     model_label = f" (model: {model})" if model else ""
     host_label  = f" (host: {ollama_host})" if ollama_host else ""
@@ -304,14 +303,14 @@ def run_tests(
         if isinstance(item, dict):   # exchange
             passed = _run_exchange_item(
                 item, index, total_items, output_path,
-                model=model, ollama_host=ollama_host,
+                model=model, ollama_host=ollama_host, source_file=source_file,
             )
             if passed:
                 tests_passed += 1
         else:                        # plain string
             interrupted, passed = _run_single_item(
                 str(item), index, total_items, output_path,
-                model=model, ollama_host=ollama_host,
+                model=model, ollama_host=ollama_host, source_file=source_file,
             )
             if passed:
                 tests_passed += 1
@@ -330,12 +329,13 @@ def _run_single_item(
     total_items: int,
     output_path: Path,
     model, ollama_host,
+    source_file: str = "",
 ) -> tuple[bool, bool]:
     """Run a single standalone prompt.  Returns True if the run was interrupted."""
     run_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{run_timestamp}] Running prompt {index}/{total_items}: {prompt!r}")
 
-    row = _base_row(run_timestamp, prompt)
+    row = _base_row(run_timestamp, source_file, prompt)
     try:
         duration, exit_code, stdout, stderr = invoke_framework(
             prompt, model=model, ollama_host=ollama_host,
@@ -370,6 +370,7 @@ def _run_exchange_item(
     total_items: int,
     output_path: Path,
     model, ollama_host,
+    source_file: str = "",
 ) -> bool:
     """Run a multi-turn exchange.  Writes one CSV row per turn."""
     name   = exchange.get("exchange", f"exchange_{index}")
@@ -405,7 +406,7 @@ def _run_exchange_item(
         if assert_result == "FAIL":
             any_assert_fail = True
 
-        row = _base_row(run_timestamp, user_prompt, exchange_name=name, turn_index=turn_idx)
+        row = _base_row(run_timestamp, source_file, user_prompt, exchange_name=name, turn_index=turn_idx)
         row.update({
             "final_output":     final_output,
             "assert_result":    assert_result,
@@ -432,22 +433,10 @@ def parse_args() -> argparse.Namespace:
                     "Invokes the framework as a subprocess and records results to CSV."
     )
     parser.add_argument(
-        "--prompts",
-        nargs="+",
-        default=None,
-        help="One or more user prompts to test (overrides --prompts-file).",
-    )
-    parser.add_argument(
         "--prompts-file",
         type=Path,
-        default=None,
-        help="Path to a JSON file containing an array of prompt strings.",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=DEFAULT_OUTPUT_DIR,
-        help="Directory where the CSV results file will be written.",
+        required=True,
+        help="Path to a JSON file containing an array of prompt strings or exchange objects.",
     )
     parser.add_argument(
         "--model",
@@ -461,6 +450,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Ollama host URL to pass to main.py (e.g. http://MONTBLANC:11434).",
     )
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        default=None,
+        help="Exact output CSV path. Appends to the file if it already exists (header skipped).",
+    )
+    parser.add_argument(
+        "--source-file",
+        type=str,
+        default="",
+        help="Label written to the source_file column in the CSV (typically the prompts filename).",
+    )
     return parser.parse_args()
 
 
@@ -469,17 +470,11 @@ def parse_args() -> argparse.Namespace:
 # ====================================================================================================
 if __name__ == "__main__":
     args = parse_args()
-
-    if args.prompts:
-        prompts = args.prompts
-    elif args.prompts_file:
-        prompts = load_prompts_file(args.prompts_file)
-    else:
-        prompts = load_prompts_file(DEFAULT_PROMPTS_FILE)
-
     run_tests(
-        prompts=prompts,
-        output_dir=args.output_dir,
+        prompts=load_prompts_file(args.prompts_file),
+        output_dir=DEFAULT_OUTPUT_DIR,
         model=args.model,
         ollama_host=args.ollama_host,
+        output_path=args.output_file,
+        source_file=args.source_file or args.prompts_file.name,
     )

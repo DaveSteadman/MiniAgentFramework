@@ -9,8 +9,7 @@
 #                  thread executes items one at a time, preventing concurrent LLM calls.
 #                  Tasks with a name already queued or active are silently deduplicated.
 #   llm_lock     -- the raw threading.Lock exposed by task_queue; held for the duration of
-#                  each task.  Slash commands use this via lock_input / unlock_input to pause
-#                  the queue while /test or /task run executes.
+#                  each task.  Back-compat alias for task_queue.run_lock.
 #   load_schedules_dir -- scans a directory for *.json schedule files and merges all tasks lists.
 #   is_task_due        -- pure function; tests whether a task should fire given current time.
 #
@@ -53,10 +52,8 @@ from pathlib import Path
 # same name is already queued or running (deduplication).  The queue worker executes items
 # sequentially on its own daemon thread, holding run_lock for the duration of each item.
 #
-# llm_lock exposes the raw threading.Lock so existing code that calls acquire/release
-# (primarily slash-command lock_input / unlock_input wiring) continues to work unchanged.
-# Acquiring llm_lock directly lets /test and /task run hold the serialisation token outside
-# the queue, which is intentional: those are explicit user-initiated commands.
+# llm_lock exposes the raw threading.Lock so code that needs to hold the serialisation
+# token outside the queue (e.g. /test and /task run commands) can do so directly.
 class TaskQueue:
     """Sequential LLM-call queue with deduplication and state-file visibility.
 
@@ -162,33 +159,38 @@ class TaskQueue:
                     if not self._deque:
                         break
 
-                # Block here while /test or /task run holds the lock.
-                self._run_lock.acquire(blocking=True)
+                # Block here while /test or /task run holds the lock; then re-check for shutdown.
+                with self._run_lock:
+                    if self._shutdown.is_set():
+                        return
 
-                if self._shutdown.is_set():
-                    self._run_lock.release()
-                    return
+                    # Dequeue under state lock; re-check in case the queue was cleared while waiting.
+                    with self._state_lock:
+                        if not self._deque:
+                            break
+                        item             = self._deque.popleft()
+                        self._queued_names.discard(item["name"])
+                        self._active     = {
+                            "name":       item["name"],
+                            "kind":       item["kind"],
+                            "started_at": datetime.now().isoformat(timespec="seconds"),
+                        }
 
-                # Dequeue under state lock; re-check in case the queue was cleared while waiting.
-                with self._state_lock:
-                    if not self._deque:
-                        self._run_lock.release()
-                        break
-                    item             = self._deque.popleft()
-                    self._queued_names.discard(item["name"])
-                    self._active     = {
-                        "name":       item["name"],
-                        "kind":       item["kind"],
-                        "started_at": datetime.now().isoformat(timespec="seconds"),
-                    }
-
-                self._write_state()
-                try:
-                    item["fn"]()
-                except Exception:
-                    pass
-                finally:
-                    self._run_lock.release()
+                    self._write_state()
+                    try:
+                        item["fn"]()
+                    except Exception as exc:
+                        # Log the failure rather than silently swallowing it.  In dashboard
+                        # mode this is the only indication that a scheduled task crashed.
+                        try:
+                            import traceback
+                            from ollama_client import log_to_session
+                            log_to_session(
+                                f"[scheduler] Task '{item['name']}' raised an exception:\n"
+                                + traceback.format_exc()
+                            )
+                        except Exception:
+                            pass
                     with self._state_lock:
                         self._active = None
                     self._write_state()
@@ -198,7 +200,7 @@ class TaskQueue:
 # MARK: MODULE INSTANCES
 # ====================================================================================================
 # task_queue is the shared singleton used by all scheduler and dashboard code.
-# llm_lock is a back-compat alias so slash commands (lock_input / unlock_input) work unchanged.
+# llm_lock is a back-compat alias for task_queue.run_lock.
 task_queue: TaskQueue    = TaskQueue()
 llm_lock:   threading.Lock = task_queue.run_lock
 

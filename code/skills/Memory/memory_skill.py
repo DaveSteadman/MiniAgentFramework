@@ -24,11 +24,15 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from workspace_utils import get_controldata_dir
+
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-MEMORY_STORE_PATH        = Path(__file__).resolve().parent / "memory_store.json"
+# Store runtime data under controldata/ rather than beside the skill source files, so
+# memory_store.json is never accidentally committed alongside version-controlled code.
+MEMORY_STORE_PATH        = get_controldata_dir() / "memory_store.json"
 MEMORY_STORE_LEGACY_PATH = Path(__file__).resolve().parent / "memory_store.txt"
 MEMORY_SCHEMA_VERSION    = "2.0"
 

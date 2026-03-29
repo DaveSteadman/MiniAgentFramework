@@ -399,9 +399,10 @@ def _cmd_newchat(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_clearmemory(arg: str, ctx: SlashCommandContext) -> None:
-    from pathlib import Path
-    store_path = Path(__file__).resolve().parent / "skills" / "Memory" / "memory_store.json"
-    legacy_path = Path(__file__).resolve().parent / "skills" / "Memory" / "memory_store.txt"
+    from skills.Memory.memory_skill import MEMORY_STORE_PATH
+    from skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
+    store_path  = MEMORY_STORE_PATH
+    legacy_path = MEMORY_STORE_LEGACY_PATH
 
     deleted = []
     for path in (store_path, legacy_path):
@@ -549,6 +550,7 @@ def _run_one_test_file(
     re_mod,
     subprocess_mod,
     sys_mod,
+    output_file=None,
 ) -> tuple[int, int]:
     # Run a single test file via test_wrapper.py and stream output to ctx.
     # Returns (passed, total) - both 0 if summary line was not emitted.
@@ -559,6 +561,9 @@ def _run_one_test_file(
     ]
     if "localhost" not in active_host and "127.0.0.1" not in active_host:
         cmd += ["--ollama-host", active_host]
+    if output_file is not None:
+        cmd += ["--output-file", str(output_file)]
+    cmd += ["--source-file", candidate.name]
 
     _summary_re = re_mod.compile(r"^\[TEST_SUMMARY\] passed=(\d+) total=(\d+)$")
     test_passed = test_total = None
@@ -601,9 +606,11 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
     import subprocess
     import sys
     import time
+    from datetime import datetime
     from pathlib import Path
     from ollama_client import get_active_host
     from scheduler import task_queue
+    from workspace_utils import get_test_results_dir
 
     test_prompts_dir = Path(__file__).resolve().parent.parent / "controldata" / "test_prompts"
     wrapper          = Path(__file__).resolve().parent.parent / "testcode" / "test_wrapper.py"
@@ -638,17 +645,31 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
         ) -> None:
             _model = _ctx.config.resolved_model
             _host  = get_active_host()
+            # Pre-allocate a single shared CSV file for all test files in this run.
+            _now = datetime.now()
+            _shared_output = (
+                get_test_results_dir()
+                / _now.strftime("%Y-%m-%d")
+                / f"test_results_{_now.strftime('%Y%m%d_%H%M%S')}_all.csv"
+            )
+            _shared_output.parent.mkdir(parents=True, exist_ok=True)
             _ctx.output(
                 f"Running all {len(_files)} test file(s) - host: {_host}  model: {_model}",
                 "info",
             )
+            _ctx.output(f"Results file: {_shared_output}", "dim")
             total_passed = 0
             total_tests  = 0
             wall_start   = time.monotonic()
+            _bar = "=" * 47
             for idx, candidate in enumerate(_files, start=1):
+                _ctx.output(_bar, "info")
+                _ctx.output(f"= Test Suite: {candidate.stem}", "info")
+                _ctx.output(_bar, "info")
                 _ctx.output(f"[{idx}/{len(_files)}] Starting: {candidate.name}", "info")
                 p, t = _run_one_test_file(
                     candidate, _ctx, _wrapper, _model, _host, re, subprocess, sys,
+                    output_file=_shared_output,
                 )
                 total_passed += p
                 total_tests  += t

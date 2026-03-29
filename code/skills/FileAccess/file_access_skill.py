@@ -16,8 +16,6 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
-import csv
-import io
 from pathlib import Path
 
 from workspace_utils import get_workspace_root
@@ -70,51 +68,6 @@ def _resolve_safe_path(file_path: str) -> Path:
     return candidate
 
 
-# ----------------------------------------------------------------------------------------------------
-def _parse_system_info_pairs(text: str) -> list[tuple[str, str]] | None:
-    stripped = str(text or "").strip()
-    if not stripped.lower().startswith("system info:"):
-        return None
-
-    payload = stripped.split(":", maxsplit=1)[1].strip()
-    if not payload:
-        return None
-
-    pairs: list[tuple[str, str]] = []
-    for segment in payload.split(";"):
-        entry = segment.strip()
-        if not entry or "=" not in entry:
-            return None
-
-        key, value = entry.split("=", maxsplit=1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            return None
-        pairs.append((key, value))
-
-    return pairs or None
-
-
-# ----------------------------------------------------------------------------------------------------
-def _coerce_text_for_target(target_path: Path, text: str) -> str:
-    text_value = str(text)
-
-    if target_path.suffix.lower() != ".csv":
-        return text_value
-
-    system_info_pairs = _parse_system_info_pairs(text_value)
-    if not system_info_pairs:
-        return text_value
-
-    csv_buffer = io.StringIO(newline="")
-    writer = csv.writer(csv_buffer, lineterminator="\n")
-    writer.writerow(["key", "value"])
-    for key, value in system_info_pairs:
-        writer.writerow([key, value])
-    return csv_buffer.getvalue()
-
-
 # ====================================================================================================
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
@@ -126,7 +79,7 @@ def write_file(path: str, content: str) -> str:
     except ValueError as err:
         return f"Error: {err}"
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(_coerce_text_for_target(target_path=target_path, text=content), encoding="utf-8")
+    target_path.write_text(str(content), encoding="utf-8")
     return f"Wrote {target_path.relative_to(WORKSPACE_ROOT).as_posix()}"
 
 

@@ -9,3 +9,8 @@
 - Framework Desktop
 - [Test: test_wikipedia_prompts.json  Passed 19/20]
 - Failed: 300s Timeout on long search
+
+ [ALL TESTS COMPLETE]  host=http://MONTBLANC:11434  model=qwen3.5:27b  elapsed=18m 23s  passed=87/87        
+ - Remote Ollama host: 5090
+
+ 

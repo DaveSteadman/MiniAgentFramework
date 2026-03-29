@@ -7,6 +7,8 @@
 #
 #   resolve_tokens(text)       -- replaces {today}, {yesterday}, {month_year}, {month},
 #                                 {year}, and {week} in any string with their current values.
+#                                 {week} returns the ISO week number (ISO 8601, Monday-anchored,
+#                                 01-53, January 4th is always in week 1).
 #                                 Also resolves {scratch:key} to the current scratchpad value.
 #                                 Applied automatically to user prompts in orchestration.py
 #                                 and to string skill arguments in skill_executor.py.
@@ -33,6 +35,8 @@
 import re
 from datetime import date as _date
 from datetime import timedelta as _timedelta
+
+from scratchpad import get_store as _get_store
 
 
 # ====================================================================================================
@@ -62,7 +66,7 @@ def resolve_tokens(text: str) -> str:
       {month_year}        -> Month YYYY           (e.g. March 2026)
       {month}             -> full month name      (e.g. March)
       {year}              -> four-digit year      (e.g. 2026)
-      {week}              -> ISO week number      (e.g. 10)
+      {week}              -> ISO week number (ISO 8601, 01-53) (e.g. 10)
 
     Tokens are resolved at call time so that stored/scheduled prompts and queries
     stay perpetually current without manual edits.
@@ -81,7 +85,9 @@ def resolve_tokens(text: str) -> str:
         "month_year":        today.strftime("%B %Y"),
         "month":             today.strftime("%B"),
         "year":              today.strftime("%Y"),
-        "week":              today.strftime("%W"),
+        # %V: ISO 8601 week number (Monday-anchored, 01-53; January 4th is always in week 1).
+        # Using %V rather than %W (%W is Sunday-anchored and can return "00" in early January).
+        "week":              today.strftime("%V"),
     }
 
     def _replace(match: re.Match) -> str:
@@ -90,11 +96,9 @@ def resolve_tokens(text: str) -> str:
     # Single-pass date/time token resolution.
     result = _TOKEN_RE.sub(_replace, text)
 
-    # Single-pass scratch token resolution.  Import is lazy to avoid a circular import at startup;
-    # scratchpad.py has no dependency on prompt_tokens.py.
+    # Single-pass scratch token resolution.
     if "{scratch:" in result:
-        from scratchpad import get_store  # noqa: PLC0415
-        store = get_store()
+        store = _get_store()
         if store:
             def _replace_scratch(m: re.Match) -> str:
                 val = store.get(m.group(1).lower())

@@ -85,13 +85,17 @@ def log_to_session(message: str) -> None:
 
     Skills and other non-UI code should use this instead of print() so that output
     is routed to the log file rather than stdout, which would corrupt the TUI.
-    If no logger has been registered the message is silently discarded.
+    If no logger has been registered the message is written to stderr so useful
+    diagnostic output is not silently discarded during startup or in non-interactive runs.
     """
     if _llm_call_log_fn is not None:
         try:
             _llm_call_log_fn(message)
         except Exception:
             pass
+    else:
+        import sys
+        print(message, file=sys.stderr)
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -180,6 +184,9 @@ class OllamaCallResult:
 def _request_json(url: str, method: str = "GET", payload: dict | None = None, timeout: float = 10.0) -> dict:
     # Thread-based timeout: urllib socket timeouts are unreliable on Windows loopback;
     # wrapping the call in a daemon thread lets us enforce a hard deadline via join().
+    # The urllib call also sets a matching socket timeout so the underlying connection
+    # closes around the same time the join expires, bounding the leaked daemon thread's
+    # lifetime to roughly 2x the requested timeout rather than indefinitely.
     request_data = None
     headers      = {}
 
@@ -199,7 +206,7 @@ def _request_json(url: str, method: str = "GET", payload: dict | None = None, ti
 
     def _worker() -> None:
         try:
-            with urllib.request.urlopen(request) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 _result[0] = json.loads(response.read().decode("utf-8"))
         except Exception as exc:
             _error[0] = exc

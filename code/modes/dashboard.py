@@ -158,23 +158,23 @@ def run_dashboard_mode(
             tps_str  = ""
             try:
                 run_log_path = create_log_file_path(log_dir=_LOG_DIR)
-                run_logger   = SessionLogger(run_log_path)
-                run_logger.log_section_file_only("DASHBOARD CHAT")
-                run_logger.log_file_only(f"User: {_captured_text}")
+                with SessionLogger(run_log_path) as run_logger:
+                    run_logger.log_section_file_only("DASHBOARD CHAT")
+                    run_logger.log_file_only(f"User: {_captured_text}")
 
-                hist = chat_history.as_list() or None
-                response, p_tokens, _c, _ok, tps = orchestrate_prompt(
-                    user_prompt=_captured_text,
-                    config=config,
-                    logger=run_logger,
-                    conversation_history=hist,
-                    session_context=chat_session,
-                    quiet=True,
-                )
+                    hist = chat_history.as_list() or None
+                    response, p_tokens, _c, _ok, tps = orchestrate_prompt(
+                        user_prompt=_captured_text,
+                        config=config,
+                        logger=run_logger,
+                        conversation_history=hist,
+                        session_context=chat_session,
+                        quiet=True,
+                    )
 
-                tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
-                run_logger.log_file_only(f"Agent: {response}")
-                run_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
+                    tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
+                    run_logger.log_file_only(f"Agent: {response}")
+                    run_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
             except Exception as exc:
                 app.add_chat_line(f"Agent\u25b6 [Error: {exc}]", ui_colors.RED)
                 return
@@ -267,6 +267,9 @@ def run_dashboard_mode(
 
                 added   = [n for n in fresh_by_name   if n not in current_by_name]
                 removed = [n for n in current_by_name if n not in fresh_by_name]
+                # Note: task dicts are compared by value; schedule fields like "cron" trigger a reload
+                # but `last_run` is preserved so already-fired tasks are not re-run on the same tick.
+                # Assumes schedule names are stable identifiers - a rename appears as remove+add.
                 changed = [
                     n for n in fresh_by_name
                     if n in current_by_name and fresh_by_name[n] != current_by_name[n]
@@ -306,50 +309,50 @@ def run_dashboard_mode(
                     app.add_log_line(f"[SCHED] Starting: {_name}", ui_colors.MAGENTA)
                     app.add_chat_line(f"Sched\u25b6 Task started: {_name}", ui_colors.MAGENTA)
                     task_log_path = create_log_file_path(log_dir=_LOG_DIR)
-                    task_logger   = SessionLogger(task_log_path)
-                    task_logger.log_section_file_only(f"SCHEDULER TASK (dashboard): {_name}")
-                    try:
-                        task_hist  = ConversationHistory()
-                        task_ctx   = SessionContext(
-                            session_id   = f"task_{_name}",
-                            persist_path = get_chatsessions_dir() / f"task_{_name}.json",
-                        )
-                        sched_ctx  = SlashCommandContext(
-                            config          = config,
-                            output          = lambda text, level="info": task_logger.log_file_only(f"[slash/{level}] {text}"),
-                            clear_history   = task_hist.clear,
-                            session_context = task_ctx,
-                        )
-                        for step_index, prompt_text in enumerate(_prompts, start=1):
-                            if shutdown.is_set():
-                                break
-                            app.add_log_line(f"  [Step {step_index}] {trunc(prompt_text, 70)}", ui_colors.DIM)
-                            task_logger.log_file_only(f"[Step {step_index}] {prompt_text}")
-                            if handle_slash(prompt_text, sched_ctx):
-                                app.add_log_line("  [slash command handled]", ui_colors.DIM)
-                                continue
-                            hist = task_hist.as_list() or None
-                            response, p_tokens, _c, _ok, tps = orchestrate_prompt(
-                                user_prompt=prompt_text,
-                                config=config,
-                                logger=task_logger,
-                                conversation_history=hist,
-                                session_context=task_ctx,
-                                quiet=True,
+                    with SessionLogger(task_log_path) as task_logger:
+                        task_logger.log_section_file_only(f"SCHEDULER TASK (dashboard): {_name}")
+                        try:
+                            task_hist  = ConversationHistory()
+                            task_ctx   = SessionContext(
+                                session_id   = f"task_{_name}",
+                                persist_path = get_chatsessions_dir() / f"task_{_name}.json",
                             )
-                            task_hist.add(prompt_text, response)
-                            tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
-                            task_logger.log_file_only(f"[Step {step_index}] Agent: {response}")
-                            task_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
-                            app.add_log_line(f"  \u2713 [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
-                            app.add_chat_line(
-                                f"Sched\u25b6 [{_name} step {step_index}] {trunc(response, 100)}",
-                                ui_colors.BLUE,
+                            sched_ctx  = SlashCommandContext(
+                                config          = config,
+                                output          = lambda text, level="info": task_logger.log_file_only(f"[slash/{level}] {text}"),
+                                clear_history   = task_hist.clear,
+                                session_context = task_ctx,
                             )
-                        task_logger.log_file_only(f"[DASHBOARD] Task '{_name}' completed.")
-                        app.add_log_line(f"[SCHED] Done: {_name}", ui_colors.MAGENTA)
-                    except Exception as exc:
-                        app.add_log_line(f"[SCHED] Error in '{_name}': {exc}", ui_colors.RED)
+                            for step_index, prompt_text in enumerate(_prompts, start=1):
+                                if shutdown.is_set():
+                                    break
+                                app.add_log_line(f"  [Step {step_index}] {trunc(prompt_text, 70)}", ui_colors.DIM)
+                                task_logger.log_file_only(f"[Step {step_index}] {prompt_text}")
+                                if handle_slash(prompt_text, sched_ctx):
+                                    app.add_log_line("  [slash command handled]", ui_colors.DIM)
+                                    continue
+                                hist = task_hist.as_list() or None
+                                response, p_tokens, _c, _ok, tps = orchestrate_prompt(
+                                    user_prompt=prompt_text,
+                                    config=config,
+                                    logger=task_logger,
+                                    conversation_history=hist,
+                                    session_context=task_ctx,
+                                    quiet=True,
+                                )
+                                task_hist.add(prompt_text, response)
+                                tps_str = f" | {tps:.1f} tok/s" if tps > 0 else ""
+                                task_logger.log_file_only(f"[Step {step_index}] Agent: {response}")
+                                task_logger.log_file_only(f"[{p_tokens:,} ctx{tps_str}]")
+                                app.add_log_line(f"  \u2713 [{p_tokens:,} ctx{tps_str}]", ui_colors.DIM)
+                                app.add_chat_line(
+                                    f"Sched\u25b6 [{_name} step {step_index}] {trunc(response, 100)}",
+                                    ui_colors.BLUE,
+                                )
+                            task_logger.log_file_only(f"[DASHBOARD] Task '{_name}' completed.")
+                            app.add_log_line(f"[SCHED] Done: {_name}", ui_colors.MAGENTA)
+                        except Exception as exc:
+                            app.add_log_line(f"[SCHED] Error in '{_name}': {exc}", ui_colors.RED)
 
                 if task_queue.enqueue(name, "scheduled", _make_dash_task):
                     last_run[name] = now

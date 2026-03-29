@@ -77,11 +77,14 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
 
 
 # ----------------------------------------------------------------------------------------------------
-def _build_catalog_gates(skills_payload: dict) -> dict[str, tuple[str, str]]:
+def build_catalog_gates(skills_payload: dict) -> dict[str, tuple[str, str]]:
     """Build the tool-name dispatch index in a single pass over the catalog.
 
     Returns a dict mapping tool_name -> (module_path, function_name).
-    The index lookup is the security gate: unknown names are rejected before any import.
+    This index lookup is the security gate: unknown names are rejected before any import.
+    Callers that invoke execute_tool_call multiple times for the same payload (e.g. the
+    orchestration loop) should call this once and pass the result via the catalog_gates
+    parameter to avoid rebuilding the index on every tool invocation.
     """
     index: dict[str, tuple[str, str]] = {}
 
@@ -94,18 +97,6 @@ def _build_catalog_gates(skills_payload: dict) -> dict[str, tuple[str, str]]:
                 index[function_name] = (module, function_name)
 
     return index
-
-
-
-# ----------------------------------------------------------------------------------------------------
-def build_catalog_gates(skills_payload: dict) -> dict[str, tuple[str, str]]:
-    """Return the tool-name dispatch index for a skills payload.
-
-    Callers that invoke execute_tool_call multiple times for the same payload (e.g. the
-    orchestration loop) should call this once and pass the result via the catalog_gates
-    parameter to avoid rebuilding the index on every tool invocation.
-    """
-    return _build_catalog_gates(skills_payload)
 
 
 # ====================================================================================================

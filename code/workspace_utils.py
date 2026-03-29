@@ -24,7 +24,7 @@
 #   - file_access_skill.py  -- uses get_workspace_root() for path-safety checks
 #   - skill_executor.py     -- uses get_workspace_root() to resolve skill module paths
 #   - main.py               -- uses get_logs_dir(), get_schedules_dir()
-#   - testcode/test_wrapper.py -- uses get_test_results_dir(), get_test_prompts_dir()
+#   - testcode/test_wrapper.py -- uses get_test_results_dir()
 # ====================================================================================================
 
 

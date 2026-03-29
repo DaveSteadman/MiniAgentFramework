@@ -13,7 +13,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 - `code/main.py`
   - Main entrypoint; supports single-shot, chat, scheduler, and dashboard modes via `argparse`.
   - Runs the tool-calling orchestration pipeline (up to `MAX_ITERATIONS` tool rounds) via `orchestration.py`.
-  - A single `threading.Lock` (`llm_lock`) is shared across all modes to serialise LLM calls.
+  - LLM calls are serialised via `task_queue.run_lock` (a `threading.Lock` on the `TaskQueue` instance); `llm_lock` in other modules is an alias for this lock.
   - Graceful shutdown uses `threading.Event` + SIGINT handler; sleeping loops wake every 0.5 s to check the event.
 
 - `code/chat_input.py`
@@ -50,13 +50,13 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - Supports local Ollama, LAN-hosted Ollama machines, and Ollama Cloud via `configure_host(host)`.
   - The active host is module-level state (same pattern as `_DEFAULT_LLM_TIMEOUT`); all public functions resolve to it automatically so no caller needs to pass a host.
   - `configure_host` is called from `main()` at startup using `--ollama-host` / `OLLAMA_HOST` env var.
-  - `_is_local_host()` guards features that only make sense locally: `ensure_ollama_running` will not attempt to auto-start `ollama serve` for remote/cloud hosts, and `get_ollama_ps_rows` returns `[]` (since `ollama ps` is a local subprocess).
+  - `_is_local_host()` guards features that only make sense locally: `ensure_ollama_running` will not attempt to auto-start `ollama serve` for remote/cloud hosts. `get_ollama_ps_rows` calls `_get_ollama_ps_rows_local()` for local hosts (subprocess `ollama ps`) and `_get_ollama_ps_rows_remote()` for remote/cloud hosts (Ollama `/api/ps` HTTP endpoint).
   - Model discovery and alias resolution (`list_ollama_models`, `resolve_model_name`). Short aliases like `"20b"` resolve to the first installed model whose tag contains that string.
   - Primary LLM interface: `call_llm_chat` calls `/v1/chat/completions` with optional tool definitions and returns a `ChatCallResult` with token metrics and any tool call requests.
   - `call_ollama_extended` / `call_ollama` retain the legacy `/api/generate` path used by `skills_catalog_builder` and `system_check`.
   - `ChatCallResult` carries `message`, `finish_reason`, `prompt_tokens`, `completion_tokens`, and `tokens_per_second`.
 
-### 3) Skill invocation layer
+### 3) Debug CLI tools
 - `code/preprocess_prompt.py`
   - Standalone CLI that loads the skills catalog and prints the JSON Schema tool definitions sent to the model via `/v1/chat/completions`. Useful for debugging which functions are visible to the model and verifying that skill signatures are parsed correctly.
 
@@ -102,7 +102,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 - `code/scheduler.py`
   - `load_schedules_dir(dir)` - globs all `*.json` files in the given directory, merges their `"tasks"` lists, and skips malformed files with a stderr warning.
   - `is_task_due(task, last_run, now)` - evaluates `"interval"` (minutes since last run) and `"daily"` (HH:MM wall clock) task types.
-  - `llm_lock` - the module-level `threading.Lock` imported by all modes that call the LLM.
+  - `llm_lock` - module-level alias for `task_queue.run_lock`; imported by all modes that call the LLM to serialise access.
 
 ### 8) Terminal UI
 - `code/ui/dashboard_app.py`
@@ -146,6 +146,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 | `get_test_prompts_dir()` | `<repo_root>/controldata/test_prompts/` |
 | `get_test_results_dir()` | `<repo_root>/controldata/test_results/` |
 | `get_chatsessions_dir()` | `<repo_root>/controldata/chatsessions/` |
+| `get_chatsessions_day_dir()` | `<repo_root>/controldata/chatsessions/<YYYY-MM-DD>/` |
 
 - `code/webpage_utils.py`
   - Shared HTTP fetching, HTML extraction, and text utilities used by web skill modules.
@@ -229,6 +230,8 @@ The orchestration design is intentionally singular: one pipeline, one LLM, one n
 |-------|--------------------------------------|
 | `{today}` | `2026-03-11` |
 | `{yesterday}` | `2026-03-10` |
+| `{longdate}` | `March 11, 2026` |
+| `{longdateyesterday}` | `March 10, 2026` |
 | `{month_year}` | `March 2026` |
 | `{month}` | `March` |
 | `{year}` | `2026` |
@@ -359,5 +362,5 @@ set OLLAMA_HOST=http://MONTBLANC:11434
 
 **Behaviour differences for non-local hosts:**
 - `ensure_ollama_running` skips the auto-start attempt and raises a clean error if the host is unreachable.
-- `get_ollama_ps_rows` returns `[]` (running-model list is a localhost-only API). The SYSTEM STATUS block will show "unavailable for remote host".
+- `get_ollama_ps_rows` calls the remote `/api/ps` HTTP endpoint for remote hosts, so the running-model list is available for LAN/cloud hosts too.
 - All inference and model-listing calls work identically regardless of host.

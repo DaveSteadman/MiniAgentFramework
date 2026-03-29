@@ -30,6 +30,7 @@ import argparse
 import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 
 from ollama_client import call_ollama
@@ -60,12 +61,20 @@ def _load_module_from_path(module_path: str):
     if not absolute_module_path.exists():
         return None
 
-    dynamic_module_name = f"catalog_skill_{absolute_module_path.stem}_{abs(hash(str(absolute_module_path)))}"
+    # Use the same canonical name as skill_executor so both loaders share the same module
+    # object and module-level state (e.g. sandbox flags, caches) rather than getting separate
+    # instances from two independent exec_module calls.
+    dynamic_module_name = f"skill_module_{absolute_module_path.stem}_{abs(hash(str(absolute_module_path)))}"
+
+    if dynamic_module_name in sys.modules:
+        return sys.modules[dynamic_module_name]
+
     spec = importlib.util.spec_from_file_location(dynamic_module_name, absolute_module_path)
     if spec is None or spec.loader is None:
         return None
 
     module = importlib.util.module_from_spec(spec)
+    sys.modules[dynamic_module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -279,8 +288,8 @@ def summarize_skill(skill_md_path: Path, use_llm: bool, model_name: str, num_ctx
             llm_summary = summarize_with_llm(skill_md_path=skill_md_path, model_name=model_name, num_ctx=num_ctx)
             if isinstance(llm_summary, dict):
                 summary = llm_summary
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[catalog] LLM summarise failed for {skill_md_path.name}: {exc}")
 
     if summary is None:
         summary = summarize_locally(skill_md_path=skill_md_path)

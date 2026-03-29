@@ -68,11 +68,11 @@ class SessionLogger:
     def close(self) -> None:
         self._handle.close()
 
-    def __del__(self) -> None:
-        try:
-            self._handle.close()
-        except Exception:
-            pass
+    def __enter__(self) -> "SessionLogger":
+        return self
+
+    def __exit__(self, *_) -> None:
+        self.close()
 
     # ----------------------------------------------------------------------------------------------------
     def log(self, message: str = "") -> None:

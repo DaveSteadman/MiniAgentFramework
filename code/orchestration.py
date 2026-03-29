@@ -24,6 +24,7 @@
 # ====================================================================================================
 import json
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,17 +73,22 @@ def set_skill_guidance_enabled(enabled: bool) -> None:
 # Holds references to the context_map and messages list from the most recently completed run.
 # Populated at the end of orchestrate_prompt() and available to slash commands (e.g. /compact)
 # for ad-hoc inspection and compaction between turns.
+# _last_run_lock guards reads and writes so a background scheduler task completing its run
+# cannot overwrite these globals while a chat-mode /ctx command is reading them.
 
 _last_context_map: list[dict] = []
 _last_messages:    list[dict] = []
+_last_run_lock:    threading.Lock = threading.Lock()
 
 
 def get_last_context_map() -> list[dict]:
-    return _last_context_map
+    with _last_run_lock:
+        return list(_last_context_map)
 
 
 def get_last_messages() -> list[dict]:
-    return _last_messages
+    with _last_run_lock:
+        return list(_last_messages)
 
 # Maximum chars placed in each tool message appended to the model's messages thread.
 # Results exceeding _TOOL_MSG_AUTO_SCRATCH_MIN are also auto-saved to the scratchpad under a
@@ -109,7 +115,7 @@ class OrchestratorConfig:
     max_iterations:       int
     skills_payload:       dict
     skills_summary_path:  Path | None = None   # set to enable auto-reload on catalog change
-    _catalog_mtime:       float       = 0.0    # last-seen mtime of skills_summary.md
+    catalog_mtime:        float       = 0.0    # last-seen mtime of skills_summary.md
 
 
 # ====================================================================================================
@@ -317,20 +323,21 @@ def resolve_execution_model(requested_model: str) -> str:
     Falls back to the first available model (with a printed warning) rather than
     crashing, so a machine with no "20b" model still starts cleanly.
 
-    If the requested name looks like an explicit fully-qualified tag (contains ':'
-    with no whitespace) and is not in the local model list, it is returned as-is so
-    that cloud or remote models (e.g. gpt-oss:120b-cloud) are not silently replaced
-    with a local fallback.
+    If the requested name is already fully-qualified (contains ':' with no whitespace)
+    it is returned as-is without querying the host.  This means a model resolved once
+    at session startup is forwarded verbatim to subprocesses (e.g. /test against a
+    remote host) without re-resolution against that host's model list.
     """
+    # Already fully qualified - trust it; no need to hit /api/tags.
+    if is_explicit_model_name(requested_model):
+        return requested_model.strip()
+
     available_models = list_ollama_models()
     if not available_models:
         raise RuntimeError("No models are installed in Ollama. Pull models first, then rerun.")
 
     resolved = resolve_model_name(requested_model, available_models)
     if resolved is None:
-        # Explicit tag (e.g. "gpt-oss:120b-cloud") - trust the caller; don't fall back locally.
-        if is_explicit_model_name(requested_model):
-            return requested_model.strip()
         fallback = available_models[0]
         print(
             f"[model] '{requested_model}' not found - falling back to '{fallback}'.\n"
@@ -507,12 +514,11 @@ def _estimate_thread_chars(messages: list[dict]) -> int:
 # ----------------------------------------------------------------------------------------------------
 
 def compact_context(context_map: list[dict], messages: list[dict], idx: int) -> bool:
-    """Replace messages[entry.msg_idx] content with a compact headline.
+    """Replace messages referenced by context_map[idx] with a compact headline.
 
-    Looks up context_map[idx], finds the corresponding message via the stored msg_idx,
-    and replaces its content with a single-line summary that preserves the key facts
-    (what happened, original size, scratchpad key if one was written) while freeing
-    token budget for later rounds.
+    For normal entries: replaces messages[msg_idx] content in-place.
+    For history-block entries: replaces all messages in the [msg_idx, msg_idx_end] range
+    with a single placeholder in messages[msg_idx] and empties the rest.
 
     Returns True when the entry was compacted, False when skipped (already compacted,
     no msg_idx stored, or idx out of range).
@@ -529,7 +535,16 @@ def compact_context(context_map: list[dict], messages: list[dict], idx: int) -> 
     ref         = f" -> scratchpad: {auto_key}" if auto_key else ""
     round_n     = entry.get("round", 0)
     placeholder = f"[compacted: rnd {round_n} {label} ({orig_chars:,} chars{ref})]"
+
+    # History-block entries span multiple messages (msg_idx through msg_idx_end inclusive).
+    # Replace the first with the placeholder and empty the rest so they consume no tokens.
+    msg_idx_end = entry.get("msg_idx_end")
     messages[msg_idx]["content"] = placeholder
+    if msg_idx_end is not None and msg_idx_end > msg_idx:
+        for i in range(msg_idx + 1, msg_idx_end + 1):
+            if i < len(messages):
+                messages[i]["content"] = ""
+
     entry["chars"]     = len(placeholder)
     entry["compacted"] = True
     return True
@@ -549,6 +564,7 @@ def _assess_compact(
     # stopping as soon as usage drops back to or below the threshold.
     # Returns (thread_chars_after, log_line) - log_line is None when nothing was compacted.
     thread_chars   = _estimate_thread_chars(messages)
+    # Approximation: 4 chars per token. Good enough for a threshold check; no tokeniser needed.
     budget_chars   = num_ctx * 4
     usage_fraction = thread_chars / budget_chars if budget_chars else 0.0
 
@@ -563,8 +579,19 @@ def _assess_compact(
         and not entry.get("compacted")
     ]
     candidates.sort(key=lambda x: (0 if x[1].get("auto_key") else 1, -x[1].get("chars", 0)))
+
+    # Include the history block as a last-resort candidate (round=0 but large and compactable).
+    history_candidates = [
+        (cm_idx, entry)
+        for cm_idx, entry in enumerate(context_map)
+        if entry.get("role") == "hist"
+        and entry.get("msg_idx") is not None
+        and not entry.get("compacted")
+    ]
+    # History goes at the end of the list - only compacted when nothing else helped.
+    all_candidates = candidates + history_candidates
     compacted_count = 0
-    for cm_idx, _entry in candidates:
+    for cm_idx, _entry in all_candidates:
         if compact_context(context_map, messages, cm_idx):
             compacted_count += 1
         thread_chars = _estimate_thread_chars(messages)
@@ -748,9 +775,9 @@ def orchestrate_prompt(
     # -- Auto-reload catalog if skills_summary.md has been updated since last load --
     if config.skills_summary_path and config.skills_summary_path.exists():
         current_mtime = config.skills_summary_path.stat().st_mtime
-        if current_mtime != config._catalog_mtime:
+        if current_mtime != config.catalog_mtime:
             config.skills_payload  = load_skills_payload(config.skills_summary_path)
-            config._catalog_mtime  = current_mtime
+            config.catalog_mtime   = current_mtime
             logger.log_file_only("[catalog] skills catalog reloaded (file changed on disk)")
 
     _log_section("ORCHESTRATION RUN")
@@ -792,9 +819,11 @@ def orchestrate_prompt(
         {"round": 0, "role": "sys", "label": "system prompt", "chars": len(system_message), "auto_key": None, "msg_idx": 0},
     ]
     if conversation_history:
+        _hist_start = len(messages)
         _hist_chars = sum(len(m.get("content") or "") for m in conversation_history)
-        # History spans multiple indices - no single msg_idx; cannot be individually compacted.
-        _context_map.append({"round": 0, "role": "hist", "label": f"history ({len(conversation_history)} msgs)", "chars": _hist_chars, "auto_key": None, "msg_idx": None})
+        # Store msg_idx (first history message) and msg_idx_end (last) so the block can
+        # be compacted as a unit when context pressure is high.
+        _context_map.append({"round": 0, "role": "hist", "label": f"history ({len(conversation_history)} msgs)", "chars": _hist_chars, "auto_key": None, "msg_idx": _hist_start, "msg_idx_end": _hist_start + len(conversation_history) - 1})
         messages.extend(conversation_history)
     messages.append({"role": "user", "content": user_prompt})
     _context_map.append({"round": 0, "role": "user", "label": trunc(user_prompt, 50), "chars": len(user_prompt), "auto_key": None, "msg_idx": len(messages) - 1})
@@ -983,8 +1012,9 @@ def orchestrate_prompt(
 
     # Store last-run state for ad-hoc inspection via /compact and other slash commands.
     global _last_context_map, _last_messages
-    _last_context_map = _context_map
-    _last_messages    = messages
+    with _last_run_lock:
+        _last_context_map = _context_map
+        _last_messages    = messages
 
     # Archive this turn's skill outputs so later turns can reference prior results without re-running.
     if session_context is not None and run_success and tool_outputs:
