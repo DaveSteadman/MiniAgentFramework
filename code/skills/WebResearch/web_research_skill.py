@@ -24,6 +24,7 @@ from webpage_utils import extract_content as _extract_content
 from webpage_utils import truncate_to_words as _truncate_to_words
 
 from skills.WebSearch.web_search_skill import search_web
+from skills.WebNavigate.web_navigate_skill import extract_urls_from_html as _extract_urls_from_html
 
 
 # ==================================================================================================== #
@@ -38,7 +39,6 @@ _MAX_WORDS_PER_PAGE_CAP          = 1200
 _MAX_EVIDENCE_QUOTES_CAP         = 8
 
 _URL_RE                          = re.compile(r'https?://[^\s<>"\')]+', re.IGNORECASE)
-_HREF_RE                         = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
 _SPACE_RE                        = re.compile(r"\s+")
 _NON_WORD_RE                     = re.compile(r"[^a-z0-9\s]+", re.IGNORECASE)
 
@@ -110,27 +110,6 @@ def _same_domain(url_a: str, url_b: str) -> bool:
         return bool(a) and bool(b) and a == b
     except Exception:
         return False
-
-
-def _extract_links(html_text: str, base_url: str) -> list[str]:
-    found = []
-
-    for match in _HREF_RE.finditer(html_text or ""):
-        href = (match.group(1) or "").strip()
-        if not href:
-            continue
-        absolute = urllib.parse.urljoin(base_url, href)
-        normalised = _normalise_url(absolute)
-        if normalised.startswith("http://") or normalised.startswith("https://"):
-            found.append(normalised)
-
-    deduped = []
-    seen = set()
-    for url in found:
-        if url not in seen:
-            seen.add(url)
-            deduped.append(url)
-    return deduped
 
 
 # ==================================================================================================== #
@@ -239,7 +218,7 @@ def _fetch_extract_score(url: str, query: str, timeout_seconds: int, max_words_p
             "matched_terms" : matched_terms,
             "evidence"      : evidence,
             "body_text"     : body_text,
-            "discovered_urls": _extract_links(html_text, final_url),
+            "discovered_urls": _extract_urls_from_html(html_text, final_url),
             "error"         : "",
         }
     except Exception as exc:
@@ -270,12 +249,11 @@ def research_traverse(
     max_words_per_page: int           = 450,
     max_evidence_quotes: int          = 3,
 ) -> dict:
-    """
-    Search the web, examine multiple pages, optionally follow promising links, and
-    return a compact evidence-oriented research bundle.
-
-    This is a generic retrieval-depth skill. It is intentionally broader than a
-    single-page extract and narrower than a full autonomous agent loop.
+    """Use when the prompt says 'research', 'investigate', 'look into', 'find evidence
+    across multiple sources', or 'deep dive into'. Searches, fetches multiple pages,
+    follows links, and returns an evidence-led summary bundle. Prefer over search_web_text
+    when the question requires cross-referencing several sources or when a single search
+    returns no results. For a one-source lookup use search_web_text or fetch_page_text.
     """
     query = (query or "").strip()
     if not query:

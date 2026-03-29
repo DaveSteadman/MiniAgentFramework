@@ -143,7 +143,7 @@ def execute_tool_call(
     the index on every call when executing multiple tools in one round.
     """
     # Use pre-built index when provided; otherwise build it from the payload.
-    tool_index = catalog_gates if catalog_gates is not None else _build_catalog_gates(skills_payload)
+    tool_index = catalog_gates if catalog_gates is not None else build_catalog_gates(skills_payload)
 
     # Resolve the tool name to its (module, function); fails fast for any unrecognised tool.
     resolved = tool_index.get(tool_name)

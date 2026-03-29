@@ -1,0 +1,41 @@
+{
+  "schema_version": "2.0",
+  "entries": [
+    {
+      "id": "bf4a73c7",
+      "stored": "2026-03-29 17:21:19",
+      "updated": null,
+      "category": "environment",
+      "fact": "com/library and answer the question: what models are listed on this page",
+      "access_count": 203,
+      "last_accessed": "2026-03-29 21:09:11"
+    },
+    {
+      "id": "a5606a82",
+      "stored": "2026-03-29 17:25:05",
+      "updated": null,
+      "category": "project",
+      "fact": "research what open source LLM projects have been released in 2025",
+      "access_count": 61,
+      "last_accessed": "2026-03-29 21:09:11"
+    },
+    {
+      "id": "a643de57",
+      "stored": "2026-03-29 17:25:58",
+      "updated": null,
+      "category": "general",
+      "fact": "investigate the current state of local AI inference tools - what are the main options",
+      "access_count": 149,
+      "last_accessed": "2026-03-29 21:09:11"
+    },
+    {
+      "id": "d964de58",
+      "stored": "2026-03-29 17:27:21",
+      "updated": null,
+      "category": "project",
+      "fact": "investigate what AI agent frameworks are available in Python in 2025 - examine at least 8 results",
+      "access_count": 70,
+      "last_accessed": "2026-03-29 21:09:11"
+    }
+  ]
+}

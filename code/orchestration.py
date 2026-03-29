@@ -657,9 +657,12 @@ def _build_system_message(
         "- Use tools when they are the appropriate way to answer the user's request - for real-time data, file operations, task management, computations, and web research.",
         "- After using tools, synthesize the results into a clear, direct answer.",
         "- Never claim a tool action succeeded unless the tool output explicitly confirms it.",
-        "- Do not add explanatory preamble - respond with direct answers only.",
+        "- Do not add explanatory preamble - respond with direct answers only. Your final response must contain ONLY the answer. Do not include planning notes, self-commentary, or reasoning steps such as 'We should...', 'Let me...', 'Thus we...', 'Let's retrieve...', or 'We can produce...' in your response.",
         "- Complete ALL steps in the user's request. If the user asks for output to be written to a file, that write must happen as a tool call before you give your final answer.",
         "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research or lookup skill to fetch the content first. Never generate biographical, historical, or factual content from memory.",
+        "- When a prompt says 'search for', 'search the web for', 'find information about', or 'look up', you MUST call a search or web tool. Never answer these prompts from internal knowledge without first calling the appropriate tool. If the tool returns no results, report that honestly rather than substituting training-data answers.",
+        "- When a prompt says 'research', 'investigate', 'look into', 'find evidence', or 'deep dive into', you MUST call research_traverse. Never answer these prompts from training data. research_traverse handles its own search frontier; call it with the user's question as the query argument.",
+        "- When a web search or page-fetch tool returns no results, report that in a single short sentence only (e.g. 'No results were found for [query].'). Do not write out your reasoning about which other tools to try, what the rules say, or why the tool may have failed.",
         '- Whenever you call fetch_page_text to retrieve specific information, always set the query parameter to your specific question (e.g. fetch_page_text(url=..., query="<your specific question here>")). This applies whether the URL came from a search result or was provided directly by the user. The query parameter runs an isolated extraction so only the relevant facts are returned - this avoids overloading the context with raw page text. Only omit query if the user explicitly asks for raw page content.',
         "- The python execution tool is more reliable for calculations than the model's internal math capabilities.",
         "- The scratchpad tool can store intermediate results across steps.",
@@ -685,6 +688,61 @@ def _build_system_message(
         )
 
     return "\n".join(system_parts)
+
+
+# ====================================================================================================
+# MARK: COT PREAMBLE STRIPPER
+# ====================================================================================================
+# Matches planning/self-talk language that some models emit inline before writing the answer.
+_COT_PLANNING_RE = re.compile(
+    r"\b(?:we should|we can|we need|we will|we could|we\'ll|we\'re|we must|"
+    r"let me|let\'s|let us|thus we|so we|now we|next we|i need|i should|i will|i\'ll|"
+    r"provide an?\b|provide the\b|need to |should |we want|we are going|"
+    r"maybe |perhaps )",
+    re.IGNORECASE,
+)
+
+# First line of a structured answer - bold heading, markdown heading, table, or list item.
+_CONTENT_MARKER_RE = re.compile(r"(?:^|\n)(\*\*|#{1,3} |\| |\d+\. |- )")
+
+
+# ----------------------------------------------------------------------------------------------------
+def _strip_cot_preamble(text: str) -> str:
+    # Remove inline chain-of-thought planning prose that some models embed at the top of their
+    # final response before writing the actual structured answer. Only strips when:
+    #   1. There IS a structured content marker (bold, heading, table, list) further down.
+    #   2. Everything before that marker contains recognisable planning language.
+    # Leaves responses without preamble completely untouched.
+    if not text:
+        return text
+
+    # Fast exit: response already starts with formatted content.
+    stripped_start = text.lstrip("\n")
+    if stripped_start[:2] in ("**", "# ", "##", "| ") or (stripped_start and stripped_start[0] in "#|"):
+        return text
+
+    marker = _CONTENT_MARKER_RE.search(text)
+    if not marker:
+        # Paragraph-split fallback: if the response has multiple newline-separated
+        # paragraphs and the earlier ones contain planning language while the final
+        # paragraph does not, return only the last paragraph (the actual answer).
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+        if len(paragraphs) >= 2:
+            last_para  = paragraphs[-1]
+            prior_text = "\n\n".join(paragraphs[:-1])
+            if _COT_PLANNING_RE.search(prior_text) and not _COT_PLANNING_RE.search(last_para):
+                return last_para
+        return text
+
+    split_pos = marker.start()
+    if text[split_pos] == "\n":
+        split_pos += 1  # move past the leading newline so the marker itself is kept
+
+    preamble = text[:split_pos]
+    if preamble.strip() and _COT_PLANNING_RE.search(preamble):
+        return text[split_pos:].lstrip("\n")
+
+    return text
 
 
 # ====================================================================================================
@@ -879,7 +937,7 @@ def orchestrate_prompt(
 
         if not result.tool_calls:
             # Model answered directly - this is the final response.
-            final_response = result.response
+            final_response = _strip_cot_preamble(result.response)
             run_success    = bool(final_response)
             _log(final_response)
             _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
@@ -974,7 +1032,7 @@ def orchestrate_prompt(
                 tools=None,
                 num_ctx=config.num_ctx,
             )
-            final_response     = result.response
+            final_response     = _strip_cot_preamble(result.response)
             prompt_tokens     += result.prompt_tokens
             completion_tokens += result.completion_tokens
             final_tps          = result.tokens_per_second

@@ -59,7 +59,30 @@ Prefer a cheaper alternative whenever one of the following applies:
 | Stable factual topic (person, place, concept) | `lookup_wikipedia` |
 | Answer likely on one known page | `fetch_page_text(url=..., query=...)` |
 | Answer likely on one unknown page | `search_web_text` + `fetch_page_text(query=...)` |
+| Need to browse a listing/hub page and select items | `get_page_links_text` + `fetch_page_text` per item |
 | Multi-source investigation needed | **use `research_traverse`** |
+
+**Escalate to `research_traverse` when initial search returns zero results.**
+If `search_web` or `search_web_text` returns "No results" for a topic that should have web
+coverage, retry once with a simplified or rephrased query. If still no results, escalate to
+`research_traverse` rather than answering from training data - the traverse skill uses an
+internal multi-step frontier that can succeed where a single-query search fails.
+
+**The manual three-stage chain is often better for structured tasks:**
+
+When the goal is to ingest articles from a known site (e.g. daily news harvest, GitHub trending),
+use the manual chain rather than `research_traverse` - it gives the orchestrator visible control
+over which items are selected:
+
+```
+1. get_page_links_text("https://news.ycombinator.com")   <- survey the listing
+2. scratch_query(key, "which links are about AI tools?")  <- semantic selection
+3. fetch_page_text(url, query="what is this and how to use it?")  <- read chosen items
+4. write_file(path, content)                              <- store results
+```
+
+Reserve `research_traverse` for open-ended investigation where the set of sources is
+unknown upfront and automated frontier expansion is needed.
 
 **Check the scratchpad before researching.**
 If related content is already stored from an earlier step, use `scratch_query` to extract the

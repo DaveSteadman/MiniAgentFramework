@@ -1,0 +1,48 @@
+[
+    "search the web for Python 3.13 new features and summarise what you find",
+    "what is the latest stable release of Ollama according to the web",
+    "search for open source LLM inference engines and list the top three you find",
+    "find current news about AI coding assistants and give me a one paragraph summary",
+    "search for Hacker News and tell me the URL of the front page",
+
+    "search the web for DuckDuckGo privacy policy and return the top result URL",
+    "search for GitHub trending Python repositories and list the URLs of the top five results",
+    "find the official Python documentation site and give me just the URL",
+
+    "fetch the page at https://docs.python.org/3/whatsnew/3.13.html and tell me the headline new features",
+    "read the content at https://ollama.com and summarise what the product is in two sentences",
+    "fetch https://httpbin.org/html and tell me what text is on the page",
+
+    "fetch https://docs.python.org/3/whatsnew/3.13.html and tell me specifically what changed in the typing module",
+    "read https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture) and extract only the section about attention mechanism",
+    "fetch https://ollama.com/library and answer the question: what models are listed on this page",
+
+    "what links are on the front page of https://news.ycombinator.com",
+    "get the links from https://github.com/trending and list them",
+    "what stories are listed on https://lobste.rs",
+    "get links from https://news.ycombinator.com filtered to python",
+    "list the links on https://docs.python.org/3/ up to 20 links",
+
+    "get the structured link list from https://news.ycombinator.com and count how many links there are",
+    "get links from https://github.com/trending?l=python and tell me the repo names",
+
+    "search for the Hacker News front page URL, then get the links from it, then fetch the top story and summarise it",
+    "find the GitHub trending Python page, list the links on it, then read the first repository and tell me what it does",
+    "search for the Python weekly newsletter website, navigate to it to see what links are on the front page, then read the most recent issue",
+
+    "research what open source LLM projects have been released in 2025",
+    "investigate the current state of local AI inference tools - what are the main options",
+    "research the differences between Ollama, llama.cpp, and LM Studio",
+    "look into what new features were added to Python in 2024 and 2025",
+    "research recent developments in retrieval-augmented generation",
+
+    "investigate what AI agent frameworks are available in Python in 2025 - examine at least 8 results",
+    "research DuckDuckGo search API limitations using up to 3 pages only",
+    "look into the latest benchmarks for small local LLMs with max 2 hops",
+
+    "fetch the page at https://httpbin.org/status/404 and tell me what you get",
+    "fetch https://httpbin.org/delay/60 with timeout_seconds=5 and report what happens",
+    "get links from https://httpbin.org/html and tell me how many you find",
+    "search for ajksdhakjsdhkajshd2025zxqppp and tell me what the search returns",
+    "fetch https://not-a-real-domain-xyz-abc.com and report the error"
+]

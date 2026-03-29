@@ -38,6 +38,18 @@ If active scratchpad keys are listed in the system prompt, check whether the pag
 already exists there before making a network request. Use `scratch_query(key, question)` to
 extract a specific answer from stored content without re-fetching.
 
+**This is Stage 3 in the web chain - use it on specific article/detail URLs.**
+
+`fetch_page_text` is designed to read a single known page. If the URL you have is a hub or
+listing page (front page, topic index, search results), use `get_page_links_text` first to
+survey the available links, then call `fetch_page_text` on the selected items.
+
+| Situation | Correct tool |
+|---|---|
+| URL is a specific article/repo/doc | `fetch_page_text(url, query=...)` |
+| URL is a listing/hub/front page | `get_page_links_text(url)` first, then `fetch_page_text` |
+| No URL yet, need to find one | `search_web_text(query)` first |
+
 **Always use `query=` unless storing raw content for later processing.**
 
 Raw mode (no `query`) injects up to 4,000 words directly into the main context window.  That

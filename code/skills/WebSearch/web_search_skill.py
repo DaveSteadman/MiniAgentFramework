@@ -6,8 +6,7 @@
 # Searches DuckDuckGo HTML (no API key required) and returns structured result lists.
 # All network I/O uses Python stdlib (urllib) so there are no mandatory third-party dependencies.
 #
-# Inspired by Gen2WebSearch from OpenClawTest (DaveSteadman), adapted to this framework's
-# single-file skill pattern with a clean, model-callable function surface.
+# Searches DuckDuckGo HTML using a single-file skill pattern with a clean, model-callable function surface.
 #
 # Related modules:
 #   - main.py                          -- orchestration entry point

@@ -27,21 +27,20 @@ class RegressionTests(unittest.TestCase):
             output_path.unlink()
 
         try:
-            result = write_file("data/test_systemstats_regression.csv", get_system_info_string())
+            result = write_file("test_systemstats_regression.csv", get_system_info_string())
             self.assertEqual(result, "Wrote data/test_systemstats_regression.csv")
             self.assertTrue(output_path.exists())
 
             content = output_path.read_text(encoding="utf-8")
-            self.assertTrue(content.startswith("key,value\n"))
-            self.assertIn("os,", content)
-            self.assertIn("python,", content)
+            self.assertIn("os=", content)
+            self.assertIn("python=", content)
         finally:
             if output_path.exists():
                 output_path.unlink()
 
     def test_execute_tool_call_runs_datetime(self) -> None:
         result = execute_tool_call(
-            function_name="get_datetime_data",
+            tool_name="get_datetime_data",
             arguments={},
             skills_payload=self.skills_payload,
         )

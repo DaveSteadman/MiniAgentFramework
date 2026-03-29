@@ -39,19 +39,33 @@ If relevant data from a prior step in this session is already stored, use `scrat
 `scratch_load` rather than issuing a new search. Only search the web when the data is
 confirmed absent from the scratchpad.
 
+**Always call the search tool - never answer from training data.**
+When the prompt says "search for", "search the web for", "find information about", or "look up",
+a tool call is mandatory. The purpose of search prompts is to retrieve current, verified data -
+not to recall training knowledge. If the tool returns no results, report that explicitly rather
+than substituting an answer from memory.
+
 **Choose between `search_web` and `search_web_text`:**
 - Use `search_web_text` in almost all cases - returns formatted text ready for direct synthesis,
   no extra processing needed.
 - Use `search_web` only when you need to iterate over individual result fields (URL, title,
   snippet) programmatically - for example when passing each URL to a subsequent `fetch_page_text`.
 
-**When to escalate to a more powerful tool:**
-- If a snippet answer is insufficient and you need to read the actual page - follow with
-  `fetch_page_text(url=..., query=...)` on the most relevant result URL.
-- If the question requires evidence from multiple pages - use `research_traverse` instead of
-  manually chaining multiple search + fetch calls.
-- If the topic is stable factual reference (a person, place, event, concept) - prefer
-  `lookup_wikipedia` over a web search for a faster, more authoritative single-call answer.
+**The three-stage web chain - when to go beyond a search:**
+
+`search_web` is Stage 1: it finds entry-point URLs. Know which stage you need next:
+
+| What you have after search | Next step | When to use it |
+|---|---|---|
+| A specific article URL | `fetch_page_text(url, query=...)` | Reading a known article |
+| A hub/listing/index URL | `get_page_links_text(url)` | Surveying what is on a front page before choosing items |
+| Need multiple sources | `research_traverse(query)` | Full automated investigation |
+| Stable reference topic | `lookup_wikipedia(topic)` | Faster than web search for known subjects |
+
+The hub-page pattern - use `get_page_links_text` as an intermediate step when the search
+result is a listing page (HN, GitHub trending, news homepage, forum index) rather than a
+direct article. Get the links, park them, use `scratch_query` to select, then `fetch_page_text`
+on the chosen items.
 
 ## Scratchpad integration
 Search results can be large.  When the result will be referenced in a later step (summarise,

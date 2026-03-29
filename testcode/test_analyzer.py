@@ -65,7 +65,9 @@ CAPABILITY_GAP_PHRASES = [
 ]
 
 # Regex to detect un-resolved template placeholders that leaked into the final output
-_TEMPLATE_LEAK_RE = re.compile(r"\{\{|\}\}|\$\{output\d+")
+# Matches Jinja-style {{variable}} (paired braces with content) or ${output1} patterns.
+# Does NOT match bare }} from LaTeX math like \frac{QK^\top}{\sqrt{d_k}}.
+_TEMPLATE_LEAK_RE = re.compile(r"\{\{[^}\n]*\}\}|\$\{output\d+")
 
 # Regex patterns used to parse the structured log sections
 _SECTION_RE       = re.compile(r"^={5,}\s*$")

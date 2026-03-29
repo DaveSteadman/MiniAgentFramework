@@ -495,6 +495,7 @@ Single JSON payload for orchestration planning.
       "functions": [
         "fetch_page_text(\"https://example.com/asyncio-guide\", query=\"summarise the key asyncio concepts\")",
         "fetch_page_text(url, max_words, timeout_seconds, query)",
+        "fetch_page_text(url, query=...)",
         "fetch_page_text(url: str, max_words: int = 1000, timeout_seconds: int = 15, query: str | None = None)"
       ],
       "inputs": [],
@@ -509,6 +510,55 @@ Single JSON payload for orchestration planning.
           "max_words": "maximum words of body prose to return (range 50-4000).",
           "timeout_seconds": "network timeout in seconds (range 5-60).",
           "query": "when provided, runs an isolated LLM extraction pass and returns only the facts relevant to the query. Use when you know exactly what you are looking for on the page."
+        }
+      }
+    },
+    {
+      "skill_name": "WebNavigate Skill",
+      "relative_path": "code/skills/WebNavigate/skill.md",
+      "purpose": "Extract all navigable hyperlinks from a web page and return them as a numbered list with anchor text and resolved absolute URLs. Use this when you land on a hub or listing page (news front page, GitHub topic, forum index, search results page) and need to see what links are available before deciding which ones to read. This is the middle link in the web navigation chain - between `search_web` (discovery) and `fetch_page_text` (reading content). Navigation chrome (menus, login, subscribe, cookie notices) is filtered automatically.",
+      "module": "code/skills/WebNavigate/web_navigate_skill.py",
+      "trigger_keyword": "links, navigate",
+      "triggers": [
+        "get links from",
+        "list links on",
+        "what links are on",
+        "navigate to",
+        "follow the links on",
+        "find links on this page",
+        "what is on the front page of",
+        "what stories are on",
+        "hub page",
+        "listing page",
+        "index page",
+        "forum page",
+        "news front page",
+        "find articles on",
+        "what pages link to"
+      ],
+      "functions": [
+        "get_page_links(\"https://techcrunch.com\")",
+        "get_page_links(...)",
+        "get_page_links(url, filter_text = \"\", max_links = 30, timeout_seconds = 15)",
+        "get_page_links(url: str, filter_text: str = \"\", max_links: int = 30, timeout_seconds: int = 15)",
+        "get_page_links_text(\"https://github.com/trending\", filter_text=\"language:python\")",
+        "get_page_links_text(\"https://lobste.rs\", max_links=20)",
+        "get_page_links_text(\"https://news.ycombinator.com\")",
+        "get_page_links_text(...)",
+        "get_page_links_text(url, filter_text = \"\", max_links = 30, timeout_seconds = 15)",
+        "get_page_links_text(url: str, filter_text: str = \"\", max_links: int = 30, timeout_seconds: int = 15)"
+      ],
+      "inputs": [],
+      "outputs": [
+        "`get_page_links(...)` - returns `list[dict]`, each entry `{\"text\": str, \"url\": str}`. On error: single-entry list `{\"text\": \"Error\", \"url\": ..., \"error\": \"...\"}`.",
+        "`get_page_links_text(...)` - returns a formatted plain-text block:"
+      ],
+      "param_descriptions": {
+        "get_page_links": {
+          "url": "full HTTP or HTTPS URL of the listing or hub page to extract links from.",
+          "filter_text": "case-insensitive substring; only links whose anchor text or URL contains this string are returned. Use for coarse pre-filtering when you already know a keyword. For semantic filtering (\"which links are about open source models?\") use `scratch_query` on the parked result instead.",
+          "max_links": "maximum number of links to return, 1-100.",
+          "timeout_seconds": "network timeout, 5-60."
         }
       }
     },

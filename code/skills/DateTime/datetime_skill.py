@@ -24,6 +24,7 @@ from datetime import datetime
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
 def get_datetime_data() -> dict:
+    """Return the current local date and time as a dict with keys 'date' (YYYY-MM-DD) and 'time' (HH:MM:SS). Takes no arguments. When the user asks only for the time, report only the time field; when asked only for the date, report only the date field."""
     current_local = datetime.now()
     return {
         "date": current_local.strftime("%Y-%m-%d"),

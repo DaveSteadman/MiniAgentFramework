@@ -600,6 +600,45 @@ def _run_one_test_file(
 
 
 # ----------------------------------------------------------------------------------------------------
+def _run_post_test_checks(ctx, csv_path, testcode_dir, subprocess_mod, sys_mod) -> None:
+    # Run quick unit tests and the results analyzer after a wrapper test run completes.
+    # Runs test_regressions.py and test_cot_preamble.py (no LLM, completes in seconds),
+    # then test_analyzer.py on the CSV to produce _analysis.csv and _gaps.txt alongside it.
+    ctx.output("--- Post-test checks ---", "dim")
+    for script_name in ("test_regressions.py", "test_cot_preamble.py"):
+        script = testcode_dir / script_name
+        ctx.output(f"  {script_name} ...", "dim")
+        try:
+            proc = subprocess_mod.run(
+                [sys_mod.executable, str(script)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            combined = (proc.stdout + proc.stderr).strip()
+            for line in combined.splitlines():
+                ctx.output(f"    {line}", "dim" if proc.returncode == 0 else "error")
+            level = "success" if proc.returncode == 0 else "error"
+            ctx.output(f"  [{script_name}: {'OK' if proc.returncode == 0 else 'FAILED'}]", level)
+        except Exception as exc:
+            ctx.output(f"  Error running {script_name}: {exc}", "error")
+    if csv_path is not None and csv_path.exists():
+        analyzer = testcode_dir / "test_analyzer.py"
+        ctx.output(f"  test_analyzer on {csv_path.name} ...", "dim")
+        try:
+            proc = subprocess_mod.run(
+                [sys_mod.executable, str(analyzer), str(csv_path)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            for line in (proc.stdout + proc.stderr).splitlines():
+                ctx.output(f"    {line}", "dim" if proc.returncode == 0 else "error")
+        except Exception as exc:
+            ctx.output(f"  Error running test_analyzer: {exc}", "error")
+
+
+# ----------------------------------------------------------------------------------------------------
 
 def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
     import re
@@ -682,6 +721,7 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
                 f"elapsed={time_str}  passed={total_passed}/{total_tests}",
                 level,
             )
+            _run_post_test_checks(_ctx, _shared_output, _wrapper.parent, subprocess, sys)
 
         if task_queue.enqueue("test_all", "test", _run_all):
             ctx.output("Test run queued.", "dim")
@@ -714,13 +754,23 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
         _candidate=candidate,
         _wrapper=wrapper,
         _ctx=ctx,
+        _datetime=datetime,
     ) -> None:
         _model = _ctx.config.resolved_model
         _host  = get_active_host()
+        _now   = _datetime.now()
+        _output_file = (
+            get_test_results_dir()
+            / _now.strftime("%Y-%m-%d")
+            / f"test_results_{_now.strftime('%Y%m%d_%H%M%S')}_{_candidate.stem}.csv"
+        )
+        _output_file.parent.mkdir(parents=True, exist_ok=True)
         _ctx.output(f"Running test suite: {_candidate.name} ...", "info")
         _run_one_test_file(
             _candidate, _ctx, _wrapper, _model, _host, re, subprocess, sys,
+            output_file=_output_file,
         )
+        _run_post_test_checks(_ctx, _output_file, _wrapper.parent, subprocess, sys)
 
     queue_name = f"test_{candidate.stem}"
     if task_queue.enqueue(queue_name, "test", _run_single):
