@@ -920,6 +920,31 @@ def orchestrate_prompt(
                 num_ctx=config.num_ctx,
             )
         except Exception as error:
+            error_str = str(error)
+            # Ollama returns HTTP 500 "error parsing tool call" when the model generates
+            # a truncated or malformed JSON tool-call argument (common when the model
+            # tries to embed a large string literal inline rather than building it via
+            # code_execute or scratchpad). Instead of aborting the run, inject a
+            # corrective user message so the model can retry with a different approach.
+            if "error parsing tool call" in error_str:
+                _log(f"[error] Tool call JSON parse error in round {round_num} - injecting correction message.")
+                correction = (
+                    "Your previous tool call could not be executed because the argument "
+                    "JSON was truncated or malformed. Do not embed large multi-line strings "
+                    "directly in a tool call argument. Instead: (1) build the content using "
+                    "code_execute and print() it, (2) save the output to the scratchpad with "
+                    "scratch_save, then (3) pass the scratchpad reference to write_file."
+                )
+                messages.append({"role": "user", "content": correction})
+                _context_map.append({
+                    "round":    round_num,
+                    "role":     "user",
+                    "label":    "[tool-call correction injected]",
+                    "chars":    len(correction),
+                    "auto_key": None,
+                    "msg_idx":  len(messages) - 1,
+                })
+                continue
             _log(f"[error] LLM call failed in round {round_num}: {error}")
             final_response = f"(LLM call failed: {error})"
             break
