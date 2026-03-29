@@ -34,6 +34,7 @@ from pathlib import Path
 
 import ollama_client
 from modes.dashboard import run_dashboard_mode
+from modes.api_mode import run_api_mode
 from ollama_client import format_running_model_report
 from ollama_client import get_llm_timeout
 from ollama_client import register_llm_call_logger
@@ -112,6 +113,26 @@ def parse_main_args() -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Start the interactive dashboard (timeline + log + chat).",
+    )
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        default=False,
+        help="Start the REST API server with web UI (FastAPI on --api-port).",
+    )
+    parser.add_argument(
+        "--api-port",
+        type=int,
+        default=8000,
+        metavar="PORT",
+        help="Port for the API server (default 8000). Only used with --api.",
+    )
+    parser.add_argument(
+        "--api-host",
+        type=str,
+        default="0.0.0.0",
+        metavar="HOST",
+        help="Bind host for the API server (default 0.0.0.0). Only used with --api.",
     )
     parser.add_argument(
         "--scheduled-item",
@@ -636,6 +657,7 @@ def _run(args, logger, log_path) -> None:
         "chat"          if args.chat          else
         "scheduler"     if args.scheduler     else
         "dashboard"     if args.dashboard     else
+        "api"           if args.api           else
         f"scheduled-item:{args.scheduled_item}" if args.scheduled_item else
         f"chat-sequence:{args.chat_sequence_file.name}" if args.chat_sequence_file else
         "single-shot"
@@ -660,6 +682,10 @@ def _run(args, logger, log_path) -> None:
 
     if args.dashboard:
         run_dashboard_mode(config=config, logger=logger, log_path=log_path)
+        return
+
+    if args.api:
+        run_api_mode(config=config, logger=logger, log_path=log_path, host=args.api_host, port=args.api_port)
         return
 
     if args.scheduled_item:

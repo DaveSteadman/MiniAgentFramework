@@ -95,14 +95,21 @@ _COUNTER_LABEL_RE = re.compile(r"^\d[\d,\s]*(?:\([^)]+\))?$")
 # MARK: HTML LINK EXTRACTOR
 # ====================================================================================================
 class _LinkExtractor(HTMLParser):
-    """Stdlib HTMLParser subclass that collects <a href> links with their anchor text."""
+    """Stdlib HTMLParser subclass that collects <a href> links with their anchor text.
+
+    Also captures the page <title> and any <base href> so callers can use the correct
+    base URL when resolving relative links.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self._in_skip  = 0         # depth inside tags we must ignore entirely
         self._in_a     = False
+        self._in_title = False
         self._buf:    list[str] = []
         self.links:   list[tuple[str, str]] = []  # [(href, text), ...]
+        self.base_href: str = ""   # from <base href="..."> if the page declares one
+        self.page_title: str = ""  # from <title>...</title>
 
     # Tags whose entire subtree is ignored (navigation chrome, scripts, etc.)
     _SKIP_TAGS = frozenset({
@@ -111,6 +118,14 @@ class _LinkExtractor(HTMLParser):
     })
 
     def handle_starttag(self, tag: str, attrs) -> None:  # type: ignore[override]
+        if tag == "base":
+            href = dict(attrs).get("href", "").strip()
+            if href and not self.base_href:
+                self.base_href = href
+            return
+        if tag == "title":
+            self._in_title = True
+            return
         if tag in self._SKIP_TAGS:
             self._in_skip += 1
             return
@@ -123,6 +138,9 @@ class _LinkExtractor(HTMLParser):
             self._cur_href = href or ""
 
     def handle_endtag(self, tag: str) -> None:  # type: ignore[override]
+        if tag == "title":
+            self._in_title = False
+            return
         if tag in self._SKIP_TAGS:
             self._in_skip = max(0, self._in_skip - 1)
             return
@@ -136,6 +154,9 @@ class _LinkExtractor(HTMLParser):
             self._cur_href = ""
 
     def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self.page_title += data
+            return
         if self._in_skip or not self._in_a:
             return
         self._buf.append(data)
@@ -190,13 +211,21 @@ def _is_noise_link(text: str, url: str) -> bool:
 # ====================================================================================================
 # MARK: CORE EXTRACTION
 # ====================================================================================================
-def _extract_links(html_text: str, base_url: str, filter_text: str, max_links: int) -> list[dict]:
-    """Parse HTML and return filtered, deduplicated, absolute-URL link list."""
+def _extract_links(html_text: str, base_url: str, filter_text: str, max_links: int) -> tuple[list[dict], str]:
+    """Parse HTML and return (filtered_links, page_title).
+
+    The page <base href> is honoured when resolving relative URLs - if the page declares
+    a different base the fetched URL is not used for resolution.
+    """
     extractor = _LinkExtractor()
     try:
         extractor.feed(html_text)
     except Exception:
         pass  # HTMLParser raises on malformed HTML; take whatever was collected.
+
+    # Honour <base href> declared by the page; fall back to the fetched URL.
+    effective_base = extractor.base_href or base_url
+    page_title     = _html.unescape(extractor.page_title).strip()
 
     filter_lower   = filter_text.lower().strip() if filter_text else ""
     seen_urls:       set[str]       = set()
@@ -207,7 +236,7 @@ def _extract_links(html_text: str, base_url: str, filter_text: str, max_links: i
         if len(results) >= max_links:
             break
 
-        url = _resolve_url(base_url, href)
+        url = _resolve_url(effective_base, href)
         if not url:
             continue
 
@@ -234,20 +263,58 @@ def _extract_links(html_text: str, base_url: str, filter_text: str, max_links: i
         seen_urls.add(url)
         results.append({"text": text, "url": url})
 
-    return results
+    return results, page_title
 
 
 # ----------------------------------------------------------------------------------------------------
 def extract_urls_from_html(html_text: str, base_url: str, max_links: int = 200) -> list[str]:
     # Reusable helper for other skills that already hold fetched HTML and need a clean,
     # noise-filtered URL list without re-fetching the page. Not exposed as a tool.
-    links = _extract_links(html_text, base_url, filter_text="", max_links=max(1, int(max_links)))
+    links, _ = _extract_links(html_text, base_url, filter_text="", max_links=max(1, int(max_links)))
     return [link["url"] for link in links]
 
 
 # ====================================================================================================
 # MARK: PUBLIC SKILL API
 # ====================================================================================================
+# MARK: PUBLIC SKILL API
+# ====================================================================================================
+
+# ----------------------------------------------------------------------------------------------------
+def _fetch_links_data(
+    url: str,
+    filter_text: str,
+    max_links: int,
+    timeout_seconds: int,
+) -> dict:
+    """Shared core helper - fetches the page and extracts links.
+
+    Returns a dict with keys: links (list[dict]), title (str), final_url (str), error (str|None).
+    """
+    if not url or not url.strip():
+        return {"links": [], "title": "", "final_url": url, "error": "url cannot be empty"}
+
+    parsed_url = urllib.parse.urlparse(url.strip())
+    if parsed_url.scheme not in ("http", "https"):
+        return {"links": [], "title": "", "final_url": url, "error": f"unsupported URL scheme '{parsed_url.scheme}'"}
+
+    max_links       = max(1, min(int(max_links),       MAX_LINKS_CAP))
+    timeout_seconds = max(5, min(int(timeout_seconds), TIMEOUT_CAP))
+
+    try:
+        html_text, final_url = _fetch_html(url.strip(), timeout=float(timeout_seconds))
+    except urllib.error.HTTPError as exc:
+        return {"links": [], "title": "", "final_url": url, "error": f"HTTP {exc.code}"}
+    except urllib.error.URLError as exc:
+        return {"links": [], "title": "", "final_url": url, "error": str(exc.reason)}
+    except Exception as exc:
+        return {"links": [], "title": "", "final_url": url, "error": str(exc)}
+
+    links, page_title = _extract_links(html_text, final_url, filter_text, max_links)
+    return {"links": links, "title": page_title, "final_url": final_url, "error": None}
+
+
+# ----------------------------------------------------------------------------------------------------
 def get_page_links(
     url: str,
     filter_text: str = "",
@@ -258,7 +325,7 @@ def get_page_links(
 
     Each entry is a dict: {"text": "anchor text", "url": "https://absolute.url"}.
     Navigation chrome (menus, login, subscribe, etc.) is filtered automatically.
-    Relative URLs are resolved to absolute URLs against the fetched page URL.
+    Relative URLs are resolved to absolute URLs, honouring any <base href> the page declares.
 
     filter_text: optional substring - only links whose anchor text or URL contains this
                  string (case-insensitive) are returned. Use for coarse pre-filtering
@@ -266,34 +333,18 @@ def get_page_links(
 
     Returns a list[dict]. Returns a single-entry error list on network/parse failure.
     """
-    if not url or not url.strip():
-        return [{"text": "Error", "url": "", "error": "url cannot be empty"}]
+    data = _fetch_links_data(url, filter_text, max_links, timeout_seconds)
 
-    parsed_url = urllib.parse.urlparse(url.strip())
-    if parsed_url.scheme not in ("http", "https"):
-        return [{"text": "Error", "url": url, "error": f"unsupported URL scheme '{parsed_url.scheme}'"}]
+    if data["error"]:
+        return [{"text": "Error", "url": url, "error": data["error"]}]
 
-    max_links       = max(1, min(int(max_links),       MAX_LINKS_CAP))
-    timeout_seconds = max(5, min(int(timeout_seconds), TIMEOUT_CAP))
-
-    try:
-        html_text, final_url = _fetch_html(url.strip(), timeout=float(timeout_seconds))
-    except urllib.error.HTTPError as exc:
-        return [{"text": "Error", "url": url, "error": f"HTTP {exc.code}"}]
-    except urllib.error.URLError as exc:
-        return [{"text": "Error", "url": url, "error": str(exc.reason)}]
-    except Exception as exc:
-        return [{"text": "Error", "url": url, "error": str(exc)}]
-
-    links = _extract_links(html_text, final_url, filter_text, max_links)
-
-    if not links:
+    if not data["links"]:
         msg = "No links found"
         if filter_text:
             msg += f" matching '{filter_text}'"
         return [{"text": msg, "url": url, "error": "no_links"}]
 
-    return links
+    return data["links"]
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -306,28 +357,37 @@ def get_page_links_text(
     """Fetch a page and return its navigable links as formatted plain text.
 
     Format:
+        "Page Title" (https://example.com)  [12 links]
         1. [Anchor text] https://absolute.url
         2. [Another link] https://...
 
+    Page title is included in the header when the fetched HTML provides one.
     Designed for direct LLM consumption and scratchpad parking.
     When the result is large (typical for listing pages), it will be auto-parked by the
     orchestration layer. Use scratch_query on the parked key for semantic filtering.
 
     Returns an error string (beginning with "Error:") on failure.
     """
-    links = get_page_links(url, filter_text=filter_text, max_links=max_links, timeout_seconds=timeout_seconds)
+    data = _fetch_links_data(url, filter_text, max_links, timeout_seconds)
 
-    # Surface error from single-entry error list.
-    if len(links) == 1 and "error" in links[0]:
-        err = links[0].get("error", "unknown error")
-        txt = links[0].get("text", "Error")
-        if txt == "Error":
-            return f"Error: {err} - {url}"
-        return txt  # "No links found..." message
+    if data["error"]:
+        return f"Error: {data['error']} - {url}"
 
-    lines = [f"{i + 1}. [{item['text']}] {item['url']}" for i, item in enumerate(links)]
-    header = f"Links from: {url}"
+    links     = data["links"]
+    title     = data["title"]
+    final_url = data["final_url"]
+
+    if not links:
+        msg = "No links found"
+        if filter_text:
+            msg += f" matching '{filter_text}'"
+        return msg
+
+    title_str = f'"{title}" ' if title else ""
+    header    = f"Links from: {title_str}({final_url})"
     if filter_text:
         header += f"  (filtered: '{filter_text}')"
     header += f"  [{len(links)} links]"
+
+    lines = [f"{i + 1}. [{item['text']}] {item['url']}" for i, item in enumerate(links)]
     return header + "\n" + "\n".join(lines)

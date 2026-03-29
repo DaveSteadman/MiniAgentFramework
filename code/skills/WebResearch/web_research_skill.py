@@ -1,6 +1,6 @@
-# ==================================================================================================== #
+# ====================================================================================================
 # MARK: OVERVIEW
-# ==================================================================================================== #
+# ====================================================================================================
 # ResearchTraverse skill for MiniAgentFramework.
 #
 # Generic multi-page web research primitive:
@@ -9,27 +9,46 @@
 # - extracts readable text
 # - scores relevance against the user query
 # - optionally follows promising links discovered inside fetched pages
+# - re-extracts evidence for the top pages via an isolated LLM call (semantic quality)
 # - returns a compact summary plus a larger evidence bundle
 #
 # Built to reduce tool-call thrash and keep bulky evidence out of the main thread.
-# ==================================================================================================== #
+#
+# Related modules:
+#   - skills/WebSearch/web_search_skill.py  -- used for initial DuckDuckGo seeding
+#   - skills/WebNavigate/web_navigate_skill.py -- used for extracting hop URLs from pages
+#   - webpage_utils.py                      -- shared HTTP fetch and HTML extraction
+#   - ollama_client.py                      -- used for LLM-backed evidence re-extraction
+# ====================================================================================================
 
 import html as _html
 import re
+import sys
 import urllib.parse
 from collections import deque
+from pathlib import Path
 
-from webpage_utils import fetch_html as _fetch_html
+# Ensure code/ is on the path so webpage_utils and ollama_client are importable when this
+# skill is loaded dynamically from any working directory.
+_code_dir = str(Path(__file__).resolve().parents[2])
+if _code_dir not in sys.path:
+    sys.path.insert(0, _code_dir)
+
+from ollama_client import call_llm_chat as _call_llm_chat
+from ollama_client import get_active_model as _get_active_model
+from ollama_client import get_active_num_ctx as _get_active_num_ctx
 from webpage_utils import extract_content as _extract_content
+from webpage_utils import fetch_html as _fetch_html
 from webpage_utils import truncate_to_words as _truncate_to_words
 
-from skills.WebSearch.web_search_skill import search_web
+# Cross-skill imports - work as namespace packages (Python 3.3+) once code/ is on sys.path.
 from skills.WebNavigate.web_navigate_skill import extract_urls_from_html as _extract_urls_from_html
+from skills.WebSearch.web_search_skill import search_web
 
 
-# ==================================================================================================== #
+# ====================================================================================================
 # MARK: CONSTANTS
-# ==================================================================================================== #
+# ====================================================================================================
 
 _MAX_SEARCH_RESULTS_CAP          = 10
 _MAX_PAGES_CAP                   = 12
@@ -37,6 +56,9 @@ _MAX_HOPS_CAP                    = 2
 _TIMEOUT_SECONDS_CAP             = 30
 _MAX_WORDS_PER_PAGE_CAP          = 1200
 _MAX_EVIDENCE_QUOTES_CAP         = 8
+# Number of top-scoring pages for which an isolated LLM re-extraction pass is run to
+# replace the lexical evidence snippets with semantically focused ones.
+_LLM_REEXTRACT_TOP_N             = 3
 
 _URL_RE                          = re.compile(r'https?://[^\s<>"\')]+', re.IGNORECASE)
 _SPACE_RE                        = re.compile(r"\s+")
@@ -49,9 +71,9 @@ _STOPWORDS = {
 }
 
 
-# ==================================================================================================== #
+# ====================================================================================================
 # MARK: TEXT HELPERS
-# ==================================================================================================== #
+# ====================================================================================================
 
 def _clean_text(text: str) -> str:
     text = _html.unescape(text or "")
@@ -81,9 +103,9 @@ def _sentenceish_chunks(text: str) -> list[str]:
     return [p.strip() for p in parts if p and p.strip()]
 
 
-# ==================================================================================================== #
+# ====================================================================================================
 # MARK: URL HELPERS
-# ==================================================================================================== #
+# ====================================================================================================
 
 def _normalise_url(url: str) -> str:
     url = (url or "").strip()
@@ -112,9 +134,9 @@ def _same_domain(url_a: str, url_b: str) -> bool:
         return False
 
 
-# ==================================================================================================== #
+# ====================================================================================================
 # MARK: SCORING
-# ==================================================================================================== #
+# ====================================================================================================
 
 def _score_text_against_query(query: str, title: str, body_text: str, url: str) -> tuple[float, list[str]]:
     terms = _query_terms(query)
@@ -191,9 +213,9 @@ def _best_evidence_snippets(query: str, body_text: str, max_items: int) -> list[
     return out
 
 
-# ==================================================================================================== #
+# ====================================================================================================
 # MARK: FETCH + EXTRACT
-# ==================================================================================================== #
+# ====================================================================================================
 
 def _fetch_extract_score(url: str, query: str, timeout_seconds: int, max_words_per_page: int, max_evidence_quotes: int = 3) -> dict:
     try:
@@ -235,9 +257,55 @@ def _fetch_extract_score(url: str, query: str, timeout_seconds: int, max_words_p
         }
 
 
-# ==================================================================================================== #
+# ====================================================================================================
+# MARK: LLM EVIDENCE RE-EXTRACTION
+# ====================================================================================================
+
+def _llm_reextract_evidence(query: str, body_text: str) -> list[str] | None:
+    """Run an isolated LLM call to extract semantically relevant evidence from body_text.
+
+    Returns a list of extracted sentences/paragraphs, or None if no model is registered
+    or the call fails (callers fall back to lexical evidence in that case).
+    The full page body never enters the main messages thread - only the compact result
+    is returned.
+    """
+    model   = _get_active_model()
+    num_ctx = _get_active_num_ctx()
+    if not model:
+        return None
+
+    inner_messages = [
+        {
+            "role":    "system",
+            "content": (
+                "You are a precise evidence extractor. "
+                "Read the research question and the page content, then extract the sentences or "
+                "short paragraphs that most directly answer or support the question. "
+                "Return each piece of evidence on its own line, prefixed with '- '. "
+                "Include only text that appears verbatim or near-verbatim on the page. "
+                "If no relevant evidence is present, respond with exactly: Not found on this page."
+            ),
+        },
+        {
+            "role":    "user",
+            "content": f"Research question: {query}\n\nPage content:\n{body_text}",
+        },
+    ]
+
+    try:
+        result    = _call_llm_chat(model_name=model, messages=inner_messages, tools=None, num_ctx=num_ctx)
+        extracted = (result.response or "").strip()
+        if not extracted or extracted == "Not found on this page.":
+            return None
+        lines = [ln.lstrip("- ").strip() for ln in extracted.splitlines() if ln.strip() and ln.strip() != "-"]
+        return [ln for ln in lines if ln] or None
+    except Exception:
+        return None
+
+
+# ====================================================================================================
 # MARK: PUBLIC SKILL API
-# ==================================================================================================== #
+# ====================================================================================================
 
 def research_traverse(
     query: str,
@@ -266,6 +334,9 @@ def research_traverse(
     max_words_per_page = max(80, min(int(max_words_per_page), _MAX_WORDS_PER_PAGE_CAP))
     max_evidence_quotes = max(1, min(int(max_evidence_quotes), _MAX_EVIDENCE_QUOTES_CAP))
 
+    # Capture the DuckDuckGo URL that will be used so it appears in the output for debugging.
+    _search_url = f"https://duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
+
     seed_results = search_web(
         query           = query,
         max_results     = max_search_results,
@@ -274,15 +345,16 @@ def research_traverse(
 
     if not isinstance(seed_results, list) or not seed_results:
         return {
-            "query": query,
-            "summary": "Search returned no usable results.",
-            "answer_confidence": "low",
-            "visited_count": 0,
-            "seed_results": seed_results,
-            "best_pages": [],
-            "exploration_log": [],
+            "query"              : query,
+            "search_url"         : _search_url,
+            "summary"            : "Search returned no usable results.",
+            "answer_confidence"  : "low",
+            "visited_count"      : 0,
+            "seed_results"       : seed_results,
+            "best_pages"         : [],
+            "exploration_log"    : [],
             "unvisited_candidates": [],
-            "full_report": f"Research failed early for query: {query}",
+            "full_report"        : f"Research failed early for query: {query}",
         }
 
     frontier = deque()
@@ -357,6 +429,14 @@ def research_traverse(
 
     useful_pages.sort(key=lambda p: p.get("score", 0.0), reverse=True)
 
+    # LLM semantic re-extraction pass for the top pages.
+    # Replaces the lexical evidence snippets with semantically focused ones so high-scoring
+    # pages that repeat query terms but give a shallow answer don't pollute the evidence bundle.
+    for page in useful_pages[:_LLM_REEXTRACT_TOP_N]:
+        llm_evidence = _llm_reextract_evidence(query, page.get("body_text", ""))
+        if llm_evidence:
+            page["evidence"] = llm_evidence
+
     best_pages = []
     for page in useful_pages[: min(5, len(useful_pages))]:
         best_pages.append({
@@ -377,7 +457,11 @@ def research_traverse(
                 summary_lines.append(f"  - {ev}")
         summary = "\n".join(summary_lines)
 
-        top_score = useful_pages[0]["score"]
+        top_score  = useful_pages[0]["score"]
+        # Confidence bands: high >= 10, medium >= 5, low < 5.
+        # Score is driven by: title match +4.0, URL match +2.0, body term frequency up to
+        # +3.0 per term, multi-term bonus +3.0.  A focused article typically scores 10-20;
+        # index/listing pages with shallow mentions score 3-7.
         confidence = "high" if top_score >= 10 else ("medium" if top_score >= 5 else "low")
     else:
         summary = "No strong evidence found across the visited pages."
@@ -385,6 +469,7 @@ def research_traverse(
 
     full_report_lines = [
         f"Research query: {query}",
+        f"Search URL: {_search_url}",
         f"Visited pages: {len(visited)}",
         f"Useful pages: {len(useful_pages)}",
         "",
@@ -419,13 +504,14 @@ def research_traverse(
         })
 
     return {
-        "query"              : query,
-        "summary"            : summary,
-        "answer_confidence"  : confidence,
-        "visited_count"      : len(visited),
-        "seed_results"       : seed_results,
-        "best_pages"         : best_pages,
-        "exploration_log"    : log,
+        "query"               : query,
+        "search_url"          : _search_url,
+        "summary"             : summary,
+        "answer_confidence"   : confidence,
+        "visited_count"       : len(visited),
+        "seed_results"        : seed_results,
+        "best_pages"          : best_pages,
+        "exploration_log"     : log,
         "unvisited_candidates": unvisited_candidates,
-        "full_report"        : "\n".join(full_report_lines).strip(),
+        "full_report"         : "\n".join(full_report_lines).strip(),
     }

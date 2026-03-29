@@ -10,7 +10,7 @@
 #
 # Related modules:
 #   - main.py                          -- orchestration entry point
-#   - skills/WebExtract/               -- companion skill to fetch + extract page content
+#   - skills/WebFetch/                 -- companion skill to fetch + extract page content
 #   - skills_catalog_builder.py        -- reads skill.md to build the catalog
 #   - webpage_utils.py                 -- HTTP fetch utility (shared)
 # ====================================================================================================
@@ -29,7 +29,8 @@ from webpage_utils import fetch_html as _fetch_html
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-_DDG_URL = "https://duckduckgo.com/html/?q={q}"
+_DDG_URL      = "https://duckduckgo.com/html/?q={q}"
+_DDG_PAGE_URL = "https://duckduckgo.com/html/?q={q}&s={s}&dc={dc}"  # pagination (best-effort GET)
 
 # DDG wraps outbound links in an internal redirect; decode to extract the real destination URL.
 _REDIRECT_RE = re.compile(r"/l/\?uddg=([^&\"'>]+)")
@@ -130,6 +131,7 @@ def search_web(
     query: str = "",
     max_results: int = DEFAULT_MAX_RESULTS,
     timeout_seconds: int = DEFAULT_TIMEOUT,
+    offset: int = 0,
     # Accept common aliases that models often use instead of the canonical names:
     num_results: int | None = None,
     limit: int | None = None,
@@ -140,6 +142,10 @@ def search_web(
 
     Returns a list of dicts: [{"rank": int, "title": str, "url": str, "snippet": str}, ...]
     Returns a single error-entry dict on network or parse failure - never raises.
+
+    offset: skip this many results (multiples of 30 recommended). Uses a GET-based paging
+    request - results may vary by query. Use offset=0 (default) unless the first page
+    returned no useful results.
     """
     # Absorb query aliases the model may send instead of 'query'.
     if not query:
@@ -155,9 +161,13 @@ def search_web(
     effective_max   = num_results if num_results is not None else (limit if limit is not None else (n if n is not None else max_results))
     max_results     = max(1, min(int(effective_max),   MAX_RESULTS_CAP))
     timeout_seconds = max(5, min(int(timeout_seconds), TIMEOUT_SECONDS_CAP))
+    offset          = max(0, int(offset))
 
-    encoded    = urllib.parse.quote_plus(query.strip())
-    search_url = _DDG_URL.format(q=encoded)
+    encoded     = urllib.parse.quote_plus(query.strip())
+    if offset > 0:
+        search_url = _DDG_PAGE_URL.format(q=encoded, s=offset, dc=offset + 1)
+    else:
+        search_url = _DDG_URL.format(q=encoded)
 
     try:
         html_text, _ = _fetch_html(search_url, timeout=float(timeout_seconds))
@@ -178,6 +188,7 @@ def search_web_text(
     max_results: int = DEFAULT_MAX_RESULTS,
     timeout_seconds: int = DEFAULT_TIMEOUT,
     max_chars_per_result: int = DEFAULT_MAX_CHARS,
+    offset: int = 0,
     # Accept common aliases:
     num_results: int | None = None,
     limit: int | None = None,
@@ -201,7 +212,7 @@ def search_web_text(
                 break
 
     effective_max = num_results if num_results is not None else (limit if limit is not None else (n if n is not None else max_results))
-    results = search_web(query=query, max_results=int(effective_max), timeout_seconds=timeout_seconds)
+    results = search_web(query=query, max_results=int(effective_max), timeout_seconds=timeout_seconds, offset=offset)
 
     char_cap = max(0, min(int(max_chars_per_result), MAX_CHARS_PER_RESULT_CAP)) if max_chars_per_result > 0 else 0
 

@@ -28,3 +28,8 @@ prompt_toolkit>=3.0
 # Ensures sites like arxiv.org whose cert chain is missing from Python's bundled CAs work
 # correctly on Windows without disabling SSL verification.
 certifi>=2024.0
+
+# REST API + web UI (--api mode only).
+# fastapi pulls in starlette and pydantic automatically.
+fastapi>=0.110
+uvicorn>=0.29

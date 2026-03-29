@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniAgentFramework</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="layout">
+
+    <!-- ================================================
+         HEADER
+         ================================================ -->
+    <header id="header">
+        <div class="brand"><strong>MINI</strong>AGENT<strong>FRAMEWORK</strong></div>
+        <div id="ollama-dot" class="off"></div>
+        <div id="ollama-info">
+            <span id="ollama-host" class="info-chip"></span>
+            <span class="info-sep">|</span>
+            <span id="ollama-model" class="info-chip"></span>
+            <span class="info-sep">|</span>
+            <span id="ollama-ctx" class="info-chip"></span>
+        </div>
+        <div class="sep"></div>
+        <div id="queue-badge">
+            queue <span id="queue-badge-count" class="badge-count">0</span>
+        </div>
+    </header>
+
+    <!-- ================================================
+         MAIN GRID
+         ================================================ -->
+    <div id="main-grid">
+
+        <!-- Timeline -->
+        <div class="panel" id="panel-timeline">
+            <div class="panel-header">
+                <div class="dot"></div>
+                Schedule
+            </div>
+            <div id="timeline-ticker"></div>
+            <div id="timeline-queue"></div>
+        </div>
+
+        <!-- Log stream -->
+        <div class="panel" id="panel-log">
+            <div class="panel-header">
+                <div class="dot"></div>
+                Log
+                <span class="header-spacer"></span>
+                <button class="wrap-btn wrap-active" id="wrap-btn-log" onclick="toggleWrap('log-body','wrap-btn-log')">wrap</button>
+            </div>
+            <div class="panel-body" id="log-body"></div>
+        </div>
+
+        <!-- Chat -->
+        <div class="panel" id="panel-chat">
+            <div class="panel-header">
+                <div class="dot"></div>
+                Chat
+                <span class="header-spacer"></span>
+                <button class="wrap-btn wrap-active" id="wrap-btn-chat" onclick="toggleWrap('chat-body','wrap-btn-chat')">wrap</button>
+            </div>
+            <div class="panel-body" id="chat-body"></div>
+        </div>
+
+        <!-- Input bar -->
+        <div class="panel" id="panel-input">
+            <div class="panel-body">
+                <textarea
+                    id="chat-input"
+                    rows="3"
+                    placeholder="Type a prompt and press Enter (Shift+Enter for newline)..."
+                    autocomplete="off"
+                    spellcheck="false"
+                ></textarea>
+                <button id="send-btn">Send</button>
+            </div>
+        </div>
+
+    </div><!-- #main-grid -->
+</div><!-- #layout -->
+
+<script src="/static/app.js"></script>
+</body>
+</html>

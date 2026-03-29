@@ -8,20 +8,23 @@ Search the web using DuckDuckGo and return ranked results with title, URL, and s
 ## Interface
 - Module: `code/skills/WebSearch/web_search_skill.py`
 - Functions:
-  - `search_web(query: str, max_results: int = 5, timeout_seconds: int = 15)`
-  - `search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15)`
+  - `search_web(query: str, max_results: int = 5, timeout_seconds: int = 15, offset: int = 0)`
+  - `search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15, max_chars_per_result: int = 500, offset: int = 0)`
 
 ## Parameters
 
-### `search_web(query, max_results = 5, timeout_seconds = 15)`
+### `search_web(query, max_results = 5, timeout_seconds = 15, offset = 0)`
 - `query` *(required)* - search query string.
 - `max_results` *(optional, default 5)* - number of results to return, 1-10.
 - `timeout_seconds` *(optional, default 15)* - network timeout in seconds, 5-30.
+- `offset` *(optional, default 0)* - skip this many results from the start (multiples of 30 recommended for page 2+). Best-effort GET-based paging - may not return results for all queries.
 
-### `search_web_text(query, max_results = 5, timeout_seconds = 15)`
+### `search_web_text(query, max_results = 5, timeout_seconds = 15, max_chars_per_result = 500, offset = 0)`
 - `query` *(required)* - search query string.
 - `max_results` *(optional, default 5)* - number of results to return, 1-10.
 - `timeout_seconds` *(optional, default 15)* - network timeout in seconds, 5-30.
+- `max_chars_per_result` *(optional, default 500)* - maximum characters of snippet text per result, 0-2000. Set to 0 to disable truncation.
+- `offset` *(optional, default 0)* - skip this many results; use to retrieve page 2+ when the first page was exhausted.
 
 ## Output
 - `search_web(...)` - returns `list[dict]`, each entry with `rank` (int), `title` (str), `url` (str), `snippet` (str). On error: single-entry list with `rank=0` and `snippet` describing the failure.

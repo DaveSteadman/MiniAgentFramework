@@ -26,11 +26,13 @@ Same parameters as `get_page_links`.
 - `get_page_links(...)` - returns `list[dict]`, each entry `{"text": str, "url": str}`. On error: single-entry list `{"text": "Error", "url": ..., "error": "..."}`.
 - `get_page_links_text(...)` - returns a formatted plain-text block:
   ```
-  Links from: https://example.com  [12 links]
+  "Hacker News" (https://news.ycombinator.com)  [30 links]
   1. [Article title here] https://example.com/article/123
   2. [Another story] https://other.com/story
   ```
-  Returns a string beginning with `"Error:"` on failure.
+  The page `<title>` is shown in the header when available. Returns a string beginning with `"Error:"` on failure.
+
+**Note:** `<base href>` declarations in the fetched HTML are honoured when resolving relative links.
 
 ## Triggers
 Invoke this skill when the prompt contains any of these concepts or phrases:
@@ -92,7 +94,19 @@ If the listing page is very large (100+ links) and you already know a keyword, p
 
 ## Examples
 - `get_page_links_text("https://news.ycombinator.com")` - get today's HN front page links
-  - Returns: `"Links from: https://news.ycombinator.com  [30 links]\n1. [Show HN: ...] https://..."`
+  - Returns: `'"Hacker News" (https://news.ycombinator.com)  [30 links]\n1. [Show HN: ...] https://...'`
 - `get_page_links_text("https://github.com/trending", filter_text="language:python")` - pre-filter GitHub trending
 - `get_page_links("https://techcrunch.com")` - returns structured list[dict] for programmatic use
 - `get_page_links_text("https://lobste.rs", max_links=20)` - top 20 links from Lobsters front page
+
+## Going deeper from Stage 3
+
+When `fetch_page_text` returns an article that itself contains links worth following (e.g. a
+Wikipedia article linking to primary sources, a blog post linking to referenced studies), you
+can re-enter Stage 2 without a new network fetch by calling `get_page_links_text` on the same
+URL a second time - the result will be served from the in-process URL cache at no extra cost.
+
+If you already hold the HTML from a previous fetch (e.g. from WebResearch internals), the
+helper `extract_urls_from_html(html_text, base_url)` in this module extracts a clean,
+noise-filtered URL list from the cached HTML string without re-fetching. This helper is not
+exposed as a tool but can be imported directly by other skill modules.

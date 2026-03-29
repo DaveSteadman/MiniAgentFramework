@@ -23,16 +23,21 @@ This skill is designed to reduce orchestration thrash by owning the search front
 - `max_words_per_page` *(optional, default 450)* - truncate extracted page text per page to control size.
 - `max_evidence_quotes` *(optional, default 3)* - number of best evidence snippets to keep per useful page.
 
+**Frontier size:** the traversal internally caps the queued URL count at `max_pages * 4` before cutting off link expansion. With the default `max_pages=6` this allows up to 24 queued URLs. Increase `max_pages` if you need deeper coverage.
+
+**Evidence quality:** after the traversal, an isolated LLM call re-extracts evidence for the top 3 scoring pages to replace the initial lexical snippets with semantically focused ones. This pass is skipped if no model is currently registered.
+
 ## Output
 - returns a dict with:
 - `query` - original query
+- `search_url` - the DuckDuckGo search URL used to seed the traversal (useful for debugging)
 - `summary` - short synthesis of the strongest evidence found
-- `answer_confidence` - `high`, `medium`, or `low`
+- `answer_confidence` - `high` when top page score >= 10, `medium` >= 5, `low` < 5. Score is driven by: title term match (+4.0), URL term match (+2.0), body term frequency (up to +3.0/term), multi-term bonus (+3.0). A focused article typically scores 10-20; shallow index/listing pages score 3-7.
 - `visited_count` - number of fetched pages
 - `seed_results` - initial search results used to seed the traversal
 - `best_pages` - compact list of the most relevant pages with URL, title, score, and evidence snippets
 - `exploration_log` - per-page log showing what was visited and why
-- `unvisited_candidates` - discovered but not visited URLs
+- `unvisited_candidates` - discovered but not visited URLs (up to 20 from the remaining frontier)
 - `full_report` - larger text block suitable for scratchpad storage
 
 ## Triggers

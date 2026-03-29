@@ -94,7 +94,7 @@ def fetch_page_text(
     except Exception as exc:
         return f"Error fetching page: {exc} - {url}"
 
-    _, body = _extract_content(html_text)
+    page_title, body = _extract_content(html_text)
 
     if not body.strip():
         return f"Could not extract readable text from: {url}"
@@ -102,6 +102,10 @@ def fetch_page_text(
     body = _truncate_to_words(body, fetch_words)
 
     if not query:
+        # In raw mode, prefix the page title so the caller can confirm which page was fetched
+        # without the model having to infer it from the prose.
+        if page_title:
+            return f"# {page_title}\n\n{body}"
         return body
 
     # -- Isolated extraction call --

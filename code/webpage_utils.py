@@ -33,8 +33,10 @@ import gzip
 import html as _html
 import re
 import ssl
+import time
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from html.parser import HTMLParser
 
 try:
@@ -104,6 +106,15 @@ _HEADING_PREFIX = {
 
 _DEFAULT_TIMEOUT = 15
 
+# HTTP status codes that indicate a transient server-side error worth retrying once.
+_RETRY_ON_STATUS  = frozenset({429, 500, 502, 503, 504})
+_MAX_FETCH_RETRIES = 1
+
+# In-process LRU URL cache - avoids re-fetching the same URL within a single session
+# (e.g. when a seed search result also appears as a hop target in research_traverse).
+_HTML_CACHE_MAX  = 32
+_html_cache: OrderedDict[str, tuple[str, str]] = OrderedDict()
+
 
 # ====================================================================================================
 # MARK: HTTP FETCH
@@ -112,29 +123,52 @@ def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT) -> tuple[str, str]:
     """Fetch a URL and return (html_text, final_url).
 
     Handles charset detection from the Content-Type header.
-    Raises on network error - never silently swallows exceptions.
+    Retries once on transient 5xx / 429 responses (linear 1-second back-off).
+    Results are cached in-process (up to 32 URLs) to avoid redundant round-trips.
+    Raises on persistent network error - never silently swallows exceptions.
     """
-    request = urllib.request.Request(url=url, headers=HTTP_HEADERS, method="GET")
-    with urllib.request.urlopen(request, timeout=timeout, context=_SSL_CTX) as response:
-        final_url    = response.url
-        content_type = response.headers.get("Content-Type", "")
-        charset      = "utf-8"
-        for part in content_type.split(";"):
-            part = part.strip()
-            if part.startswith("charset="):
-                charset = part[8:].strip() or "utf-8"
-                break
-        content_encoding = response.headers.get("Content-Encoding", "")
-        raw = response.read()
-    if "gzip" in content_encoding:
-        raw = gzip.decompress(raw)
-    elif "deflate" in content_encoding:
-        import zlib
-        raw = zlib.decompress(raw)
-    try:
-        return raw.decode(charset, errors="replace"), final_url
-    except LookupError:
-        return raw.decode("utf-8", errors="replace"), final_url
+    if url in _html_cache:
+        return _html_cache[url]
+
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_FETCH_RETRIES + 1):
+        try:
+            request = urllib.request.Request(url=url, headers=HTTP_HEADERS, method="GET")
+            with urllib.request.urlopen(request, timeout=timeout, context=_SSL_CTX) as response:
+                final_url    = response.url
+                content_type = response.headers.get("Content-Type", "")
+                charset      = "utf-8"
+                for part in content_type.split(";"):
+                    part = part.strip()
+                    if part.startswith("charset="):
+                        charset = part[8:].strip() or "utf-8"
+                        break
+                content_encoding = response.headers.get("Content-Encoding", "")
+                raw = response.read()
+            if "gzip" in content_encoding:
+                raw = gzip.decompress(raw)
+            elif "deflate" in content_encoding:
+                import zlib
+                raw = zlib.decompress(raw)
+            try:
+                result = raw.decode(charset, errors="replace"), final_url
+            except LookupError:
+                result = raw.decode("utf-8", errors="replace"), final_url
+
+            # Store in cache, evicting the oldest entry if at capacity.
+            if len(_html_cache) >= _HTML_CACHE_MAX:
+                _html_cache.popitem(last=False)
+            _html_cache[url] = result
+            return result
+
+        except urllib.error.HTTPError as exc:
+            if exc.code in _RETRY_ON_STATUS and attempt < _MAX_FETCH_RETRIES:
+                time.sleep(float(attempt + 1))
+                last_exc = exc
+                continue
+            raise
+
+    raise last_exc  # type: ignore[misc]
 
 
 # ====================================================================================================

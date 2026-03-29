@@ -537,6 +537,7 @@ Single JSON payload for orchestration planning.
         "what pages link to"
       ],
       "functions": [
+        "extract_urls_from_html(html_text, base_url)",
         "get_page_links(\"https://techcrunch.com\")",
         "get_page_links(...)",
         "get_page_links(url, filter_text = \"\", max_links = 30, timeout_seconds = 15)",
@@ -587,13 +588,14 @@ Single JSON payload for orchestration planning.
       "outputs": [
         "returns a dict with:",
         "`query` - original query",
+        "`search_url` - the DuckDuckGo search URL used to seed the traversal (useful for debugging)",
         "`summary` - short synthesis of the strongest evidence found",
-        "`answer_confidence` - `high`, `medium`, or `low`",
+        "`answer_confidence` - `high` when top page score >= 10, `medium` >= 5, `low` < 5. Score is driven by: title term match (+4.0), URL term match (+2.0), body term frequency (up to +3.0/term), multi-term bonus (+3.0). A focused article typically scores 10-20; shallow index/listing pages score 3-7.",
         "`visited_count` - number of fetched pages",
         "`seed_results` - initial search results used to seed the traversal",
         "`best_pages` - compact list of the most relevant pages with URL, title, score, and evidence snippets",
         "`exploration_log` - per-page log showing what was visited and why",
-        "`unvisited_candidates` - discovered but not visited URLs",
+        "`unvisited_candidates` - discovered but not visited URLs (up to 20 from the remaining frontier)",
         "`full_report` - larger text block suitable for scratchpad storage"
       ],
       "param_descriptions": {
@@ -626,13 +628,13 @@ Single JSON payload for orchestration planning.
       "functions": [
         "search_web(\"Eiffel Tower height\")",
         "search_web(...)",
-        "search_web(query, max_results = 5, timeout_seconds = 15)",
-        "search_web(query: str, max_results: int = 5, timeout_seconds: int = 15)",
+        "search_web(query, max_results = 5, timeout_seconds = 15, offset = 0)",
+        "search_web(query: str, max_results: int = 5, timeout_seconds: int = 15, offset: int = 0)",
         "search_web_text(\"Python 3.14 release notes\")",
         "search_web_text(\"Python 3.14 release notes\", max_results=3)",
         "search_web_text(...)",
-        "search_web_text(query, max_results = 5, timeout_seconds = 15)",
-        "search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15)"
+        "search_web_text(query, max_results = 5, timeout_seconds = 15, max_chars_per_result = 500, offset = 0)",
+        "search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15, max_chars_per_result: int = 500, offset: int = 0)"
       ],
       "inputs": [],
       "outputs": [
@@ -643,12 +645,15 @@ Single JSON payload for orchestration planning.
         "search_web": {
           "query": "search query string.",
           "max_results": "number of results to return, 1-10.",
-          "timeout_seconds": "network timeout in seconds, 5-30."
+          "timeout_seconds": "network timeout in seconds, 5-30.",
+          "offset": "skip this many results from the start (multiples of 30 recommended for page 2+). Best-effort GET-based paging - may not return results for all queries."
         },
         "search_web_text": {
           "query": "search query string.",
           "max_results": "number of results to return, 1-10.",
-          "timeout_seconds": "network timeout in seconds, 5-30."
+          "timeout_seconds": "network timeout in seconds, 5-30.",
+          "max_chars_per_result": "maximum characters of snippet text per result, 0-2000. Set to 0 to disable truncation.",
+          "offset": "skip this many results; use to retrieve page 2+ when the first page was exhausted."
         }
       }
     },
