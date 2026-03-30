@@ -1,6 +1,7 @@
 
 # Version 0.2+dev #
 - Web Navigate skill and adjustments to consolidate with other web skills.
+- Adding Web UI
 
 # Version 0.2 #
 - Addition of WebResearch skill, to better navigate web search and analysis prompts.

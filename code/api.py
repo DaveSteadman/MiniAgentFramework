@@ -13,12 +13,13 @@
 #   GET  /sessions/{id}/history     full conversation history for a session
 #   POST /sessions/{id}/prompt      submit a new prompt (enqueues on task_queue)
 #   GET  /logs/stream               SSE: tail all new log lines across all log files
+#   GET  /logs/file?path=<path>      SSE: tail a specific log file (used for per-run view)
 #   GET  /runs/{id}/stream          SSE: stream events for a specific enqueued run
 #
 # SSE events are plain text/event-stream with a "data: <json>\n\n" envelope.
 # All endpoints are CORS-open for localhost origins so the bundled static UI can reach them.
 #
-# Designed for --api mode: instantiated once in modes/api_mode.py, then served by uvicorn.
+# Instantiated once in modes/api_mode.py, then served by uvicorn.
 #
 # Related modules:
 #   - modes/api_mode.py       -- constructs and starts this app
@@ -34,8 +35,10 @@
 # ====================================================================================================
 import json
 import queue
+import re
 import threading
 import time
+import uuid
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
@@ -50,11 +53,11 @@ from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import ollama_client
 from ollama_client import get_active_host
+from ollama_client import get_active_model
 from ollama_client import get_active_num_ctx
 from ollama_client import get_ollama_ps_rows
 from orchestration import ConversationHistory
@@ -75,6 +78,7 @@ from workspace_utils import get_chatsessions_dir
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
 from workspace_utils import get_workspace_root
+from version import __version__
 
 
 # ====================================================================================================
@@ -82,8 +86,9 @@ from workspace_utils import get_workspace_root
 # ====================================================================================================
 _SCHEDULES_DIR       = get_schedules_dir()
 _LOG_DIR             = get_logs_dir()
-_WEB_DIR             = Path(__file__).resolve().parent / "ui" / "web"
+_WEB_DIR             = Path(__file__).resolve().parent / "ui"
 _MAX_CHAT_HISTORY    = 10
+_QUEUE_PREVIEW_LIMIT = 10
 _LOG_POLL_SECS       = 1.0      # how often the log-tail SSE generator checks for new lines
 _LOG_TAIL_LINES      = 200      # how many historic lines to send on first connect
 
@@ -104,6 +109,7 @@ _run_queues_lock:  threading.Lock = threading.Lock()
 
 # Global log broadcast queue - all log lines are pushed here for the /logs/stream SSE endpoint.
 _log_broadcast:       queue.Queue = queue.Queue(maxsize=2000)
+_latest_log_path:     str | None  = None
 
 
 # ====================================================================================================
@@ -131,23 +137,61 @@ def setup(
 def push_log_line(line: str) -> None:
     """Push a log line into the global broadcast queue (non-blocking, drops oldest on overflow)."""
     try:
-        _log_broadcast.put_nowait({"type": "log", "text": line, "ts": datetime.now().isoformat(timespec="seconds")})
+        _log_broadcast.put_nowait({
+            "type": "log",
+            "text": line,
+            "ts":   datetime.now().isoformat(timespec="seconds"),
+            "path": _latest_log_path,
+        })
     except queue.Full:
         try:
             _log_broadcast.get_nowait()
         except queue.Empty:
             pass
         try:
-            _log_broadcast.put_nowait({"type": "log", "text": line, "ts": datetime.now().isoformat(timespec="seconds")})
+            _log_broadcast.put_nowait({
+                "type": "log",
+                "text": line,
+                "ts":   datetime.now().isoformat(timespec="seconds"),
+                "path": _latest_log_path,
+            })
         except queue.Full:
             pass
 
 
+def _set_latest_log_path(path: str | Path | None) -> None:
+    global _latest_log_path
+    _latest_log_path = str(path) if path else None
+
+
 def _make_run_event_queue(run_id: str) -> queue.Queue:
-    q: queue.Queue = queue.Queue(maxsize=500)
+    q: queue.Queue = queue.Queue(maxsize=2000)
     with _run_queues_lock:
         _run_event_queues[run_id] = q
     return q
+
+
+def _queue_run_event(run_q: queue.Queue, event: dict | None, priority: bool = False) -> None:
+    try:
+        run_q.put_nowait(event)
+        return
+    except queue.Full:
+        if not priority:
+            return
+
+    while True:
+        try:
+            dropped = run_q.get_nowait()
+            if dropped is None:
+                continue
+        except queue.Empty:
+            return
+
+        try:
+            run_q.put_nowait(event)
+            return
+        except queue.Full:
+            continue
 
 
 def finish_run_event_queue(run_id: str) -> None:
@@ -177,22 +221,37 @@ app.add_middleware(
 # ====================================================================================================
 # MARK: STATIC FILES
 # ====================================================================================================
-if _WEB_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(_WEB_DIR)), name="static")
+# All static UI files are served with Cache-Control: no-store so the browser always fetches
+# the current version from disk. Do NOT use StaticFiles mount for these - Starlette mounts
+# take routing priority over explicit handlers, which prevents the no-store header being set.
 
-
-# ----------------------------------------------------------------------------------------------------
 @app.get("/", include_in_schema=False)
 def serve_index():
     index = _WEB_DIR / "index.html"
     if not index.exists():
-        return {"error": "Web UI not found. Expected at code/ui/web/index.html"}
-    return FileResponse(str(index))
+        return {"error": "Web UI not found"}
+    return FileResponse(str(index), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/static/app.js", include_in_schema=False)
+def serve_app_js():
+    return FileResponse(str(_WEB_DIR / "app.js"), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/static/style.css", include_in_schema=False)
+def serve_style_css():
+    return FileResponse(str(_WEB_DIR / "style.css"), headers={"Cache-Control": "no-store"})
 
 
 # ====================================================================================================
 # MARK: STATUS ENDPOINTS
 # ====================================================================================================
+
+@app.get("/version")
+def get_version():
+    """Return the framework version string."""
+    return {"version": __version__}
+
 
 @app.get("/status/ollama")
 def get_ollama_status():
@@ -203,6 +262,7 @@ def get_ollama_status():
         rows = []
     return {
         "host":    get_active_host(),
+        "model":   get_active_model(),
         "num_ctx": get_active_num_ctx(),
         "rows":    rows,
         "ts":      datetime.now().isoformat(timespec="seconds"),
@@ -256,8 +316,14 @@ def get_tasks():
 
 @app.get("/queue")
 def get_queue():
-    """Return the current task queue state (active + pending)."""
-    return task_queue.get_state()
+    """Return the total queued prompt count and the next prompts to be serviced."""
+    queue_state = task_queue.get_state(pending_limit=_QUEUE_PREVIEW_LIMIT)
+    return {
+        "queued_prompt_count": queue_state.get("queued_prompt_count", 0),
+        "next_prompts":        queue_state.get("next_prompts", []),
+        "next_prompts_limit":  queue_state.get("next_prompts_limit", _QUEUE_PREVIEW_LIMIT),
+        "updated_at":          queue_state.get("updated_at"),
+    }
 
 
 # ====================================================================================================
@@ -383,25 +449,76 @@ def post_prompt(session_id: str, body: PromptRequest):
         raise HTTPException(status_code=503, detail="API not yet initialised")
 
     prompt_text = body.prompt.strip()
-    run_id      = f"api_{session_id}_{datetime.now().strftime('%H%M%S%f')}"
+    run_id      = f"api_{session_id}_{uuid.uuid4().hex}"
     run_q       = _make_run_event_queue(run_id)
 
     persist = get_chatsessions_day_dir() / f"{session_id}.json"
     ctx     = SessionContext(session_id=session_id, persist_path=persist)
     history = _load_session_history(session_id)
 
-    is_slash = prompt_text.startswith("/")
-
     def _run(_prompt=prompt_text) -> None:
-        run_q.put_nowait({"type": "start", "run_id": run_id, "prompt": _prompt})
+        _queue_run_event(run_q, {"type": "start", "run_id": run_id, "prompt": _prompt}, priority=True)
         try:
             if _prompt.startswith("/"):
                 # Route through the slash command processor.
                 output_lines: list[str] = []
+                log_file_re     = re.compile(r"^Log file:\s*(.+)$")
+                turn_agent_re   = re.compile(r"^\[TURN\s+(\d+)\]\s+Agent:\s*(.*)$")
+                turn_metrics_re = re.compile(r"^\[TURN\s+(\d+)\]\s+tokens=(\d+)\s+tps=([0-9.]+)$")
+                test_complete_re = re.compile(r"^\[(TEST COMPLETE|ALL TESTS COMPLETE)\]\s+(.+)$")
 
                 def _slash_output(text: str, level: str = "info") -> None:
                     output_lines.append(text)
                     push_log_line(f"[slash] {text}")
+
+                    log_match = log_file_re.match(text.strip())
+                    if log_match:
+                        log_path = log_match.group(1).strip()
+                        _set_latest_log_path(log_path)
+                        _queue_run_event(run_q, {
+                            "type":   "log_file",
+                            "run_id": run_id,
+                            "path":   log_path,
+                        }, priority=True)
+                        return
+
+                    agent_match = turn_agent_re.match(text)
+                    if agent_match:
+                        _queue_run_event(run_q, {
+                            "type":     "test_agent_response",
+                            "run_id":   run_id,
+                            "turn":     int(agent_match.group(1)),
+                            "response": agent_match.group(2),
+                        }, priority=True)
+                        return
+
+                    metrics_match = turn_metrics_re.match(text)
+                    if metrics_match:
+                        _queue_run_event(run_q, {
+                            "type":   "test_agent_metrics",
+                            "run_id": run_id,
+                            "turn":   int(metrics_match.group(1)),
+                            "tokens": int(metrics_match.group(2)),
+                            "tps":    metrics_match.group(3),
+                        }, priority=True)
+                        return
+
+                    test_complete_match = test_complete_re.match(text)
+                    if test_complete_match:
+                        _queue_run_event(run_q, {
+                            "type":   "test_complete",
+                            "run_id": run_id,
+                            "text":   text,
+                            "level":  level,
+                        }, priority=True)
+                        return
+
+                    _queue_run_event(run_q, {
+                        "type":   "progress",
+                        "run_id": run_id,
+                        "text":   text,
+                        "level":  level,
+                    })
 
                 slash_ctx = SlashCommandContext(
                     config          = _config,
@@ -413,15 +530,18 @@ def post_prompt(session_id: str, body: PromptRequest):
                 response = "\n".join(output_lines) if output_lines else (
                     "(done)" if handled else f"Unknown command: {_prompt.split()[0]}"
                 )
-                run_q.put_nowait({
+                _queue_run_event(run_q, {
                     "type":     "response",
                     "run_id":   run_id,
                     "response": response,
                     "tokens":   0,
                     "tps":      "0",
-                })
+                }, priority=True)
             else:
                 log_path = create_log_file_path(log_dir=_LOG_DIR)
+                _set_latest_log_path(log_path)
+                # Notify the run stream client which log file to tail.
+                _queue_run_event(run_q, {"type": "log_file", "run_id": run_id, "path": str(log_path)}, priority=True)
                 with SessionLogger(log_path) as run_logger:
                     run_logger.log_section_file_only(f"API SESSION: {session_id}")
                     response, p_tokens, _c, _ok, tps = orchestrate_prompt(
@@ -434,20 +554,21 @@ def post_prompt(session_id: str, body: PromptRequest):
                     )
                     tps_str = f"{tps:.1f}" if tps > 0 else "0"
                     history.add(_prompt, response)
-                    run_q.put_nowait({
+                    _queue_run_event(run_q, {
                         "type":     "response",
                         "run_id":   run_id,
                         "response": response,
                         "tokens":   p_tokens,
                         "tps":      tps_str,
-                    })
+                    }, priority=True)
         except Exception as exc:
-            run_q.put_nowait({"type": "error", "run_id": run_id, "message": str(exc)})
+            _queue_run_event(run_q, {"type": "error", "run_id": run_id, "message": str(exc)}, priority=True)
         finally:
             finish_run_event_queue(run_id)
 
-    _display = prompt_text[:28] + ("..." if len(prompt_text) > 28 else "")
-    task_queue.enqueue(_display, "api_slash" if is_slash else "api_chat", _run)
+    # Use run_id as the queue name so identical prompts submitted in quick succession
+    # are never deduplicated - dedup only makes sense for scheduled tasks, not user input.
+    task_queue.enqueue(run_id, "api_chat", _run, label=prompt_text[:48])
     return {"run_id": run_id, "session_id": session_id, "queued": True}
 
 
@@ -499,6 +620,16 @@ def list_logs():
                 files = sorted([f.name for f in day_dir.glob("*.txt")], reverse=True)
                 result.append({"date": day_dir.name, "files": files})
     return {"log_dirs": result}
+
+
+@app.get("/logs/latest")
+def get_latest_log():
+    """Return the absolute path of the most recent logfile, if one exists."""
+    latest = _get_latest_log_file()
+    if latest is None:
+        return {"path": None}
+    _set_latest_log_path(latest)
+    return {"path": str(latest)}
 
 
 @app.get("/logs/{date}/{filename}")
@@ -575,7 +706,12 @@ _log_subscribers_lock: threading.Lock    = threading.Lock()
 
 def push_log_line(line: str) -> None:  # noqa: F811 - replaces module-level stub above
     """Push a log line to all active log-stream SSE subscribers."""
-    item = {"type": "log", "text": line, "ts": datetime.now().isoformat(timespec="seconds")}
+    item = {
+        "type": "log",
+        "text": line,
+        "ts":   datetime.now().isoformat(timespec="seconds"),
+        "path": _latest_log_path,
+    }
     with _log_subscribers_lock:
         for sub in list(_log_subscribers):
             try:
@@ -586,21 +722,92 @@ def push_log_line(line: str) -> None:  # noqa: F811 - replaces module-level stub
 
 def _get_log_backfill() -> list[dict]:
     """Return the last _LOG_TAIL_LINES lines from the most recent log file."""
-    if not _LOG_DIR.exists():
+    latest = _get_latest_log_file()
+    if latest is None:
         return []
+    try:
+        lines = latest.read_text(encoding="utf-8", errors="replace").splitlines()
+        tail  = lines[-_LOG_TAIL_LINES:]
+        _set_latest_log_path(latest)
+        return [{"type": "log", "text": ln, "ts": "", "path": str(latest)} for ln in tail]
+    except Exception:
+        return []
+
+
+def _get_latest_log_file() -> Path | None:
+    if not _LOG_DIR.exists():
+        return None
     day_dirs = sorted(_LOG_DIR.iterdir(), reverse=True)
     for day_dir in day_dirs:
         if not day_dir.is_dir():
             continue
         files = sorted(day_dir.glob("*.txt"), reverse=True)
         if files:
-            try:
-                lines = files[0].read_text(encoding="utf-8", errors="replace").splitlines()
-                tail  = lines[-_LOG_TAIL_LINES:]
-                return [{"type": "log", "text": ln, "ts": ""} for ln in tail]
-            except Exception:
-                return []
-    return []
+            return files[0]
+    return None
+
+
+# ----------------------------------------------------------------------------------------------------
+
+@app.get("/logs/file")
+def stream_log_file(path: str):
+    """SSE endpoint: tail a specific log file by absolute path.
+
+    The path must resolve inside _LOG_DIR (validated server-side to prevent traversal).
+    Sends the entire existing file as backfill, then polls for new content by byte offset.
+    """
+    # Security: reject paths that do not resolve inside the log directory.
+    try:
+        requested = Path(path).resolve()
+        requested.relative_to(_LOG_DIR.resolve())
+    except (ValueError, OSError):
+        raise HTTPException(status_code=400, detail="Path outside log directory")
+
+    if not requested.is_file():
+        raise HTTPException(status_code=404, detail="Log file not found")
+
+    def _generate():
+        # Backfill: send entire existing file content first.
+        try:
+            content = requested.read_text(encoding="utf-8", errors="replace")
+            for ln in content.splitlines():
+                yield _sse({"type": "log", "text": ln, "ts": ""})
+        except Exception:
+            pass
+
+        # Set byte offset AFTER backfill so the tail loop only sends genuinely new bytes.
+        try:
+            offset = requested.stat().st_size
+        except OSError:
+            offset = 0
+
+        # Tail: poll for new bytes until shutdown or client disconnect.
+        try:
+            while not _shutdown_event.is_set():
+                try:
+                    size = requested.stat().st_size
+                    if size > offset:
+                        with requested.open("rb") as f:
+                            f.seek(offset)
+                            new_bytes = f.read()
+                        offset = size
+                        new_text = new_bytes.decode("utf-8", errors="replace")
+                        for ln in new_text.splitlines():
+                            if ln:
+                                yield _sse({
+                                    "type": "log",
+                                    "text": ln,
+                                    "ts":   datetime.now().isoformat(timespec="seconds"),
+                                })
+                    else:
+                        yield ": keepalive\n\n"
+                except OSError:
+                    yield ": keepalive\n\n"
+                time.sleep(_LOG_POLL_SECS)
+        except GeneratorExit:
+            pass
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
 
 
 # ====================================================================================================

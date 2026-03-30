@@ -227,7 +227,17 @@ html, body {
     padding:     0 8px 4px;
     font-family: var(--font-mono);
     font-size:   11px;
+    max-height:  220px;
+    min-height:  0;
+    overflow-y:  auto;
+    overflow-x:  hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
 }
+
+#timeline-queue::-webkit-scrollbar       { width: 4px; }
+#timeline-queue::-webkit-scrollbar-track { background: transparent; }
+#timeline-queue::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 .tl-sep {
     color:         var(--text-dim);
@@ -252,6 +262,12 @@ html, body {
     white-space: nowrap;
     overflow:    hidden;
     text-overflow: ellipsis;
+}
+
+.tl-q-more {
+    color:       var(--text-dim);
+    line-height: 1.55;
+    font-style:  italic;
 }
 
 /* Minute-ticker rows */
@@ -427,29 +443,15 @@ html, body {
 #send-btn:disabled { opacity: 0.35; cursor: default; }
 
 /* ============================================================
-   QUEUE BADGE in header
+   VERSION CHIP in header
    ============================================================ */
 
-#queue-badge {
-    font-size: 11px;
+#version-chip {
+    font-size:   10px;
     font-family: var(--font-mono);
-    color: var(--text-dim);
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    color:       var(--text-dim);
+    white-space: nowrap;
 }
-
-#queue-badge .badge-count {
-    background: var(--yellow);
-    color: #000;
-    font-size: 10px;
-    font-weight: 700;
-    padding: 1px 5px;
-    border-radius: 2px;
-    display: none;
-}
-
-#queue-badge .badge-count.visible { display: inline; }
 
 /* ============================================================
    RESPONSIVE COLLAPSE: narrow screens drop timeline

@@ -107,19 +107,19 @@ This step is also run automatically at startup whenever any `skill.md` file is n
 
 ## 8. First run
 
-Single-shot prompt - runs one prompt and exits:
+Start the Web UI / API server:
 ```powershell
-python .\code\main.py --user-prompt "what time is it"
+python .\code\main.py
 ```
 
-Interactive chat mode:
-```powershell
-python .\code\main.py --chat
+Then open:
+```text
+http://localhost:8000/
 ```
 
-Full dashboard (schedule timeline + log + chat):
+Example - target a different Ollama host:
 ```powershell
-python .\code\main.py --dashboard
+python .\code\main.py --ollama-host http://MONTBLANC:11434
 ```
 
 ---
@@ -129,17 +129,11 @@ python .\code\main.py --dashboard
 The `--model` flag accepts a short alias that is matched against installed model tags. For example if `gemma3:27b` is installed, `--model 27b` resolves to it:
 
 ```powershell
-python .\code\main.py --chat --model 27b
-python .\code\main.py --chat --model 12b --num-ctx 16384
+python .\code\main.py --model 27b
+python .\code\main.py --model 12b --num-ctx 16384
 ```
 
-List installed models:
-```powershell
-python .\code\main.py --chat
-/models
-```
-
-Or directly via Ollama:
+List installed models directly via Ollama:
 ```powershell
 ollama list
 ```
@@ -151,7 +145,6 @@ ollama list
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `ollama: command not found` | Ollama not in PATH | Reinstall Ollama and restart terminal |
-| `No module named 'prompt_toolkit'` | Optional package missing | `pip install prompt_toolkit` |
 | Model returns "I cannot" for date/web | Wrong or small model | Try a larger model with `--model 27b` |
 | Skills catalog empty | Never built | Run `python .\code\skills_catalog_builder.py` |
 | LLM call times out | Model too large for VRAM | Use a smaller model or increase swap |

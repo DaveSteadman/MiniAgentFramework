@@ -22,11 +22,7 @@ The project uses a local [Ollama](https://ollama.com) runtime and focuses on tra
 
 | Mode | Purpose | Typical command |
 |---|---|---|
-| [**Single-Shot Mode**](#running-single-shot-mode) | Run one prompt through the full pipeline and exit | `python .\code\main.py --user-prompt "what time is it"` |
-| [**Chat**](#running-chat-mode) | Interactive multi-turn REPL | `python .\code\main.py --chat` |
-| [**Scheduler**](#running-scheduler-mode) | Run scheduled prompt tasks from `controldata/schedules/` unattended | `python .\code\main.py --scheduler` |
-| [**Scheduled Item**](#running-schedule-item-mode) | Run one named scheduled task immediately (debugging aid) | `python .\code\main.py --scheduled-item <name>` |
-| [**Dashboard**](#running-dashboard-mode) | Full terminal UI: schedule timeline, live log tail, and chat combined | `python .\code\main.py --dashboard` |
+| [**Web UI / API**](#running-web-ui--api-mode) | Default runtime. Serves the browser UI, background scheduler, queue panel, log streaming, and chat prompt submission API | `python .\code\main.py` |
 | [**Chat Sequence**](#running-chat-sequence-mode) | Run a pre-defined sequence of prompts sharing a single conversation history | `python .\code\main.py --chat-sequence-file <file.json>` |
 
 ---
@@ -43,62 +39,31 @@ python .\code\skills_catalog_builder.py
 
 ---
 
-## Running: Single-Shot Mode
+## Running: Web UI / API Mode
 
-Runs one prompt through the full pipeline and exits.
+Running `main.py` with no special mode flags starts the FastAPI server and browser UI.
 
 ```powershell
-python .\code\main.py --user-prompt "what version of ollama is in use"
+python .\code\main.py
+python .\code\main.py --ollama-host MONTBLANC
+python .\code\main.py --api-port 8010 --model 20b --num-ctx 65536
 ```
+
+What this mode provides:
+- Browser UI with schedule timeline, queue preview, live logs, and chat panel.
+- Background scheduler for tasks under `controldata/schedules/`.
+- Prompt queue with a separate total queued prompt count and a preview of the next prompts to be serviced.
+- REST API endpoints used by the UI for queue, timeline, logs, history, and prompt submission.
 
 | Option | Default | Description |
 |---|---|---|
-| `--user-prompt TEXT` | `"output the time"` | The prompt to run. |
-| `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` are resolved to the first installed model whose tag contains that string. |
-| `--num-ctx N` | `131072` | Context window size (tokens) passed to Ollama for all LLM calls. |
-| `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address (e.g. `http://MONTBLANC:11434`) or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. Connectivity is checked lazily on the first LLM call, so slash commands work even when the host is unreachable. |
+| `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` resolve to the first installed model whose tag contains that string. |
+| `--num-ctx N` | `131072` | Context window size used for LLM calls. |
+| `--api-port PORT` | `8000` | Port for the web UI/API server. |
+| `--api-host HOST` | `0.0.0.0` | Bind host for the web UI/API server. |
+| `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address such as `http://MONTBLANC:11434` or `https://api.ollama.com`. Falls back to `OLLAMA_HOST`. |
 
-**Example - specify model and context window:**
-```powershell
-python .\code\main.py --user-prompt "summarize system health" --model "20b" --num-ctx 16384
-python .\code\main.py --user-prompt "write the system information to a data/systemstats.csv spreadsheet" --model "gpt-oss:120b" --num-ctx 32768
-python .\code\main.py --user-prompt "write a spreadsheet of numbers to data/sequencenumbers.csv where the first column is the index, then an incrementing prime number, then an incrementing fibonacci number" --model "gpt-oss:120b" --num-ctx 32768
-```
-
----
-
-## Running: Chat Mode
-
-Starts an interactive multi-turn REPL. Type `exit` or `quit` to end the session.
-
-```powershell
-python .\code\main.py --chat
-```
-
-Each turn runs the full orchestration pipeline. The console shows one compact status line per turn:
-
-```
-[Turn 1 | 1,204 / 131,072 ctx tokens (0.9%) | 42.3 tok/s | gemma3:20b]
-```
-
-Verbose orchestration detail (tool rounds, tool outputs, and final synthesis) is written to the log file only, keeping the console readable.
-
-Conversation history is passed as context for each subsequent turn, capped at the last 10 turns to prevent context overflow.
-
-In console chat mode the prompt supports persistent keyboard history (up/down arrows) backed by `controldata/chathistory.json`, shared across all sessions.
-
-Slash commands (see [Slash Commands](#slash-commands) below) are available at the prompt to change model or context size without restarting.
-
-| Option | Default | Description |
-|---|---|---|
-| `--chat` | off | Activates chat mode. |
-| `--model ALIAS` | `"20b"` | Same alias resolution as single-shot mode. |
-| `--num-ctx N` | `131072` | Context window for every turn in the session. |
-
-**Example - chat with a smaller context window:**
-```powershell
-python .\code\main.py --chat --model "20b" --num-ctx 16384
-```
+Open the browser UI at `http://localhost:8000/` unless you changed `--api-port`.
 
 ---
 
@@ -132,39 +97,9 @@ Output lines are tagged so the test wrapper can parse per-turn results:
 
 ---
 
-## Running: Schedule Item Mode
+## Scheduled Tasks
 
-Runs a single named task from the schedule files immediately, bypassing its normal schedule. Useful for debugging a task definition without waiting for its configured time or interval. The `enabled` flag is ignored so disabled tasks can be exercised too.
-
-```powershell
-python .\code\main.py --scheduled-item <name>
-```
-
-Loads all `*.json` files under `controldata/schedules/`, finds the first task whose `name` matches the supplied value, and runs its full prompt sequence in order.
-
-| Option | Default | Description |
-|---|---|---|
-| `--scheduled-item NAME` | *(required)* | Name of the task to run. |
-| `--model ALIAS` | `"20b"` | Ollama model alias or tag. |
-| `--num-ctx N` | `131072` | Context window size. |
-
-**Example:**
-```powershell
-python .\code\main.py --scheduled-item SystemHealth
-python .\code\main.py --scheduled-item morning_web_scan --model "8b"
-```
-
----
-
-## Running: Scheduler Mode
-
-Runs scheduled prompt tasks from `controldata/schedules/` as a background loop. Each `*.json` file in that directory can define one or more tasks with either a daily time (`HH:MM`) or a repeating interval (minutes). Tasks fire unattended and are serialised through the same LLM lock used by all other modes.
-
-```powershell
-python .\code\main.py --scheduler
-```
-
-Press **Ctrl+C** for a clean shutdown - in-flight LLM calls are allowed to complete before exit.
+Scheduled prompt tasks run inside Web UI / API mode. Each `*.json` file in `controldata/schedules/` can define one or more tasks with either a daily time (`HH:MM`) or a repeating interval (minutes). Tasks fire unattended and are serialised through the shared task queue.
 
 Schedule files live in `controldata/schedules/`. Each file must contain a top-level `"tasks"` list:
 
@@ -187,52 +122,19 @@ Schedule files live in `controldata/schedules/`. Each file must contain a top-le
 }
 ```
 
-Each task file is named `task_<name>.json`. Tasks can be created, queried, and managed at runtime - see [Task Management](#task-management) below.
-
-| Option | Default | Description |
-|---|---|---|
-| `--model ALIAS` | `"20b"` | Ollama model used for all scheduled task calls. |
-| `--num-ctx N` | `131072` | Context window for scheduled task calls. |
-
----
-
-## Running: Dashboard Mode
-
-Combines the schedule timeline, live log tail, and chat interface in a single terminal UI. Three panels are always visible: the Ollama status bar at the top, a scrolling schedule timeline on the left, and a tabbed main area (Log / Chat) on the right.
-
-```powershell
-python .\code\main.py --dashboard
-```
-
-![Dashboard screenshot](progress/2026-03-07-UI.png)
-
-| Key | Action |
-|---|---|
-| **Tab** | Switch between Log and Chat tabs |
-| **Enter** | Submit chat prompt (Chat tab) |
-| **↑ / ↓ / PgUp / PgDn** | Scroll the active panel |
-| **Ctrl+C** | Clean shutdown |
-
-Slash commands (see [Slash Commands](#slash-commands) below) are available in the Chat input bar to change model or context size at runtime.
-
-| Option | Default | Description |
-|---|---|---|
-| `--model ALIAS` | `"20b"` | Model used for chat prompts in the dashboard. |
-| `--num-ctx N` | `131072` | Context window for dashboard chat calls. |
-
+Each task file is typically named `task_<name>.json`. Tasks can be created, queried, and managed at runtime - see [Task Management](#task-management) below.
 
 ---
 
 ## Slash Commands
 
-Slash commands are available in **Chat mode** (console), the **Dashboard** chat input bar, and inside **scheduled task prompt lists**. They bypass the orchestration pipeline and take effect immediately.
+Slash commands are available in the **Web UI** chat input and inside **scheduled task prompt lists**. They bypass the orchestration pipeline and take effect immediately.
 
 Type `/help` at any prompt to see the full list. Current commands:
 
 | Command | Description |
 |---|---|
 | `/help` | List all available slash commands |
-| `/exit` | Exit dashboard mode |
 | `/models` | List installed Ollama models; the active model is marked with `►` |
 | `/model <name>` | Switch the active model for all subsequent runs (e.g. `/model 8b`). Accepts the same short aliases as `--model`. Clears conversation history. |
 | `/host <target>` | Switch the active Ollama host without restarting. Clears conversation history. See [Host targeting](#host-targeting) below. |
@@ -252,11 +154,12 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. All results are written to a single combined CSV file (`test_results_<timestamp>_all.csv`) with a banner printed between each suite. Prints a final summary with host, model, elapsed time, and cumulative pass/fail count. |
 | `/recall` | Show a summary of all skill outputs stored in the current session context (URLs fetched, files written, search results, etc.). |
 | `/tasks` | List all scheduled tasks with their status (on/off), schedule, and prompt preview. |
-| `/task enable <name>` | Enable a task by name. The dashboard scheduler picks up the change on its next reload cycle. |
+| `/task enable <name>` | Enable a task by name. The API scheduler picks up the change on its next reload cycle. |
 | `/task disable <name>` | Disable a task without deleting it. |
 | `/task add <name> <schedule> <prompt>` | Create a new task. `schedule` is either a number of minutes (e.g. `60`) or a daily wall-clock time (e.g. `08:30`). |
 | `/task delete <name>` | Permanently delete a task and remove its JSON file if it becomes empty. |
 | `/task run <name>` | Execute a task immediately, outside its normal schedule. Runs the same pipeline as the scheduler - useful for testing a task definition or triggering a one-off run. |
+| `/version` | Show framework version, active model, and context size. |
 
 ### Host targeting
 
@@ -284,7 +187,7 @@ Scheduled tasks can be managed in three complementary ways, depending on the con
 
 ### 1. Slash commands (operator, in-session)
 
-The `/tasks` and `/task` commands manipulate `controldata/schedules/*.json` files directly from the chat input bar or console prompt. Zero LLM involvement - changes are instant and deterministic.
+The `/tasks` and `/task` commands manipulate `controldata/schedules/*.json` files directly from the Web UI chat input. Zero LLM involvement - changes are instant and deterministic.
 
 ```
 /tasks                                          # list all tasks
@@ -295,7 +198,7 @@ The `/tasks` and `/task` commands manipulate `controldata/schedules/*.json` file
 /task delete OldTask
 ```
 
-The dashboard hot-reloads schedule files each poll cycle, so enable/disable/add/delete take effect within seconds without a restart.
+The API scheduler hot-reloads schedule files each poll cycle, so enable/disable/add/delete take effect within seconds without a restart.
 
 ### 2. TaskManagement skill (agent, via natural language)
 
@@ -373,7 +276,7 @@ python .\code\system_check.py --num-ctx 4096
 | Path | Contents |
 |---|---|
 | `controldata/logs/YYYY-MM-DD/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) - one file per run, grouped into dated subfolders. |
-| `controldata/schedules/` | Schedule definition files (`*.json`) consumed by Scheduler and Dashboard modes. |
+| `controldata/schedules/` | Schedule definition files (`*.json`) consumed by the Web UI / API scheduler. |
 | `controldata/test_prompts/` | Prompt suite JSON files used by the `/test` slash command. |
 | `controldata/test_results/` | Timestamped CSV results and analysis files produced by `/test`. |
 

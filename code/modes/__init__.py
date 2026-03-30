@@ -1,1 +1,1 @@
-# Execution-mode modules.  Each module exposes one run_*_mode() function.
+# API mode module - run_api_mode() starts the FastAPI web UI server.

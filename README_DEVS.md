@@ -11,14 +11,13 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 
 ### 1) Orchestration runtime
 - `code/main.py`
-  - Main entrypoint; supports single-shot, chat, scheduler, and dashboard modes via `argparse`.
-  - Runs the tool-calling orchestration pipeline (up to `MAX_ITERATIONS` tool rounds) via `orchestration.py`.
-  - LLM calls are serialised via `task_queue.run_lock` (a `threading.Lock` on the `TaskQueue` instance); `llm_lock` in other modules is an alias for this lock.
-  - Graceful shutdown uses `threading.Event` + SIGINT handler; sleeping loops wake every 0.5 s to check the event.
+  - Main entrypoint; default behaviour is to start the FastAPI server and Web UI.
+  - Supports the browser runtime and the `--chat-sequence-file` test runner mode.
+  - Loads the skills catalog, resolves the model alias, configures the active Ollama host, and hands off to `modes/api_mode.py`.
 
 - `code/chat_input.py`
-  - Provides `prompt_with_history(prompt_text)` for the interactive chat loop in `main.py`.
-  - Wraps `prompt_toolkit` to support up/down arrow navigation through persistent cross-session history.
+  - Provides the persisted history store used by the API history endpoints.
+  - Still exposes `prompt_with_history(prompt_text)` for any local CLI tooling, but the primary runtime consumer is `api.py` via `load_history()` and `append_to_history()`.
   - History is stored in `controldata/chathistory.json` (max 500 entries, consecutive duplicates de-duped).
   - Falls back to plain `input()` when `prompt_toolkit` is not installed.
 
@@ -40,9 +39,9 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - **Cross-task injection**: three-phase tasks (mine -> analyze -> present) share one `SessionContext`. After Phase 1 writes mined files, Phase 2 receives the file paths via `as_inject_block()` without any explicit parameter wiring. The scheduler creates one `SessionContext` per task name and persists it under `controldata/chatsessions/<task_name>.json`.
 
 - `code/slash_commands.py`
-  - Registers and dispatches all `/` commands available in chat, dashboard, and scheduled-task prompts.
+  - Registers and dispatches all `/` commands available in the Web UI chat input and scheduled-task prompts.
   - Each command is a plain function `_cmd_<name>(arg, ctx)` registered in `_REGISTRY` (handler map) and `_DESCRIPTIONS` (help text map).
-  - `SlashCommandContext` dataclass carries the mutable runtime state (model, num_ctx, host, flags) plus an `output(text, style)` callback so handlers can write to either the console or dashboard UI without knowing which.
+  - `SlashCommandContext` dataclass carries the mutable runtime state (model, num_ctx, host, flags) plus an `output(text, style)` callback so handlers can write to the browser-facing runtime without depending on the transport.
   - **`/ctx` unified subcommand:** bare `/ctx` shows the context map and window size; `/ctx size [<n>]` reads or sets the window; `/ctx item <n>` prints the raw message content for a given map index; `/ctx compact <n>` compacts an entry in place and prints the before/after table.
 
 ### 2) LLM + Ollama client layer
@@ -70,7 +69,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 - `code/runtime_logger.py`
   - Sectioned logger with large horizontal separators.
   - Writes evidence logs to `controldata/logs/YYYY-MM-DD/run_YYYYMMDD_HHMMSS.txt`.
-  - In chat mode verbose orchestration detail goes to the log file only; the console shows one compact status line per turn.
+  - Stores the full orchestration evidence used by the Web UI log panel and the test runner.
 
 ### 6) Skills catalog + concrete skills
 - Each skill folder contains a `skill.md` definition file. When adding or editing a skill, follow the
@@ -90,7 +89,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - Persists facts across runs in `code/skills/Memory/memory_store.json` (JSON, schema v2.0).
   - Auto-migrates legacy `memory_store.txt` on first run.
 - `code/skills/WebSearch/` - searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
-- `code/skills/TaskManagement/` - CRUD operations on scheduled task JSON files in `controldata/schedules/`. Exposes `list_tasks()`, `get_task(name)`, `create_task(name, schedule, prompt)`, `set_task_enabled(name, enabled)`, `set_task_schedule(name, schedule)`, `set_task_prompt(name, prompt)`, and `delete_task(name)` as skill functions the model can invoke from natural-language prompts. Each task is stored in its own `task_<name>.json` file; the dashboard scheduler hot-reloads changes within its next poll cycle.
+- `code/skills/TaskManagement/` - CRUD operations on scheduled task JSON files in `controldata/schedules/`. Exposes `list_tasks()`, `get_task(name)`, `create_task(name, schedule, prompt)`, `set_task_enabled(name, enabled)`, `set_task_schedule(name, schedule)`, `set_task_prompt(name, prompt)`, and `delete_task(name)` as skill functions the model can invoke from natural-language prompts. Each task is stored in its own `task_<name>.json` file; the API scheduler hot-reloads changes within its next poll cycle.
 - `code/skills/Scratchpad/`
   - In-session key/value store backed by the module-level `_STORE` dict in `code/scratchpad.py`.
   - Does not persist to disk; lives only for the duration of the process.
@@ -102,20 +101,23 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 - `code/scheduler.py`
   - `load_schedules_dir(dir)` - globs all `*.json` files in the given directory, merges their `"tasks"` lists, and skips malformed files with a stderr warning.
   - `is_task_due(task, last_run, now)` - evaluates `"interval"` (minutes since last run) and `"daily"` (HH:MM wall clock) task types.
-  - `llm_lock` - module-level alias for `task_queue.run_lock`; imported by all modes that call the LLM to serialise access.
+  - `TaskQueue.get_state(pending_limit=...)` - returns an internal queue snapshot used by the API layer to build the public queue DTO.
+  - `llm_lock` - module-level alias for `task_queue.run_lock`; imported by all code paths that must serialise LLM access.
 
-### 8) Terminal UI
-- `code/ui/dashboard_app.py`
-  - `DashboardApp` - 4-panel diff-based ANSI terminal UI running at 50 fps via `msvcrt.kbhit()`.
-  - Panels: Ollama status bar (top), schedule timeline (left), tabbed log/chat area (right), chat input (bottom).
-  - Three daemon threads: `_ollama_poll` (model status), `_log_tail` (log file), `_scheduler_loop` (scheduled tasks).
+### 8) Web UI and API
+- `code/api.py`
+  - Defines the FastAPI app, REST endpoints, SSE endpoints, and static asset handlers for the browser UI.
+  - `/queue` returns a minimal public DTO: `queued_prompt_count`, `next_prompts`, `next_prompts_limit`, and `updated_at`.
+  - `/runs/{id}/stream` provides per-run SSE events; `/logs/stream` and `/logs/file` provide global and per-run log tailing.
 
-- `code/ui/widgets.py`
-  - `ScrollLog`, `TextEdit`, `Label`, `TimelineWidget`.
-  - `TimelineWidget` draws a minute-resolution timeline centred on the current time; `►` marks the current minute; task markers are derived from schedule definitions.
+- `code/modes/api_mode.py`
+  - Starts uvicorn, publishes shared scheduler state into `api.py`, and runs the background scheduler thread.
+  - On Windows it selects the selector event loop policy before starting uvicorn to avoid noisy Proactor disconnect callbacks under browser/SSE churn.
 
-- `code/ui/screen.py` - diff-based ANSI renderer; only changed cells are re-emitted to the terminal.
-- `code/ui/panel.py`, `code/ui/colors.py`, `code/ui/keys.py` - layout primitives, ANSI colour constants, key code definitions.
+- `code/ui/index.html`, `code/ui/app.js`, `code/ui/style.css`
+  - Static browser UI assets served directly by `api.py` with `Cache-Control: no-store`.
+  - `app.js` drives queue polling, schedule timeline rendering, prompt submission, input history, and SSE run/log streams.
+  - The queue subpanel shows a separate queued prompt total and the next prompts to be serviced.
 
 ### 9) Test tooling
 - `testcode/test_wrapper.py`
@@ -175,7 +177,9 @@ All runtime dependencies are listed in [`requirements.txt`](requirements.txt).
 |---|---|---|---|
 | `beautifulsoup4` | ≥ 4.12 | WebFetch skill | Optional but strongly recommended. Falls back to stdlib `html.parser` if absent, but bs4 gives much cleaner extraction from real-world pages. |
 | `psutil` | ≥ 5.9 | `system_check.py` | Provides RAM, disk, and CPU metrics. |
-| `prompt_toolkit` | ≥ 3.0 | `chat_input.py` | Enables up/down arrow history in the console chat prompt. Optional - falls back to plain `input()` if not installed. |
+| `prompt_toolkit` | ≥ 3.0 | `chat_input.py` | Optional helper for local CLI tooling that still uses `prompt_with_history()`. |
+| `fastapi` | ≥ 0.110 | `api.py` | REST API and browser UI server. |
+| `uvicorn` | ≥ 0.29 | `modes/api_mode.py` | ASGI server used to host the FastAPI app. |
 
 All other imports (`urllib`, `json`, `re`, `threading`, `pathlib`, …) are Python stdlib.
 
@@ -199,7 +203,7 @@ python .\code\skills_catalog_builder.py
 
 ---
 
-## Project Flow (Single-Shot / Chat Turn)
+## Project Flow (Web UI Prompt / Scheduled Prompt)
 
 The orchestration design is intentionally singular: one pipeline, one LLM, one native tool-calling loop. There is no separate planning stage, no separate finalisation stage, and no fixed number of steps. The model decides when it is done.
 
@@ -265,11 +269,7 @@ Each LLM call reports completion token throughput in the log:
 Round 1 TPS: 42.3 tok/s  (87 tokens)
 ```
 
-In chat mode TPS also appears in the per-turn console status line:
-
-```
-[Turn 1 | 1,204 / 131,072 ctx tokens (0.9%) | 42.3 tok/s | gemma3:20b]
-```
+Token throughput is captured in the runtime logs and streamed into the Web UI log panel.
 
 These values come directly from Ollama's `eval_duration` field and reflect model generation speed only (prompt evaluation time is tracked separately).
 
@@ -280,7 +280,7 @@ These values come directly from Ollama's `eval_duration` field and reflect model
 ```
 code/                        Main Python source; all imports are relative to this directory.
   skills/                    One subdirectory per skill; each has skill.md + implementation.
-  ui/                        Terminal UI components (dashboard only).
+  ui/                        Browser UI static assets (index.html, app.js, style.css).
 controldata/
   logs/YYYY-MM-DD/            Runtime evidence logs (run_YYYYMMDD_HHMMSS.txt) in dated subfolders.
   schedules/                 Schedule definition JSON files (*.json).

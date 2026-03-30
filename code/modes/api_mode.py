@@ -4,11 +4,10 @@
 # API execution mode for MiniAgentFramework.
 #
 # Provides run_api_mode(), which:
-#   - Loads schedules and initialises the task queue (same as dashboard/scheduler modes)
-#   - Wires up api.py's push_log_line as the LLM-call log sink so all log output is
-#     broadcast to connected /logs/stream SSE clients
-#   - Starts a background scheduler thread so scheduled tasks still fire
-#   - Launches uvicorn to serve the FastAPI app on localhost:8000
+#   - Loads schedules and initialises the task queue
+#   - Wires up api.py's push_log_line as the LLM-call log sink
+#   - Starts a background scheduler thread so scheduled tasks fire
+#   - Launches uvicorn to serve the FastAPI app
 #
 # Related modules:
 #   - api.py              -- FastAPI app, all endpoints, setup(), push_log_line()
@@ -22,7 +21,7 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
-import signal
+import asyncio
 import sys
 import threading
 import time
@@ -77,6 +76,9 @@ def run_api_mode(
     as written to the log file.
     """
     import uvicorn
+
+    if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     shutdown = threading.Event()
 
@@ -167,17 +169,6 @@ def run_api_mode(
     sched_thread = threading.Thread(target=_scheduler_loop, daemon=True, name="api-scheduler")
     sched_thread.start()
 
-    # -----------------------------------------------------------------------
-    # Graceful shutdown on Ctrl+C.
-    # -----------------------------------------------------------------------
-    original_sigint = signal.getsignal(signal.SIGINT)
-
-    def _on_sigint(sig, frame):
-        shutdown.set()
-        signal.signal(signal.SIGINT, original_sigint)
-
-    signal.signal(signal.SIGINT, _on_sigint)
-
     push_log_line(f"[API] Server starting on http://{host}:{port}")
     print(f"\nAPI mode - http://{host}:{port}  (Ctrl+C to stop)", flush=True)
     print(f"Web UI:   http://localhost:{port}/", flush=True)
@@ -190,14 +181,22 @@ def run_api_mode(
     )
     server = uvicorn.Server(uvicorn_config)
 
+    # Run uvicorn in a background thread. When server.run() is not on the main thread,
+    # uvicorn's capture_signals() context manager detects the non-main thread and skips
+    # all signal installation entirely, so it never calls signal.raise_signal() and the
+    # CancelledError/KeyboardInterrupt tracebacks do not occur.
+    server_thread = threading.Thread(target=server.run, daemon=True, name="uvicorn")
+    server_thread.start()
+
+    # Main thread owns signal handling.
     try:
-        server.run()
+        while server_thread.is_alive():
+            server_thread.join(timeout=0.5)
     except KeyboardInterrupt:
-        # uvicorn re-raises SIGINT after its own cleanup via signal.raise_signal();
-        # absorb it here so we get a clean exit instead of a traceback.
         pass
     finally:
         shutdown.set()
-        signal.signal(signal.SIGINT, original_sigint)
+        server.should_exit = True
+        server_thread.join(timeout=10)
         print("\nAPI server stopped.", flush=True)
         logger.log("[API] Server stopped.")

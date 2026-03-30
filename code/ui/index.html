@@ -23,9 +23,7 @@
             <span id="ollama-ctx" class="info-chip"></span>
         </div>
         <div class="sep"></div>
-        <div id="queue-badge">
-            queue <span id="queue-badge-count" class="badge-count">0</span>
-        </div>
+        <div id="version-chip"></div>
     </header>
 
     <!-- ================================================
@@ -47,7 +45,7 @@
         <div class="panel" id="panel-log">
             <div class="panel-header">
                 <div class="dot"></div>
-                Log
+                <span id="log-panel-title">Log</span>
                 <span class="header-spacer"></span>
                 <button class="wrap-btn wrap-active" id="wrap-btn-log" onclick="toggleWrap('log-body','wrap-btn-log')">wrap</button>
             </div>
@@ -82,6 +80,6 @@
     </div><!-- #main-grid -->
 </div><!-- #layout -->
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

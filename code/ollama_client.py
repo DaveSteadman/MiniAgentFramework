@@ -261,6 +261,7 @@ def ensure_ollama_running(
     host: str | None = None,
     start_if_needed: bool = True,
     wait_seconds: float = 20.0,
+    verbose: bool = False,
 ) -> None:
     host = host or _active_host
     if is_ollama_running(host=host):
@@ -269,11 +270,15 @@ def ensure_ollama_running(
     if not start_if_needed or not _is_local_host(host):
         raise RuntimeError(f"Ollama is not reachable at {host}")
 
+    if verbose:
+        print(f"Starting Ollama at {host}...", flush=True)
     start_ollama_server()
     # Poll until the server responds or the deadline expires, then raise if still unreachable.
     deadline = time.time() + wait_seconds
     while time.time() < deadline:
         if is_ollama_running(host=host):
+            if verbose:
+                print("Ollama is ready.", flush=True)
             return
         time.sleep(0.5)
 

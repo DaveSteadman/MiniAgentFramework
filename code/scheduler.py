@@ -24,11 +24,10 @@
 # Queue state is persisted to controldata/task_queue.json on every enqueue/dequeue so the
 # dashboard and other tooling can observe pending and active tasks.
 #
-# The run_scheduler_mode function lives in main.py alongside run_chat_mode so that
-# orchestrate_prompt is accessible without a circular import.
+# The scheduler loop lives in modes/api_mode.py.
 #
 # Related modules:
-#   - main.py    -- imports this module and contains run_scheduler_mode
+#   - modes/api_mode.py -- uses task_queue, load_schedules_dir, is_task_due
 # ====================================================================================================
 
 
@@ -84,7 +83,7 @@ class TaskQueue:
         return self._run_lock
 
     # ----------------------------------------------------------------------------------------------------
-    def enqueue(self, name: str, kind: str, fn) -> bool:
+    def enqueue(self, name: str, kind: str, fn, label: str = "") -> bool:
         """Append *fn* to the execution queue.
 
         Returns False without enqueueing if *name* already appears in the queue or is
@@ -96,6 +95,7 @@ class TaskQueue:
             self._deque.append({
                 "name":      name,
                 "kind":      kind,
+                "label":     label,
                 "queued_at": datetime.now().isoformat(timespec="seconds"),
                 "fn":        fn,
             })
@@ -105,18 +105,49 @@ class TaskQueue:
         return True
 
     # ----------------------------------------------------------------------------------------------------
-    def get_state(self) -> dict:
+    def get_state(self, pending_limit: int | None = None) -> dict:
         """Return a JSON-serialisable snapshot of current queue state."""
         with self._state_lock:
+            active        = dict(self._active) if self._active else None
+            pending_count = len(self._deque)   # authoritative count before any preview truncation
+            queue_count   = pending_count + (1 if active else 0)
+            pending_items = list(self._deque)
+            if pending_limit is not None:
+                visible_pending_limit = max(0, pending_limit - (1 if active else 0))
+                pending_items = pending_items[:visible_pending_limit]
             pending = [
-                {"name": item["name"], "kind": item["kind"], "queued_at": item["queued_at"]}
-                for item in self._deque
+                {"name": item["name"], "kind": item["kind"], "label": item.get("label", ""), "queued_at": item["queued_at"]}
+                for item in pending_items
             ]
-            active = dict(self._active) if self._active else None
+            next_prompts: list[dict] = []
+            if active:
+                next_prompts.append({
+                    "name":       active["name"],
+                    "kind":       active["kind"],
+                    "label":      active.get("label", ""),
+                    "started_at": active.get("started_at"),
+                    "state":      "active",
+                })
+            next_prompts.extend([
+                {
+                    "name":      item["name"],
+                    "kind":      item["kind"],
+                    "label":     item.get("label", ""),
+                    "queued_at": item["queued_at"],
+                    "state":     "pending",
+                }
+                for item in pending_items
+            ])
         return {
-            "active":     active,
-            "pending":    pending,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "active":                active,
+            "pending":               pending,
+            "pending_count":         pending_count,
+            "queue_count":           queue_count,
+            "queued_prompt_count":   queue_count,
+            "next_prompts":          next_prompts,
+            "next_prompts_limit":    pending_limit,
+            "pending_preview_limit": pending_limit,
+            "updated_at":            datetime.now().isoformat(timespec="seconds"),
         }
 
     # ----------------------------------------------------------------------------------------------------
@@ -173,6 +204,7 @@ class TaskQueue:
                         self._active     = {
                             "name":       item["name"],
                             "kind":       item["kind"],
+                            "label":      item.get("label", ""),
                             "started_at": datetime.now().isoformat(timespec="seconds"),
                         }
 

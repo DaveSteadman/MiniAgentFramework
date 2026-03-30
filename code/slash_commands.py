@@ -551,9 +551,9 @@ def _run_one_test_file(
     subprocess_mod,
     sys_mod,
     output_file=None,
-) -> tuple[int, int]:
+) -> dict:
     # Run a single test file via test_wrapper.py and stream output to ctx.
-    # Returns (passed, total) - both 0 if summary line was not emitted.
+    # Returns parsed test metrics for summary output.
     cmd = [
         sys_mod.executable, str(wrapper),
         "--prompts-file", str(candidate),
@@ -566,7 +566,11 @@ def _run_one_test_file(
     cmd += ["--source-file", candidate.name]
 
     _summary_re = re_mod.compile(r"^\[TEST_SUMMARY\] passed=(\d+) total=(\d+)$")
+    _metrics_re = re_mod.compile(r"^\[TURN\s+(\d+)\]\s+tokens=(\d+)\s+tps=([0-9.]+)$")
     test_passed = test_total = None
+    prompt_tokens_total = 0
+    tps_sum             = 0.0
+    tps_samples         = 0
     try:
         proc = subprocess_mod.Popen(
             cmd,
@@ -582,21 +586,53 @@ def _run_one_test_file(
                 test_passed = int(m.group(1))
                 test_total  = int(m.group(2))
             else:
+                metrics_match = _metrics_re.match(stripped)
+                if metrics_match:
+                    prompt_tokens_total += int(metrics_match.group(2))
+                    turn_tps = float(metrics_match.group(3))
+                    if turn_tps > 0:
+                        tps_sum     += turn_tps
+                        tps_samples += 1
                 ctx.output(stripped, "dim")
         proc.wait()
     except Exception as exc:
         ctx.output(f"Error running {candidate.name}: {exc}", "error")
-        return 0, 0
+        return {
+            "passed":        0,
+            "total":         0,
+            "prompt_tokens": 0,
+            "tps_sum":       0.0,
+            "tps_samples":   0,
+        }
 
     if test_passed is not None:
         level = "success" if test_passed == test_total else "error"
         ctx.output(f"[Test: {candidate.name}  Passed {test_passed}/{test_total}]", level)
-        return test_passed, test_total
+        pass_rate = (100.0 * test_passed / test_total) if test_total else 0.0
+        avg_tps   = (tps_sum / tps_samples) if tps_samples else 0.0
+        ctx.output(
+            f"[TEST COMPLETE] {candidate.name} | pass rate={pass_rate:.0f}% ({test_passed}/{test_total})"
+            f" | prompt tokens={prompt_tokens_total:,} | avg tok/s={avg_tps:.1f}",
+            level,
+        )
+        return {
+            "passed":        test_passed,
+            "total":         test_total,
+            "prompt_tokens": prompt_tokens_total,
+            "tps_sum":       tps_sum,
+            "tps_samples":   tps_samples,
+        }
     elif proc.returncode == 0:
         ctx.output(f"[Test: {candidate.name}  completed (no summary)]", "dim")
     else:
         ctx.output(f"[Test: {candidate.name}  exited with code {proc.returncode}]", "error")
-    return 0, 0
+    return {
+        "passed":        0,
+        "total":         0,
+        "prompt_tokens": prompt_tokens_total,
+        "tps_sum":       tps_sum,
+        "tps_samples":   tps_samples,
+    }
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -699,6 +735,9 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
             _ctx.output(f"Results file: {_shared_output}", "dim")
             total_passed = 0
             total_tests  = 0
+            total_prompt_tokens = 0
+            total_tps_sum       = 0.0
+            total_tps_samples   = 0
             wall_start   = time.monotonic()
             _bar = "=" * 47
             for idx, candidate in enumerate(_files, start=1):
@@ -706,19 +745,25 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
                 _ctx.output(f"= Test Suite: {candidate.stem}", "info")
                 _ctx.output(_bar, "info")
                 _ctx.output(f"[{idx}/{len(_files)}] Starting: {candidate.name}", "info")
-                p, t = _run_one_test_file(
+                result = _run_one_test_file(
                     candidate, _ctx, _wrapper, _model, _host, re, subprocess, sys,
                     output_file=_shared_output,
                 )
-                total_passed += p
-                total_tests  += t
+                total_passed       += result["passed"]
+                total_tests        += result["total"]
+                total_prompt_tokens += result["prompt_tokens"]
+                total_tps_sum      += result["tps_sum"]
+                total_tps_samples  += result["tps_samples"]
             elapsed   = time.monotonic() - wall_start
             mins, sec = divmod(int(elapsed), 60)
             time_str  = f"{mins}m {sec}s" if mins else f"{sec}s"
             level     = "success" if total_passed == total_tests and total_tests > 0 else "error"
+            pass_rate = (100.0 * total_passed / total_tests) if total_tests else 0.0
+            avg_tps   = (total_tps_sum / total_tps_samples) if total_tps_samples else 0.0
             _ctx.output(
                 f"[ALL TESTS COMPLETE]  host={_host}  model={_model}  "
-                f"elapsed={time_str}  passed={total_passed}/{total_tests}",
+                f"elapsed={time_str}  pass rate={pass_rate:.0f}% ({total_passed}/{total_tests})"
+                f"  prompt tokens={total_prompt_tokens:,}  avg tok/s={avg_tps:.1f}",
                 level,
             )
             _run_post_test_checks(_ctx, _shared_output, _wrapper.parent, subprocess, sys)
@@ -781,6 +826,14 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _cmd_version(arg: str, ctx: SlashCommandContext) -> None:
+    from version import __version__
+    ctx.output(f"MiniAgentFramework {__version__}", "info")
+    ctx.output(f"  model:   {ctx.config.resolved_model}", "item")
+    ctx.output(f"  num_ctx: {ctx.config.num_ctx:,}", "item")
+
+
+# ----------------------------------------------------------------------------------------------------
 def _cmd_sandbox(arg: str, ctx: SlashCommandContext) -> None:
     import sys
     from pathlib import Path
@@ -1190,6 +1243,7 @@ _REGISTRY: dict[str, Callable] = {
     "/recall":        _cmd_recall,
     "/tasks":         _cmd_tasks,
     "/task":          _cmd_task,
+    "/version":        _cmd_version,
 }
 
 _DESCRIPTIONS: dict[str, str] = {
@@ -1212,4 +1266,5 @@ _DESCRIPTIONS: dict[str, str] = {
     "/recall":        "Show a summary of prior skill outputs stored in this session's context",
     "/tasks":         "List all scheduled tasks with status, schedule, and first prompt",
     "/task":          "enable|disable|add|delete|run <name> [schedule] [prompt]  Manage scheduled tasks; /task run <name> executes a task immediately",
+    "/version":        "Show framework version, active model, and context size",
 }

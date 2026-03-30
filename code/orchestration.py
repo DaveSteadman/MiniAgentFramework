@@ -12,7 +12,7 @@
 #
 # Related modules:
 #   - main.py                    -- creates config, dispatches modes
-#   - modes/dashboard.py         -- run_dashboard_mode
+#   - modes/api_mode.py         -- run_api_mode
 #   - skill_executor.py          -- execute_tool_call (executes individual skill calls)
 #   - skills_catalog_builder.py  -- build_tool_definitions (generates JSON Schema tool specs)
 #   - ollama_client.py           -- call_llm_chat (/v1/chat/completions with tools support)

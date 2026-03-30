@@ -1,5 +1,1 @@
-from .app           import App
-from .dashboard_app import DashboardApp
-from .panel         import Panel
-from .screen        import Screen
-from .widgets       import ScrollLog, TextEdit
+# Web UI static files live in this directory (index.html, app.js, style.css).

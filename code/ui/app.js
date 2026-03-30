@@ -11,18 +11,22 @@ const SESSION_ID        = "web_" + Date.now();
 const POLL_OLLAMA_MS    = 10_000;
 const POLL_QUEUE_MS     = 3_000;
 const POLL_TIMELINE_MS  = 30_000;
+const POLL_LATEST_LOG_MS = 1_000;
+const MAX_QUEUE_ITEMS   = 10;
 const MAX_LOG_LINES     = 500;
 const MAX_CHAT_MESSAGES = 200;
 
 // ====================================================================================================
 // MARK: STATE
 // ====================================================================================================
-let _logLines    = [];
-let _activeRunId  = null;
-let _runEventSource = null;
+let _logLines       = [];
 let _logEventSource = null;
-let _inputHistory = [];      // loaded from server on init, mirrors chathistory.json
-let _historyIdx   = -1;      // -1 = not browsing history
+let _inputHistory   = [];     // loaded from server on init, mirrors chathistory.json
+let _historyIdx        = -1;     // -1 = not browsing history
+let _ollamaReachable   = true;   // updated by refreshOllamaStatus; used in submitPrompt
+let _timelineRefreshTimer = null;
+let _queueResizeObserver  = null;
+let _currentLogPath       = "";
 
 // ====================================================================================================
 // MARK: DOM REFS
@@ -34,7 +38,7 @@ const dom = {
     ollamaHost:   () => $("ollama-host"),
     ollamaModel:  () => $("ollama-model"),
     ollamaCtx:    () => $("ollama-ctx"),
-    queueBadge:   () => $("queue-badge-count"),
+    versionChip:  () => $("version-chip"),
     timeline:     () => $("timeline-ticker"),
     timelineQueue: () => $("timeline-queue"),
     log:          () => $("log-body"),
@@ -73,6 +77,7 @@ async function refreshOllamaStatus() {
         dom.ollamaModel().textContent = "";
         dom.ollamaCtx().textContent   = "";
         dom.ollamaDot().className = "off";
+        _ollamaReachable = false;
         return;
     }
     // Update text BEFORE dot so the two are never mismatched.
@@ -85,9 +90,10 @@ async function refreshOllamaStatus() {
     // Additional per-row detail: size and processor.
     const detail    = [first.size, first.processor].filter(Boolean).join("  ");
     dom.ollamaHost().textContent  = data.host  || "";
-    dom.ollamaModel().textContent = modelName  || (rows.length === 0 ? "no model loaded" : "");
+    dom.ollamaModel().textContent = modelName  || data.model || "";
     dom.ollamaCtx().textContent   = ctxVal;
     dom.ollamaDot().className = "on";
+    _ollamaReachable = true;
 }
 
 // ====================================================================================================
@@ -97,40 +103,53 @@ async function refreshOllamaStatus() {
 async function refreshQueue() {
     const data = await apiFetch("/queue");
     if (!data) return;
-    const pending = (data.pending || []).length;
-    const active  = data.active ? 1 : 0;
-    const total   = pending + active;
-    const badge   = dom.queueBadge();
-    badge.textContent = total;
-    badge.classList.toggle("visible", total > 0);
     _renderTimelineQueue(data);
+    _scheduleTimelineRefresh();
+}
+
+// ----------------------------------------------------------------------------------------------------
+async function refreshVersion() {
+    const data = await apiFetch("/version");
+    if (!data) return;
+    dom.versionChip().textContent = "v" + data.version;
+}
+
+function _queueItemLabel(item) {
+    if (item.label) return item.label.length > 40 ? item.label.slice(0, 40) + "..." : item.label;
+    if (item.kind && item.kind !== "api_chat") return item.name;
+    return item.name.slice(-8);  // last 8 chars of run_id as fallback
 }
 
 function _renderTimelineQueue(queueData) {
-    const el      = dom.timelineQueue();
+    const el           = dom.timelineQueue();
     if (!el) return;
-    const active  = queueData.active;
-    const pending = queueData.pending || [];
-    el.innerHTML  = "";
-    if (!active && pending.length === 0) return;
+    const nextPrompts  = queueData.next_prompts || [];
+    const queuedTotal  = queueData.queued_prompt_count !== undefined ? String(queueData.queued_prompt_count) : "?";
+    const previewLimit = queueData.next_prompts_limit !== undefined ? queueData.next_prompts_limit : MAX_QUEUE_ITEMS;
+    el.innerHTML       = "";
+    if (queuedTotal === "0" && nextPrompts.length === 0) return;
 
-    const sep = document.createElement("div");
-    sep.className   = "tl-sep";
-    sep.textContent = "Queue";
-    el.appendChild(sep);
+    const totalRow = document.createElement("div");
+    totalRow.className   = "tl-sep";
+    totalRow.textContent = "Queued prompts: " + queuedTotal;
+    el.appendChild(totalRow);
 
-    if (active) {
+    for (const item of nextPrompts) {
         const row = document.createElement("div");
-        row.className   = "tl-q-active";
-        row.textContent = "\u25B6 " + (active.name || "?");
+        row.className   = item.state === "active" ? "tl-q-active" : "tl-q-pending";
+        row.textContent = item.state === "active"
+            ? "\u25B6 " + _queueItemLabel(item)
+            : "  \u00B7 " + _queueItemLabel(item);
         el.appendChild(row);
     }
-    for (const item of pending) {
-        const row = document.createElement("div");
-        row.className   = "tl-q-pending";
-        row.textContent = "  \u00B7 " + (item.name || "?");
-        el.appendChild(row);
-    }
+}
+
+// ----------------------------------------------------------------------------------------------------
+function _scheduleTimelineRefresh() {
+    clearTimeout(_timelineRefreshTimer);
+    _timelineRefreshTimer = setTimeout(() => {
+        refreshTimeline();
+    }, 50);
 }
 
 // ====================================================================================================
@@ -223,6 +242,7 @@ function _logLineClass(text) {
 
 function appendLogLine(text) {
     const el    = dom.log();
+    const shouldStick = _isLogNearBottom();
     const div   = document.createElement("div");
     div.className = "log-line " + _logLineClass(text);
     div.textContent = text;
@@ -233,15 +253,60 @@ function appendLogLine(text) {
         const old = _logLines.shift();
         old.remove();
     }
-    el.scrollTop = el.scrollHeight;
+    if (shouldStick) {
+        el.scrollTop = el.scrollHeight;
+    }
+}
+
+function clearLogLines() {
+    _logLines = [];
+    dom.log().innerHTML = "";
+}
+
+function _displayLogPath(path) {
+    if (!path) return "";
+    const normalized = path.replace(/\\/g, "/");
+    const logsIdx    = normalized.lastIndexOf("/logs/");
+    return logsIdx >= 0
+        ? "controldata/logs" + normalized.slice(logsIdx + 5)
+        : normalized.split("/").slice(-2).join("/");
+}
+
+function _isLogNearBottom() {
+    const el = dom.log();
+    const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+    return remaining <= 12;
+}
+
+function _setLogPanelTitle(path) {
+    const titleEl = $("log-panel-title");
+    if (!titleEl) return;
+    const displayPath = _displayLogPath(path);
+    titleEl.textContent = displayPath ? "Log: " + displayPath : "Log";
+}
+
+function _setChatMessageMeta(wrap, meta) {
+    if (!wrap || !meta) return;
+    let metaEl = wrap.querySelector(".msg-meta");
+    if (!metaEl) {
+        metaEl = document.createElement("div");
+        metaEl.className = "msg-meta";
+        wrap.appendChild(metaEl);
+    }
+    metaEl.textContent = meta;
 }
 
 function startLogStream() {
     if (_logEventSource) _logEventSource.close();
+    _currentLogPath = "";
     _logEventSource = new EventSource(API_BASE + "/logs/stream");
     _logEventSource.onmessage = e => {
         try {
             const data = JSON.parse(e.data);
+            if (data.path) {
+                _currentLogPath = data.path;
+                _setLogPanelTitle(data.path);
+            }
             if (data.text !== undefined) appendLogLine(data.text);
         } catch { appendLogLine(e.data); }
     };
@@ -249,6 +314,42 @@ function startLogStream() {
         // Reconnect after a short wait.
         setTimeout(startLogStream, 3000);
     };
+}
+
+// ----------------------------------------------------------------------------------------------------
+
+function _switchLogStream(path) {
+    if (!path) return;
+    _currentLogPath = path;
+    _setLogPanelTitle(path);
+
+    clearLogLines();
+    if (_logEventSource) {
+        _logEventSource.close();
+        _logEventSource = null;
+    }
+    _logEventSource = new EventSource(API_BASE + "/logs/file?path=" + encodeURIComponent(path));
+    _logEventSource.onmessage = e => {
+        try {
+            const data = JSON.parse(e.data);
+            if (data.path) {
+                _currentLogPath = data.path;
+                _setLogPanelTitle(data.path);
+            }
+            if (data.text !== undefined) appendLogLine(data.text);
+        } catch { appendLogLine(e.data); }
+    };
+    _logEventSource.onerror = () => {
+        // Let the latest-log poller reopen the active file if this connection drops.
+        _currentLogPath = "";
+    };
+}
+
+async function refreshLatestLogFile() {
+    const data = await apiFetch("/logs/latest");
+    if (!data || !data.path) return;
+    if (data.path === _currentLogPath) return;
+    _switchLogStream(data.path);
 }
 
 // ====================================================================================================
@@ -283,19 +384,18 @@ function appendChatMessage(role, text, meta) {
     return wrap;
 }
 
-function appendThinking() {
+function appendThinking(runId) {
     const el   = dom.chat();
     const wrap = document.createElement("div");
     wrap.className = "chat-thinking";
-    wrap.id        = "thinking-indicator";
+    wrap.setAttribute("data-run-id", runId);
     wrap.textContent = "thinking...";
     el.appendChild(wrap);
     el.scrollTop = el.scrollHeight;
-    return wrap;
 }
 
-function removeThinking() {
-    const el = $("thinking-indicator");
+function removeThinking(runId) {
+    const el = dom.chat().querySelector(".chat-thinking[data-run-id='" + runId + "']");
     if (el) el.remove();
 }
 
@@ -304,51 +404,62 @@ function removeThinking() {
 // ====================================================================================================
 
 function listenRun(runId) {
-    if (_runEventSource) _runEventSource.close();
-    _runEventSource = new EventSource(API_BASE + "/runs/" + encodeURIComponent(runId) + "/stream");
+    // Each run gets its own EventSource so concurrent in-flight requests
+    // do not cancel each other.
+    const es = new EventSource(API_BASE + "/runs/" + encodeURIComponent(runId) + "/stream");
+    const testTurnMessages = new Map();
 
-    _runEventSource.onmessage = e => {
+    es.onmessage = e => {
         try {
             const ev = JSON.parse(e.data);
             if (ev.type === "start") {
-                appendThinking();
+                appendChatMessage("user", ev.prompt);
+                if (ev.prompt && ev.prompt.startsWith("/")) {
+                    startLogStream();
+                }
+                appendThinking(runId);
+            } else if (ev.type === "log_file") {
+                _switchLogStream(ev.path);
+            } else if (ev.type === "test_agent_response") {
+                const wrap = appendChatMessage("agent", ev.response, "turn " + ev.turn);
+                testTurnMessages.set(String(ev.turn), wrap);
+            } else if (ev.type === "test_agent_metrics") {
+                const wrap = testTurnMessages.get(String(ev.turn));
+                const meta = "turn " + ev.turn + " | " + Number(ev.tokens).toLocaleString() + " ctx" + (ev.tps && ev.tps !== "0" ? " | " + ev.tps + " tok/s" : "");
+                if (wrap) {
+                    _setChatMessageMeta(wrap, meta);
+                } else {
+                    appendChatMessage("agent", "[Turn " + ev.turn + " metrics]", meta);
+                }
+            } else if (ev.type === "test_complete") {
+                appendChatMessage("agent", ev.text);
+            } else if (ev.type === "progress") {
+                appendChatMessage("agent", ev.text);
             } else if (ev.type === "response") {
-                removeThinking();
+                removeThinking(runId);
                 const meta = ev.tokens ? ev.tokens.toLocaleString() + " ctx" + (ev.tps && ev.tps !== "0" ? " | " + ev.tps + " tok/s" : "") : "";
                 appendChatMessage("agent", ev.response, meta);
-                setInputEnabled(true);
             } else if (ev.type === "error") {
-                removeThinking();
+                removeThinking(runId);
                 appendChatMessage("agent", "[Error: " + ev.message + "]");
-                setInputEnabled(true);
             } else if (ev.type === "done") {
-                _runEventSource.close();
-                _runEventSource = null;
-                _activeRunId    = null;
-                setInputEnabled(true);
+                es.close();
+                refreshQueue();
             }
         } catch (err) {
             console.warn("run event parse error", err);
         }
     };
 
-    _runEventSource.onerror = () => {
-        removeThinking();
-        _runEventSource.close();
-        _runEventSource = null;
-        _activeRunId    = null;
-        setInputEnabled(true);
+    es.onerror = () => {
+        removeThinking(runId);
+        es.close();
     };
 }
 
 // ====================================================================================================
 // MARK: SUBMIT PROMPT
 // ====================================================================================================
-
-function setInputEnabled(enabled) {
-    dom.input().disabled  = !enabled;
-    dom.sendBtn().disabled = !enabled;
-}
 
 async function _loadHistory() {
     const data = await apiFetch("/history");
@@ -374,29 +485,47 @@ async function _pushHistory(text) {
     }
 }
 
-async function submitPrompt() {
+function submitPrompt() {
     const text = dom.input().value.trim();
     if (!text) return;
+
+    // Slash commands run locally and don't need Ollama - always allow.
+    // Real prompts are discarded with a message if Ollama is unreachable.
+    const isSlash = text.startsWith("/");
+    if (!isSlash && !_ollamaReachable) {
+        appendChatMessage("agent", "[Ollama is unreachable - prompt discarded]");
+        dom.input().value = "";
+        return;
+    }
+
+    // Clear input and reset history cursor immediately so the user can keep typing.
     dom.input().value = "";
-    _pushHistory(text);
-    _historyIdx = -1;  // reset browsing position after submit
-    // Input stays enabled - user can queue further prompts while one is in flight.
+    _historyIdx = -1;
 
-    appendChatMessage("user", text);
+    // Dispatch immediately so the Python queue reflects the real prompt backlog.
+    _dispatchPrompt(text);
+}
 
+async function _dispatchPrompt(text) {
     const data = await apiFetch("/sessions/" + encodeURIComponent(SESSION_ID) + "/prompt", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ prompt: text }),
     });
 
+    // Persist history without blocking prompt submission into the Python queue.
+    _pushHistory(text);
+
+    // Refresh queue immediately so new entry appears without waiting for the poll interval.
+    refreshQueue();
+
     if (!data) {
+        appendChatMessage("user", text);
         appendChatMessage("agent", "[Error: could not reach API]");
         return;
     }
 
-    _activeRunId = data.run_id;
-    listenRun(_activeRunId);
+    listenRun(data.run_id);
 }
 
 // ====================================================================================================
@@ -447,13 +576,16 @@ function onInputKeydown(e) {
 // ====================================================================================================
 
 function startPolling() {
+    refreshVersion();
     refreshOllamaStatus();
     refreshQueue();
     refreshTimeline();
+    refreshLatestLogFile();
 
     setInterval(refreshOllamaStatus, POLL_OLLAMA_MS);
     setInterval(refreshQueue,        POLL_QUEUE_MS);
     setInterval(refreshTimeline,     POLL_TIMELINE_MS);
+    setInterval(refreshLatestLogFile, POLL_LATEST_LOG_MS);
 }
 
 // ====================================================================================================
@@ -467,6 +599,21 @@ function init() {
     // Wire up input events.
     dom.input().addEventListener("keydown", onInputKeydown);
     dom.sendBtn().addEventListener("click", submitPrompt);
+
+    // Recenter the schedule timeline whenever the queue subpanel changes height.
+    if (window.ResizeObserver) {
+        _queueResizeObserver = new ResizeObserver(() => {
+            _scheduleTimelineRefresh();
+        });
+        _queueResizeObserver.observe(dom.timelineQueue());
+    }
+
+    // Redraw timeline on resize so the row window recentres correctly.
+    let _resizeTimer = null;
+    window.addEventListener("resize", () => {
+        clearTimeout(_resizeTimer);
+        _resizeTimer = setTimeout(refreshTimeline, 100);
+    });
 
     // Start live log stream.
     startLogStream();

@@ -15,7 +15,7 @@
 # of the application continues to work without it.
 #
 # Related modules:
-#   - main.py            -- calls prompt_with_history() inside run_chat_mode()
+#   - main.py            -- calls append_to_history() for API mode input
 #   - modes/dashboard.py -- calls load_history() / append_to_history() for the TUI input bar
 # ====================================================================================================
 
