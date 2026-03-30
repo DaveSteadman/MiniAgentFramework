@@ -27,7 +27,8 @@
 #   'dim'     secondary / hint text
 #
 # Related modules:
-#   - main.py           -- creates contexts and calls handle() in each input mode
+#   - main.py           -- creates contexts and calls handle() in API and test-sequence modes
+#   - api.py            -- creates context and calls handle() for web UI slash commands
 #   - ollama_client.py  -- list_ollama_models, resolve_model_name used by /model commands
 # ====================================================================================================
 
@@ -50,7 +51,6 @@ class SlashCommandContext:
     config:          object                        # OrchestratorConfig; .resolved_model is writable
     output:          Callable[[str, str], None]    # (text, level) -> None
     clear_history:   Callable[[], None]            # resets conversation history + session context
-    request_exit:    Callable[[], None] | None = None   # optional: signals the host to shut down
     session_context: object | None = None               # SessionContext; None in non-interactive modes
 
 
@@ -98,16 +98,6 @@ def _cmd_help(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output("Available slash commands:", "info")
     for name, description in sorted(_DESCRIPTIONS.items()):
         ctx.output(f"  {name:<16} {description}", "item")
-
-
-# ----------------------------------------------------------------------------------------------------
-
-def _cmd_exit(arg: str, ctx: SlashCommandContext) -> None:
-    if ctx.request_exit is None:
-        ctx.output("/exit is not available in this mode.", "error")
-        return
-    ctx.output("Exiting...", "dim")
-    ctx.request_exit()
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -684,7 +674,6 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
     from datetime import datetime
     from pathlib import Path
     from ollama_client import get_active_host
-    from scheduler import task_queue
     from workspace_utils import get_test_results_dir
 
     test_prompts_dir = Path(__file__).resolve().parent.parent / "controldata" / "test_prompts"
@@ -768,10 +757,7 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
             )
             _run_post_test_checks(_ctx, _shared_output, _wrapper.parent, subprocess, sys)
 
-        if task_queue.enqueue("test_all", "test", _run_all):
-            ctx.output("Test run queued.", "dim")
-        else:
-            ctx.output("A test run is already queued or in progress.", "error")
+        _run_all()
         return
 
     # ---- single file ----
@@ -817,11 +803,7 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
         )
         _run_post_test_checks(_ctx, _output_file, _wrapper.parent, subprocess, sys)
 
-    queue_name = f"test_{candidate.stem}"
-    if task_queue.enqueue(queue_name, "test", _run_single):
-        ctx.output(f"Test queued: {candidate.name}", "dim")
-    else:
-        ctx.output(f"Test '{candidate.name}' is already queued or in progress.", "error")
+    _run_single()
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -1225,7 +1207,6 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
 # ====================================================================================================
 _REGISTRY: dict[str, Callable] = {
     "/help":          _cmd_help,
-    "/exit":          _cmd_exit,
     "/models":        _cmd_models,
     "/model":         _cmd_model,
     "/host":          _cmd_host,
@@ -1248,7 +1229,6 @@ _REGISTRY: dict[str, Callable] = {
 
 _DESCRIPTIONS: dict[str, str] = {
     "/help":          "List available slash commands",
-    "/exit":          "Exit dashboard mode",
     "/models":        "List installed Ollama models",
     "/model":         "<name>  Switch active model for all subsequent runs",
     "/host":          "<hostname|url|local>  Switch active Ollama host (LAN, cloud, or local)",

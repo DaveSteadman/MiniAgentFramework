@@ -21,9 +21,14 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import asyncio
 import argparse
 import os
+import sys
 from pathlib import Path
+
+if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import ollama_client
 from modes.api_mode import run_api_mode

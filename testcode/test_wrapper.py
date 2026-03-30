@@ -35,6 +35,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -184,6 +185,19 @@ def _parse_turn_outputs(stdout_text: str) -> dict[int, str]:
         outputs[current_turn] = "\n".join(current_lines).strip()
 
     return outputs
+
+
+# ----------------------------------------------------------------------------------------------------
+def _parse_turn_metrics(stdout_text: str) -> dict[int, tuple[int, str]]:
+    """Parse [TURN N] tokens=<n> tps=<f> lines into {turn_idx: (tokens, tps_str)}."""
+    metrics: dict[int, tuple[int, str]] = {}
+    pattern = re.compile(r"^\[TURN\s+(\d+)\]\s+tokens=(\d+)\s+tps=([0-9.]+)$")
+    for line in stdout_text.splitlines():
+        match = pattern.match(line.strip())
+        if not match:
+            continue
+        metrics[int(match.group(1))] = (int(match.group(2)), match.group(3))
+    return metrics
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -342,11 +356,13 @@ def _run_single_item(
         )
         log_file     = extract_log_file(stdout_text=stdout)
         final_output = extract_final_output(stdout_text=stdout)
+        turn_metrics = _parse_turn_metrics(stdout)
         row.update({"final_output": final_output, "duration_seconds": f"{duration:.3f}",
                     "exit_code": exit_code, "log_file": log_file, "stderr": stderr.strip()})
     except subprocess.TimeoutExpired as e:
         row.update({"duration_seconds": f"{SUBPROCESS_TIMEOUT_SECONDS}.000",
                     "exit_code": 124, "stderr": f"Timeout: {e}"})
+        turn_metrics = {}
     except KeyboardInterrupt:
         row.update({"exit_code": 130, "stderr": "Interrupted by user."})
         append_csv_row(output_path=output_path, row=row)
@@ -356,8 +372,11 @@ def _run_single_item(
         return True, False
     except Exception as e:
         row.update({"exit_code": 125, "stderr": f"Wrapper error: {e}"})
+        turn_metrics = {}
 
     append_csv_row(output_path=output_path, row=row)
+    for turn_idx, (prompt_tokens, tps_str) in sorted(turn_metrics.items()):
+        print(f"[TURN {turn_idx}] tokens={prompt_tokens} tps={tps_str}")
     status_label = "OK" if row["exit_code"] == 0 else "FAIL"
     print(f"  [{status_label}] duration={row['duration_seconds']}s  exit_code={row['exit_code']}")
     return False, row["exit_code"] == 0
@@ -395,6 +414,7 @@ def _run_exchange_item(
 
     log_file      = extract_log_file(stdout_text=stdout)
     turn_outputs  = _parse_turn_outputs(stdout)
+    turn_metrics  = _parse_turn_metrics(stdout)
     per_turn_dur  = duration / n if n else duration
     any_assert_fail = False
 
@@ -416,6 +436,9 @@ def _run_exchange_item(
             "stderr":           stderr.strip(),
         })
         append_csv_row(output_path=output_path, row=row)
+
+        prompt_tokens, tps_str = turn_metrics.get(turn_idx, (0, "0"))
+        print(f"[TURN {turn_idx}] tokens={prompt_tokens} tps={tps_str}")
 
         status_label = "OK" if exit_code == 0 else "FAIL"
         assert_label = f"  assert={assert_result}" if assert_expr else ""

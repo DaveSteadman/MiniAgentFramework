@@ -15,7 +15,6 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
-from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -25,34 +24,6 @@ import sys
 # MARK: CONSTANTS
 # ====================================================================================================
 SECTION_SEPARATOR = "=" * 100
-HORIZONTAL_SEPARATOR = "-" * 100
-
-
-# ====================================================================================================
-# MARK: TEE WRITER
-# ====================================================================================================
-class _TeeWriter:
-    """Wraps sys.stdout so that print() calls go to both the console and the log file."""
-
-    def __init__(self, original, file_handle):
-        self._original      = original
-        self._file_handle   = file_handle
-
-    def write(self, text: str) -> None:
-        self._original.write(text)
-        self._file_handle.write(text)
-
-    def flush(self) -> None:
-        self._original.flush()
-        self._file_handle.flush()
-
-    @property
-    def encoding(self) -> str:
-        return getattr(self._original, "encoding", None) or "utf-8"
-
-    @property
-    def errors(self) -> str:
-        return getattr(self._original, "errors", None) or "replace"
 
 
 # ====================================================================================================
@@ -98,12 +69,6 @@ class SessionLogger:
         self.log("")
 
     # ----------------------------------------------------------------------------------------------------
-    def log_separator(self) -> None:
-        self.log("")
-        self.log(HORIZONTAL_SEPARATOR)
-        self.log("")
-
-    # ----------------------------------------------------------------------------------------------------
     def log_file_only(self, message: str = "") -> None:
         """Write to the log file only - no stdout. Used for verbose orchestration detail in chat mode."""
         text = str(message)
@@ -118,18 +83,6 @@ class SessionLogger:
         self.log_file_only(SECTION_SEPARATOR)
         self.log_file_only(stamped)
         self.log_file_only(SECTION_SEPARATOR)
-
-    # ----------------------------------------------------------------------------------------------------
-    @contextmanager
-    def tee_stdout(self):
-        """Context manager: redirect sys.stdout so print() calls inside skill code go to both
-        the console and the log file for the duration of the block."""
-        original    = sys.stdout
-        sys.stdout  = _TeeWriter(original, self._handle)
-        try:
-            yield
-        finally:
-            sys.stdout = original
 
 
 # ====================================================================================================

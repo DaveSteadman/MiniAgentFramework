@@ -22,7 +22,7 @@
 #   daily      fires once per day at a fixed wall-clock time  {"type": "daily", "time": "HH:MM"}
 #
 # Queue state is persisted to controldata/task_queue.json on every enqueue/dequeue so the
-# dashboard and other tooling can observe pending and active tasks.
+# web UI and other tooling can observe pending and active tasks.
 #
 # The scheduler loop lives in modes/api_mode.py.
 #
@@ -212,8 +212,8 @@ class TaskQueue:
                     try:
                         item["fn"]()
                     except Exception as exc:
-                        # Log the failure rather than silently swallowing it.  In dashboard
-                        # mode this is the only indication that a scheduled task crashed.
+                        # Log the failure so it is visible in the log file and
+                        # the /logs/stream SSE endpoint.
                         try:
                             import traceback
                             from ollama_client import log_to_session
@@ -231,7 +231,7 @@ class TaskQueue:
 # ====================================================================================================
 # MARK: MODULE INSTANCES
 # ====================================================================================================
-# task_queue is the shared singleton used by all scheduler and dashboard code.
+# task_queue is the shared singleton used by all scheduler and API mode code.
 # llm_lock is a back-compat alias for task_queue.run_lock.
 task_queue: TaskQueue    = TaskQueue()
 llm_lock:   threading.Lock = task_queue.run_lock

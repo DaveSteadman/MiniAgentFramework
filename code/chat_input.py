@@ -1,22 +1,14 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# Persistent-history input helper for CLI chat mode.
+# Persistent prompt-history file I/O for the web UI session.
 #
-# Provides prompt_with_history(): a drop-in replacement for input() that gives the user
-# up/down arrow navigation through their full prompt history.  History is persisted to
-# controldata/chathistory.json so it survives across runs and sessions.
-#
-# Also exposes load_history() and append_to_history() so the dashboard TextEdit widget
-# can share the same history store without duplicating file-handling logic.
-#
-# Uses prompt_toolkit when available (installed on first use via requirements.txt).
-# Falls back silently to plain input() if prompt_toolkit is not installed, so the rest
-# of the application continues to work without it.
+# Exposes load_history() and append_to_history() so the API endpoints and the web UI
+# client can share a single history store (controldata/chathistory.json) without
+# duplicating file-handling logic.
 #
 # Related modules:
-#   - main.py            -- calls append_to_history() for API mode input
-#   - modes/dashboard.py -- calls load_history() / append_to_history() for the TUI input bar
+#   - api.py   -- GET /history and POST /history use load_history() / append_to_history()
 # ====================================================================================================
 
 
@@ -85,36 +77,3 @@ def load_history() -> list[str]:
 def append_to_history(text: str) -> None:
     """Append *text* to the persisted history file (deduplicating consecutive duplicates)."""
     _append_to_history(text)
-
-
-def prompt_with_history(prompt_text: str = "You: ") -> str:
-    """Display *prompt_text* and return the user's input, with up/down arrow history.
-
-    The returned string is already stripped.  An EOFError or KeyboardInterrupt is re-raised
-    so callers can handle session termination exactly as they would with plain input().
-
-    If prompt_toolkit is not installed, falls back to plain input() - history file is still
-    updated so it is ready when prompt_toolkit becomes available.
-    """
-    try:
-        from prompt_toolkit import PromptSession
-        from prompt_toolkit.history import InMemoryHistory
-
-        # Build an InMemoryHistory pre-loaded with the persisted entries.
-        # prompt_toolkit expects oldest-first; the user navigates with the up arrow
-        # from the most recent entry backwards.
-        pt_history = InMemoryHistory()
-        for entry in _load_history():
-            pt_history.append_string(entry)
-
-        session: PromptSession = PromptSession(history=pt_history)
-        text = session.prompt(prompt_text).strip()
-
-    except ImportError:
-        # Graceful degradation: plain input().
-        text = input(prompt_text).strip()
-
-    if text:
-        _append_to_history(text)
-
-    return text

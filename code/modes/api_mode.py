@@ -181,11 +181,38 @@ def run_api_mode(
     )
     server = uvicorn.Server(uvicorn_config)
 
+    def _run_server() -> None:
+        if sys.platform != "win32":
+            server.run()
+            return
+
+        loop = asyncio.SelectorEventLoop() if hasattr(asyncio, "SelectorEventLoop") else asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        def _exception_handler(loop_obj: asyncio.AbstractEventLoop, context: dict) -> None:
+            exc    = context.get("exception")
+            handle = context.get("handle")
+            callback = getattr(handle, "_callback", None)
+            cb_name  = getattr(callback, "__qualname__", repr(callback))
+            if (
+                isinstance(exc, ConnectionResetError)
+                and getattr(exc, "winerror", None) == 10054
+                and "_call_connection_lost" in str(cb_name)
+            ):
+                return
+            loop_obj.default_exception_handler(context)
+
+        loop.set_exception_handler(_exception_handler)
+        try:
+            loop.run_until_complete(server.serve())
+        finally:
+            loop.close()
+
     # Run uvicorn in a background thread. When server.run() is not on the main thread,
     # uvicorn's capture_signals() context manager detects the non-main thread and skips
     # all signal installation entirely, so it never calls signal.raise_signal() and the
     # CancelledError/KeyboardInterrupt tracebacks do not occur.
-    server_thread = threading.Thread(target=server.run, daemon=True, name="uvicorn")
+    server_thread = threading.Thread(target=_run_server, daemon=True, name="uvicorn")
     server_thread.start()
 
     # Main thread owns signal handling.

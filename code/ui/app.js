@@ -384,6 +384,14 @@ function appendChatMessage(role, text, meta) {
     return wrap;
 }
 
+function appendChatLine(wrap, text) {
+    if (!wrap) return;
+    const body = wrap.querySelector(".msg-text");
+    if (!body) return;
+    body.textContent = body.textContent ? body.textContent + "\n" + text : text;
+    dom.chat().scrollTop = dom.chat().scrollHeight;
+}
+
 function appendThinking(runId) {
     const el   = dom.chat();
     const wrap = document.createElement("div");
@@ -408,6 +416,7 @@ function listenRun(runId) {
     // do not cancel each other.
     const es = new EventSource(API_BASE + "/runs/" + encodeURIComponent(runId) + "/stream");
     const testTurnMessages = new Map();
+    let progressWrap = null;
 
     es.onmessage = e => {
         try {
@@ -434,7 +443,11 @@ function listenRun(runId) {
             } else if (ev.type === "test_complete") {
                 appendChatMessage("agent", ev.text);
             } else if (ev.type === "progress") {
-                appendChatMessage("agent", ev.text);
+                if (!progressWrap) {
+                    progressWrap = appendChatMessage("agent", ev.text);
+                } else {
+                    appendChatLine(progressWrap, ev.text);
+                }
             } else if (ev.type === "response") {
                 removeThinking(runId);
                 const meta = ev.tokens ? ev.tokens.toLocaleString() + " ctx" + (ev.tps && ev.tps !== "0" ? " | " + ev.tps + " tok/s" : "") : "";
@@ -443,6 +456,7 @@ function listenRun(runId) {
                 removeThinking(runId);
                 appendChatMessage("agent", "[Error: " + ev.message + "]");
             } else if (ev.type === "done") {
+                removeThinking(runId);
                 es.close();
                 refreshQueue();
             }

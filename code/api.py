@@ -107,9 +107,7 @@ _shutdown_event: threading.Event = threading.Event()
 _run_event_queues: dict[str, queue.Queue] = {}
 _run_queues_lock:  threading.Lock = threading.Lock()
 
-# Global log broadcast queue - all log lines are pushed here for the /logs/stream SSE endpoint.
-_log_broadcast:       queue.Queue = queue.Queue(maxsize=2000)
-_latest_log_path:     str | None  = None
+_latest_log_path: str | None = None
 
 
 # ====================================================================================================
@@ -128,35 +126,6 @@ def setup(
     _enabled_tasks  = enabled_tasks
     _last_run       = last_run
     _shutdown_event = shutdown_event
-
-
-# ====================================================================================================
-# MARK: LOG BROADCAST
-# ====================================================================================================
-
-def push_log_line(line: str) -> None:
-    """Push a log line into the global broadcast queue (non-blocking, drops oldest on overflow)."""
-    try:
-        _log_broadcast.put_nowait({
-            "type": "log",
-            "text": line,
-            "ts":   datetime.now().isoformat(timespec="seconds"),
-            "path": _latest_log_path,
-        })
-    except queue.Full:
-        try:
-            _log_broadcast.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            _log_broadcast.put_nowait({
-                "type": "log",
-                "text": line,
-                "ts":   datetime.now().isoformat(timespec="seconds"),
-                "path": _latest_log_path,
-            })
-        except queue.Full:
-            pass
 
 
 def _set_latest_log_path(path: str | Path | None) -> None:
@@ -462,12 +431,14 @@ def post_prompt(session_id: str, body: PromptRequest):
             if _prompt.startswith("/"):
                 # Route through the slash command processor.
                 output_lines: list[str] = []
+                streamed_output = False
                 log_file_re     = re.compile(r"^Log file:\s*(.+)$")
                 turn_agent_re   = re.compile(r"^\[TURN\s+(\d+)\]\s+Agent:\s*(.*)$")
                 turn_metrics_re = re.compile(r"^\[TURN\s+(\d+)\]\s+tokens=(\d+)\s+tps=([0-9.]+)$")
                 test_complete_re = re.compile(r"^\[(TEST COMPLETE|ALL TESTS COMPLETE)\]\s+(.+)$")
 
                 def _slash_output(text: str, level: str = "info") -> None:
+                    nonlocal streamed_output
                     output_lines.append(text)
                     push_log_line(f"[slash] {text}")
 
@@ -480,6 +451,7 @@ def post_prompt(session_id: str, body: PromptRequest):
                             "run_id": run_id,
                             "path":   log_path,
                         }, priority=True)
+                        streamed_output = True
                         return
 
                     agent_match = turn_agent_re.match(text)
@@ -490,6 +462,7 @@ def post_prompt(session_id: str, body: PromptRequest):
                             "turn":     int(agent_match.group(1)),
                             "response": agent_match.group(2),
                         }, priority=True)
+                        streamed_output = True
                         return
 
                     metrics_match = turn_metrics_re.match(text)
@@ -501,6 +474,7 @@ def post_prompt(session_id: str, body: PromptRequest):
                             "tokens": int(metrics_match.group(2)),
                             "tps":    metrics_match.group(3),
                         }, priority=True)
+                        streamed_output = True
                         return
 
                     test_complete_match = test_complete_re.match(text)
@@ -511,6 +485,7 @@ def post_prompt(session_id: str, body: PromptRequest):
                             "text":   text,
                             "level":  level,
                         }, priority=True)
+                        streamed_output = True
                         return
 
                     _queue_run_event(run_q, {
@@ -519,6 +494,7 @@ def post_prompt(session_id: str, body: PromptRequest):
                         "text":   text,
                         "level":  level,
                     })
+                    streamed_output = True
 
                 slash_ctx = SlashCommandContext(
                     config          = _config,
@@ -527,16 +503,17 @@ def post_prompt(session_id: str, body: PromptRequest):
                     session_context = ctx,
                 )
                 handled = handle_slash(_prompt, slash_ctx)
-                response = "\n".join(output_lines) if output_lines else (
-                    "(done)" if handled else f"Unknown command: {_prompt.split()[0]}"
-                )
-                _queue_run_event(run_q, {
-                    "type":     "response",
-                    "run_id":   run_id,
-                    "response": response,
-                    "tokens":   0,
-                    "tps":      "0",
-                }, priority=True)
+                if not streamed_output:
+                    response = "\n".join(output_lines) if output_lines else (
+                        "(done)" if handled else f"Unknown command: {_prompt.split()[0]}"
+                    )
+                    _queue_run_event(run_q, {
+                        "type":     "response",
+                        "run_id":   run_id,
+                        "response": response,
+                        "tokens":   0,
+                        "tps":      "0",
+                    }, priority=True)
             else:
                 log_path = create_log_file_path(log_dir=_LOG_DIR)
                 _set_latest_log_path(log_path)
@@ -699,12 +676,15 @@ def stream_logs():
     return StreamingResponse(_generate(), media_type="text/event-stream")
 
 
+# ====================================================================================================
+# MARK: LOG BROADCAST
+# ====================================================================================================
 # Fan-out: each SSE client gets its own subscriber queue fed by push_log_line.
 _log_subscribers:      list[queue.Queue] = []
 _log_subscribers_lock: threading.Lock    = threading.Lock()
 
 
-def push_log_line(line: str) -> None:  # noqa: F811 - replaces module-level stub above
+def push_log_line(line: str) -> None:
     """Push a log line to all active log-stream SSE subscribers."""
     item = {
         "type": "log",
