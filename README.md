@@ -1,12 +1,12 @@
 # MiniAgentFramework
 
-![MiniAgentFramework](progress/readme_header.png)
-
 > Calling an LLM from Python is easy - this project researches calling Python *from* an LLM prompt.
 
 MiniAgentFramework is an orchestration experiment that blends LLM reasoning with Python tool execution. A local LLM decides which Python skills to call, executes them safely in ordered steps, and incorporates the results into its final response.
 
 The project uses a local [Ollama](https://ollama.com) runtime and focuses on transparent, logged orchestration with tools for testing and measuring agent behaviour. From the orchestration foundation it builds simple, robust skills with performance measurement and self-improvement research on top.
+
+![MiniAgentFramework](progress/2026-03-30-WebUI.png)
 
 ## Documentation
 
@@ -16,15 +16,6 @@ The project uses a local [Ollama](https://ollama.com) runtime and focuses on tra
 | [README_GETTING_STARTED.md](README_GETTING_STARTED.md) | First-time setup: Python, Ollama, venv, first run |
 | [README_DEVS.md](README_DEVS.md) | Module architecture, design notes, internal flow |
 | [ChangeLog.md](ChangeLog.md) | Report of main changes per version |
----
-
-## Modes of Operation
-
-| Mode | Purpose | Typical command |
-|---|---|---|
-| [**Web UI / API**](#running-web-ui--api-mode) | Default runtime. Serves the browser UI, background scheduler, queue panel, log streaming, and chat prompt submission API | `python .\code\main.py` |
-| [**Chat Sequence**](#running-chat-sequence-mode) | Run a pre-defined sequence of prompts sharing a single conversation history | `python .\code\main.py --chat-sequence-file <file.json>` |
-
 ---
 
 ## Quick Start
@@ -64,36 +55,6 @@ What this mode provides:
 | `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address such as `http://MONTBLANC:11434` or `https://api.ollama.com`. Falls back to `OLLAMA_HOST`. |
 
 Open the browser UI at `http://localhost:8000/` unless you changed `--api-port`.
-
----
-
-## Running: Chat Sequence Mode
-
-Runs a pre-defined sequence of prompts through a shared conversation history - each prompt sees all prior turns in the sequence. Used by the `/test` slash command to execute multi-turn test scenarios where later steps depend on earlier results.
-
-The sequence file is a JSON array of prompt strings:
-
-```json
-["What is the current date?", "Write that date to data/date.txt", "Confirm the file was created."]
-```
-
-```powershell
-python .\code\main.py --chat-sequence-file controldata/test_prompts/my_sequence.json
-```
-
-Output lines are tagged so the test wrapper can parse per-turn results:
-
-```
-[TURN 1] User: <prompt>
-[TURN 1] Agent: <response>
-[TURN 1] tokens=<n> tps=<f>
-```
-
-| Option | Default | Description |
-|---|---|---|
-| `--chat-sequence-file PATH` | *(required)* | JSON file containing an array of prompt strings. |
-| `--model ALIAS` | `"20b"` | Ollama model alias or tag. |
-| `--num-ctx N` | `131072` | Context window size in tokens. |
 
 ---
 
