@@ -11,15 +11,13 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 
 ### 1) Orchestration runtime
 - `code/main.py`
-  - Main entrypoint; default behaviour is to start the FastAPI server and Web UI.
-  - Supports the browser runtime and the `--chat-sequence-file` test runner mode.
+  - Main entrypoint; starts the FastAPI server and Web UI.
   - Loads the skills catalog, resolves the model alias, configures the active Ollama host, and hands off to `modes/api_mode.py`.
 
 - `code/chat_input.py`
   - Provides the persisted history store used by the API history endpoints.
-  - Still exposes `prompt_with_history(prompt_text)` for any local CLI tooling, but the primary runtime consumer is `api.py` via `load_history()` and `append_to_history()`.
-  - History is stored in `controldata/chathistory.json` (max 500 entries, consecutive duplicates de-duped).
-  - Falls back to plain `input()` when `prompt_toolkit` is not installed.
+  - Exposes `load_history()` and `append_to_history()` used by `api.py`.
+  - History is stored in `controldata/chathistory.json` (max 32 entries, duplicates de-duped by full text match).
 
 - `code/orchestration.py`
   - Core tool-calling loop called by `main.py` for every mode.
@@ -175,11 +173,12 @@ All runtime dependencies are listed in [`requirements.txt`](requirements.txt).
 
 | Package | Version | Required by | Notes |
 |---|---|---|---|
-| `beautifulsoup4` | ≥ 4.12 | WebFetch skill | Optional but strongly recommended. Falls back to stdlib `html.parser` if absent, but bs4 gives much cleaner extraction from real-world pages. |
-| `psutil` | ≥ 5.9 | `system_check.py` | Provides RAM, disk, and CPU metrics. |
-| `prompt_toolkit` | ≥ 3.0 | `chat_input.py` | Optional helper for local CLI tooling that still uses `prompt_with_history()`. |
-| `fastapi` | ≥ 0.110 | `api.py` | REST API and browser UI server. |
-| `uvicorn` | ≥ 0.29 | `modes/api_mode.py` | ASGI server used to host the FastAPI app. |
+| `beautifulsoup4` | >= 4.12 | WebFetch skill | Optional but strongly recommended. Falls back to stdlib `html.parser` if absent, but bs4 gives much cleaner extraction from real-world pages. |
+| `psutil` | >= 5.9 | `system_check.py` | Provides RAM, disk, and CPU metrics. |
+| `markdown` | >= 3.6 | WebResearchOutput skill | Optional; falls back to a minimal inline converter if absent. |
+| `certifi` | >= 2024.0 | `webpage_utils.py` | Updated Mozilla CA bundle for SSL verification. |
+| `fastapi` | >= 0.110 | `api.py` | REST API and browser UI server. |
+| `uvicorn` | >= 0.29 | `modes/api_mode.py` | ASGI server used to host the FastAPI app. |
 
 All other imports (`urllib`, `json`, `re`, `threading`, `pathlib`, …) are Python stdlib.
 

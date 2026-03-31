@@ -3,14 +3,13 @@
 # ====================================================================================================
 # CLI entrypoint for MiniAgentFramework.
 #
-# Default mode: starts the FastAPI server with the web UI.
-# Test mode (--chat-sequence-file): runs a pre-defined prompt sequence and exits.
+# Starts the FastAPI server with the web UI and background scheduler.
 #
 # Core orchestration pipeline lives in orchestration.py.
 # API/web mode lives in modes/api_mode.py.
 #
 # Related modules:
-#   - orchestration.py          -- OrchestratorConfig, ConversationHistory, orchestrate_prompt
+#   - orchestration.py          -- OrchestratorConfig, orchestrate_prompt
 #   - modes/api_mode.py         -- run_api_mode (FastAPI + uvicorn + scheduler)
 #   - ollama_client.py          -- Ollama server management and LLM calls
 #   - skills_catalog_builder.py -- load_skills_payload, tool definitions
@@ -23,6 +22,7 @@
 # ====================================================================================================
 import asyncio
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -46,6 +46,7 @@ from runtime_logger import SessionLogger
 from slash_commands import SlashCommandContext
 from slash_commands import handle as handle_slash
 from workspace_utils import get_chatsessions_day_dir
+from workspace_utils import get_controldata_dir
 from workspace_utils import get_logs_dir
 
 
@@ -56,12 +57,36 @@ DEFAULT_NUM_CTX      = 131072
 MAX_ITERATIONS       = 25   # safety cap; model exits naturally via native tool calling
 SKILLS_SUMMARY_PATH  = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
 LOG_DIR              = get_logs_dir()
+DEFAULTS_FILE        = get_controldata_dir() / "default.json"
+
+# Keys accepted from default.json - any other keys are silently ignored.
+_DEFAULTS_KEYS = {"model", "num_ctx", "api_port", "api_host", "ollama_host"}
+
+
+# ====================================================================================================
+# MARK: DEFAULTS LOADING
+# ====================================================================================================
+def _load_defaults() -> dict:
+    # Returns only recognised keys from default.json; silently ignores unrecognised ones.
+    # Returns an empty dict if the file is absent or malformed.
+    if not DEFAULTS_FILE.exists():
+        return {}
+    try:
+        raw = json.loads(DEFAULTS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return {}
+        return {k: v for k, v in raw.items() if k in _DEFAULTS_KEYS}
+    except Exception:
+        return {}
 
 
 # ====================================================================================================
 # MARK: CLI
 # ====================================================================================================
 def parse_main_args() -> argparse.Namespace:
+    # Priority: factory defaults < default.json < command-line args.
+    file_defaults = _load_defaults()
+
     parser = argparse.ArgumentParser(description="MiniAgentFramework - web UI entrypoint.")
     parser.add_argument(
         "--model",
@@ -96,13 +121,18 @@ def parse_main_args() -> argparse.Namespace:
         metavar="URL",
         help="Ollama host URL. Defaults to http://localhost:11434. Also read from OLLAMA_HOST env var.",
     )
+    # Internal arg used by the test runner (test_wrapper.py) only - hidden from help.
     parser.add_argument(
         "--chat-sequence-file",
         type=Path,
         default=None,
         metavar="FILE",
-        help="JSON file containing a prompt array to run as a shared-history exchange (test runner).",
+        help=argparse.SUPPRESS,
     )
+    # Apply file defaults between factory defaults and CLI; set_defaults() is overridden
+    # by any explicit CLI value but overrides argparse's own default= values.
+    if file_defaults:
+        parser.set_defaults(**file_defaults)
     return parser.parse_args()
 
 
@@ -114,7 +144,6 @@ def _make_task_session(
     persist_path: Path,
     max_turns: int = 10,
 ) -> tuple[ConversationHistory, SessionContext]:
-    """Create a ConversationHistory and SessionContext pair for one task or chat session."""
     history = ConversationHistory(max_turns=max_turns)
     ctx     = SessionContext(session_id=session_id, persist_path=persist_path)
     return history, ctx
@@ -122,6 +151,7 @@ def _make_task_session(
 
 # ====================================================================================================
 # MARK: CHAT SEQUENCE MODE
+# Used by test_wrapper.py via --chat-sequence-file (internal, suppressed from --help).
 # ====================================================================================================
 def run_chat_sequence_mode(
     sequence_file: Path,

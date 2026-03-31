@@ -45,7 +45,6 @@ from scheduler import task_queue
 from workspace_utils import get_chatsessions_day_dir
 from workspace_utils import get_logs_dir
 from workspace_utils import get_schedules_dir
-from workspace_utils import get_workspace_root
 
 
 # ====================================================================================================

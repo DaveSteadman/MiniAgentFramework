@@ -171,8 +171,8 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
         return get_last_context_map(), get_last_messages()
 
     def _show_map(context_map):
-        from orchestration import _format_context_map
-        ctx.output(_format_context_map(context_map, ctx.config.num_ctx), "item")
+        from orchestration import format_context_map
+        ctx.output(format_context_map(context_map, ctx.config.num_ctx), "item")
 
     def _resolve_index(rest: str) -> tuple[list, list, int] | None:
         # Validate and parse a context-map index string.
@@ -812,9 +812,6 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
 def _cmd_version(arg: str, ctx: SlashCommandContext) -> None:
     from version import __version__
     ctx.output(f"MiniAgentFramework {__version__}", "info")
-    ctx.output(f"  model:   {ctx.config.resolved_model}", "item")
-    ctx.output(f"  num_ctx: {ctx.config.num_ctx:,}", "item")
-
 
 # ----------------------------------------------------------------------------------------------------
 def _cmd_sandbox(arg: str, ctx: SlashCommandContext) -> None:

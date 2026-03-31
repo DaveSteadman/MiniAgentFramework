@@ -18,18 +18,6 @@ The project uses a local [Ollama](https://ollama.com) runtime and focuses on tra
 | [ChangeLog.md](ChangeLog.md) | Report of main changes per version |
 ---
 
-## Quick Start
-
-For a full first-time walkthrough (Python install, Ollama, venv, first run) see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
-
-### Regenerate the skills catalog
-Run this whenever a `skill.md` file is added or changed:
-```powershell
-python .\code\skills_catalog_builder.py
-```
-
----
-
 ## Running: Web UI / API Mode
 
 Running `main.py` with no special mode flags starts the FastAPI server and browser UI.
@@ -46,15 +34,37 @@ What this mode provides:
 - Prompt queue with a separate total queued prompt count and a preview of the next prompts to be serviced.
 - REST API endpoints used by the UI for queue, timeline, logs, history, and prompt submission.
 
+Open the browser UI at `http://localhost:8000/` unless you changed `--api-port`.
+
+---
+
+## Command-Line Options
+
+All options are optional. Unrecognised options are rejected at startup with a usage message.
+
 | Option | Default | Description |
 |---|---|---|
 | `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` resolve to the first installed model whose tag contains that string. |
 | `--num-ctx N` | `131072` | Context window size used for LLM calls. |
 | `--api-port PORT` | `8000` | Port for the web UI/API server. |
 | `--api-host HOST` | `0.0.0.0` | Bind host for the web UI/API server. |
-| `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address such as `http://MONTBLANC:11434` or `https://api.ollama.com`. Falls back to `OLLAMA_HOST`. |
+| `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address such as `http://MONTBLANC:11434` or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. |
 
-Open the browser UI at `http://localhost:8000/` unless you changed `--api-port`.
+### Default overrides file
+
+`controldata/default.json` lets you persist your preferred settings without touching the command line. Values are applied after the factory defaults but before any explicit CLI argument, so a CLI flag always wins.
+
+```json
+{
+  "model":       "20b",
+  "num_ctx":     131072,
+  "api_port":    8000,
+  "api_host":    "0.0.0.0",
+  "ollama_host": "http://localhost:11434"
+}
+```
+
+Only the keys shown above are recognised. Unknown keys are silently ignored. The file is optional - if absent, factory defaults apply as usual.
 
 ---
 

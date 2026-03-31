@@ -2,6 +2,11 @@
 
 Code standards for this project:
 
+## Emoji
+- Emoji are permitted only in the web UI layer: `index.html`, `style.css`, `app.js`.
+- No emoji in Python files, Markdown docs, JSON config/data, or log output.
+- In the UI, emoji are accent characters only - labels, panel headers, status indicators. Never in data payloads or API response strings.
+
 ## Formatting
 - No em dashes (—) anywhere. Use a plain hyphen-minus (-) instead.
 - No typographic/curly quotes anywhere - not in .py, .md, or .json files. Use only straight ASCII quotes (" and '). This applies to all generated and edited content including skill.md files, comments, and documentation.

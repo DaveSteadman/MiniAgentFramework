@@ -25,14 +25,14 @@ from workspace_utils import get_workspace_root
 # MARK: CONSTANTS
 # ====================================================================================================
 _HISTORY_FILE = get_workspace_root() / "controldata" / "chathistory.json"
-_MAX_HISTORY  = 500   # cap to avoid unbounded growth
+_MAX_HISTORY  = 32    # hard cap; oldest entries are dropped when exceeded
 
 
 # ====================================================================================================
-# MARK: HISTORY FILE I/O
+# MARK: PUBLIC API
 # ====================================================================================================
-def _load_history() -> list[str]:
-    """Load history entries from the JSON file; return empty list on any error."""
+def load_history() -> list[str]:
+    """Return the persisted history list (oldest-first)."""
     if not _HISTORY_FILE.exists():
         return []
     try:
@@ -55,25 +55,14 @@ def _save_history(entries: list[str]) -> None:
         pass
 
 
-def _append_to_history(text: str) -> None:
-    """Load the current file, append *text* (deduplicating consecutive duplicates), save."""
+def append_to_history(text: str) -> None:
+    """Append *text* to the persisted history file, deduplicating on full text match."""
+    # Remove any existing occurrence of text (full dedup), then append so the
+    # most-recent use always floats to the end. Cull to _MAX_HISTORY on save.
     text = text.strip()
     if not text:
         return
-    entries = _load_history()
-    if not entries or entries[-1] != text:
-        entries.append(text)
+    entries = load_history()
+    entries = [e for e in entries if e != text]
+    entries.append(text)
     _save_history(entries)
-
-
-# ====================================================================================================
-# MARK: PUBLIC API
-# ====================================================================================================
-def load_history() -> list[str]:
-    """Return the persisted history list (oldest-first) for callers outside this module."""
-    return _load_history()
-
-
-def append_to_history(text: str) -> None:
-    """Append *text* to the persisted history file (deduplicating consecutive duplicates)."""
-    _append_to_history(text)

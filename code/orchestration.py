@@ -614,7 +614,7 @@ def _assess_compact(
 
 # ----------------------------------------------------------------------------------------------------
 
-def _format_context_map(context_map: list[dict], num_ctx: int) -> str:
+def format_context_map(context_map: list[dict], num_ctx: int) -> str:
     # Renders the per-run context map as a diagnostic table for the log file.
     hdr  = f"  {'#':>3}  {'rnd':>3}  {'role':<6}  {'label':<50}  {'chars':>7}  {'~tok':>6}"
     sep  = "  ---  ---  ------  " + "-" * 50 + "  -------  ------"
@@ -1093,7 +1093,7 @@ def orchestrate_prompt(
     _log_section_file_only("TOOL CALL SUMMARY")
     _log_file_only(_format_tool_outputs(tool_outputs))
     _log_section_file_only("CONTEXT MAP")
-    _log_file_only(_format_context_map(_context_map, config.num_ctx))
+    _log_file_only(format_context_map(_context_map, config.num_ctx))
     _log_section_file_only("SCRATCHPAD STATE")
     _log_file_only(_scratch_list())
     _log(f"Total: {prompt_tokens:,} prompt tokens | {completion_tokens:,} completion tokens")

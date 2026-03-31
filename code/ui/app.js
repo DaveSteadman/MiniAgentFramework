@@ -91,8 +91,6 @@ async function refreshOllamaStatus() {
     // but strip size annotation if present like "llama3.1:8b-q4" stays; just trim whitespace).
     const modelName = (first.name || "").trim();
     const ctxVal    = data.num_ctx ? data.num_ctx.toLocaleString() + " ctx" : "";
-    // Additional per-row detail: size and processor.
-    const detail    = [first.size, first.processor].filter(Boolean).join("  ");
     dom.ollamaHost().textContent  = data.host  || "";
     dom.ollamaModel().textContent = modelName  || data.model || "";
     dom.ollamaCtx().textContent   = ctxVal;
@@ -115,7 +113,7 @@ async function refreshQueue() {
 async function refreshVersion() {
     const data = await apiFetch("/version");
     if (!data) return;
-    dom.versionChip().textContent = "v" + data.version;
+    dom.versionChip().textContent = data.version;
 }
 
 function _queueItemLabel(item) {

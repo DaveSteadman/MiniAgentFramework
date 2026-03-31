@@ -55,7 +55,6 @@ from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-import ollama_client
 from ollama_client import get_active_host
 from ollama_client import get_active_model
 from ollama_client import get_active_num_ctx
@@ -69,22 +68,18 @@ from runtime_logger import create_log_file_path
 from chat_input import append_to_history
 from chat_input import load_history
 from scheduler import is_task_due
-from scheduler import load_schedules_dir
 from scheduler import task_queue
 from slash_commands import SlashCommandContext
 from slash_commands import handle as handle_slash
 from workspace_utils import get_chatsessions_day_dir
 from workspace_utils import get_chatsessions_dir
 from workspace_utils import get_logs_dir
-from workspace_utils import get_schedules_dir
-from workspace_utils import get_workspace_root
 from version import __version__
 
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-_SCHEDULES_DIR       = get_schedules_dir()
 _LOG_DIR             = get_logs_dir()
 _WEB_DIR             = Path(__file__).resolve().parent / "ui"
 _MAX_CHAT_HISTORY    = 10
@@ -651,9 +646,8 @@ def stream_logs():
 
         # Stream live events until client disconnects (GeneratorExit) or shutdown.
         subscriber: queue.Queue = queue.Queue(maxsize=1000)
-        _log_subscribers_lock.acquire()
-        _log_subscribers.append(subscriber)
-        _log_subscribers_lock.release()
+        with _log_subscribers_lock:
+            _log_subscribers.append(subscriber)
 
         try:
             while not _shutdown_event.is_set():
@@ -666,12 +660,11 @@ def stream_logs():
         except GeneratorExit:
             pass
         finally:
-            _log_subscribers_lock.acquire()
-            try:
-                _log_subscribers.remove(subscriber)
-            except ValueError:
-                pass
-            _log_subscribers_lock.release()
+            with _log_subscribers_lock:
+                try:
+                    _log_subscribers.remove(subscriber)
+                except ValueError:
+                    pass
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
 
