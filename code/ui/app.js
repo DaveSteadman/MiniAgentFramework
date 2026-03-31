@@ -32,6 +32,8 @@ let _timelineRefreshTimer = null;
 let _queueResizeObserver  = null;
 let _currentLogPath       = "";
 let _logLive              = true;   // when false, refreshLatestLogFile() is suppressed
+let _logScrollGuard       = false;  // true while a programmatic file load is settling
+let _onLatestFile         = true;   // true only when viewing the newest log file
 
 // ====================================================================================================
 // MARK: DOM REFS
@@ -518,6 +520,11 @@ function _switchLogStream(path) {
     _currentLogPath = path;
     _setLogPanelTitle(path);
 
+    // Suppress the scroll listener while we load new content.
+    _logScrollGuard = true;
+    clearTimeout(_switchLogStream._guardTimer);
+    _switchLogStream._guardTimer = setTimeout(() => { _logScrollGuard = false; }, 800);
+
     clearLogLines();
     if (_logEventSource) {
         _logEventSource.close();
@@ -561,6 +568,7 @@ function toggleLogLive() {
     _setLiveBtn(_logLive);
     if (_logLive) {
         // Snap back to latest file and resume auto-scroll.
+        _onLatestFile = true;
         refreshLatestLogFile();
         const el = dom.log();
         el.scrollTop = el.scrollHeight;
@@ -591,6 +599,9 @@ async function logNavStep(delta) {
 
     const next = allFiles[idx + delta];
     if (!next) return;  // already at boundary
+
+    // Track whether we've navigated to the newest file.
+    _onLatestFile = (idx + delta === allFiles.length - 1);
 
     // Navigating away from live stream - pause live mode.
     if (_logLive) {
@@ -869,8 +880,9 @@ function init() {
 
     // Scroll-to-pause/resume live mode on the log panel.
     dom.log().addEventListener("scroll", () => {
+        if (_logScrollGuard) return;
         if (_isLogNearBottom()) {
-            if (!_logLive) {
+            if (!_logLive && _onLatestFile) {
                 _logLive = true;
                 _setLiveBtn(true);
             }
