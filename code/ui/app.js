@@ -16,6 +16,10 @@ const MAX_QUEUE_ITEMS   = 10;
 const MAX_LOG_LINES     = 500;
 const MAX_CHAT_MESSAGES = 200;
 
+// CSS class name constants used by toggleWrap.
+const CSS_NOWRAP      = "nowrap";
+const CSS_WRAP_ACTIVE = "wrap-active";
+
 // ====================================================================================================
 // MARK: STATE
 // ====================================================================================================
@@ -219,9 +223,9 @@ function toggleWrap(bodyId, btnId) {
     const body = $(bodyId);
     const btn  = $(btnId);
     if (!body || !btn) return;
-    const nowrapOn = body.classList.toggle("nowrap");
+    const nowrapOn = body.classList.toggle(CSS_NOWRAP);
     // Button is lit (wrap-active) when wrapping is ON, dim when nowrap is ON.
-    btn.classList.toggle("wrap-active", !nowrapOn);
+    btn.classList.toggle(CSS_WRAP_ACTIVE, !nowrapOn);
     // Scroll to bottom when returning to wrap mode so content is visible.
     if (!nowrapOn) body.scrollTop = body.scrollHeight;
 }

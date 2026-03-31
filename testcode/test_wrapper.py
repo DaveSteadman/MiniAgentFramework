@@ -43,14 +43,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# sys.path must include the code/ directory before project modules can be imported.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / "code"))
+
+from workspace_utils import get_test_results_dir
+
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-REPO_ROOT            = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "code"))
-from workspace_utils import get_test_results_dir  # noqa: E402
-
+REPO_ROOT          = _REPO_ROOT
 MAIN_SCRIPT        = REPO_ROOT / "code" / "main.py"
 DEFAULT_OUTPUT_DIR = get_test_results_dir()
 
