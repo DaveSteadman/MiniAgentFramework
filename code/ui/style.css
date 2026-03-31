@@ -20,6 +20,8 @@
     --red:          #f87171;
     --blue:         #60a5fa;
     --yellow:       #facc15;
+    --bg-wrap-btn:        transparent;
+    --bg-wrap-btn-active: rgba(255,255,255,0.12);
     --font-mono:    "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace;
     --font-ui:      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --radius:       2px;
@@ -158,7 +160,7 @@ html, body {
 .header-spacer { flex: 1; }
 
 .wrap-btn {
-    background:     transparent;
+    background:     var(--bg-wrap-btn);
     border:         1px solid var(--border);
     border-radius:  var(--radius);
     color:          var(--text-dim);
@@ -168,12 +170,12 @@ html, body {
     padding:        1px 6px;
     cursor:         pointer;
     text-transform: lowercase;
-    transition:     border-color 0.15s, color 0.15s;
+    transition:     border-color 0.15s, color 0.15s, background 0.15s;
     flex-shrink:    0;
 }
 
 .wrap-btn:hover       { border-color: var(--border-hi); color: var(--text-hi); }
-.wrap-btn.wrap-active { border-color: var(--border-hi); color: var(--text-hi); }
+.wrap-btn.wrap-active { border-color: var(--border-hi); color: var(--text-hi); background: var(--bg-wrap-btn-active); }
 
 .panel-body {
     flex: 1;
