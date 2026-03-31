@@ -104,9 +104,11 @@ def _cmd_help(arg: str, ctx: SlashCommandContext) -> None:
 
 def _cmd_models(arg: str, ctx: SlashCommandContext) -> None:
     from ollama_client import list_ollama_models
+    from ollama_client import get_active_host
     try:
         available = list_ollama_models()
-        ctx.output(f"{len(available)} model(s) installed:", "info")
+        host = get_active_host()
+        ctx.output(f"{len(available)} model(s) installed on: {host}", "info")
         for m in available:
             marker = "\u25ba" if m == ctx.config.resolved_model else " "
             ctx.output(f"  {marker} {m}", "item")
@@ -809,6 +811,118 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _cmd_testtrend(arg: str, ctx: SlashCommandContext) -> None:
+    # Scan all *_analysis.csv files under controldata/test_results/, optionally filtered
+    # by prompts-file name, sort chronologically, and print a pass-rate table.
+    import csv
+    import re
+    from pathlib import Path
+    from workspace_utils import get_test_results_dir
+
+    results_root = get_test_results_dir()
+    if not results_root.exists():
+        ctx.output("No test results directory found.", "error")
+        return
+
+    filter_name = arg.strip().lower().replace(" ", "_") if arg.strip() else ""
+
+    # Filename pattern: test_results_YYYYMMDD_HHMMSS_<prompts_name>_analysis.csv
+    _fname_re = re.compile(r"^test_results_(\d{8}_\d{6})_(.+)_analysis\.csv$")
+
+    entries: list[tuple[str, str, Path]] = []  # (sort_key, prompts_name, path)
+    for csv_path in results_root.rglob("*_analysis.csv"):
+        m = _fname_re.match(csv_path.name)
+        if not m:
+            continue
+        ts_key      = m.group(1)           # YYYYMMDD_HHMMSS - sorts lexicographically
+        prompts_name = m.group(2)
+        if filter_name and filter_name not in prompts_name:
+            continue
+        entries.append((ts_key, prompts_name, csv_path))
+
+    if not entries:
+        hint = f" matching '{filter_name}'" if filter_name else ""
+        ctx.output(f"No analysis files found{hint}.", "dim")
+        return
+
+    entries.sort(key=lambda e: e[0])
+
+    # Determine whether the prompts-file column is needed (mixed files in results)
+    show_file_col = len({e[1] for e in entries}) > 1
+
+    # ---- header ----
+    if show_file_col:
+        ctx.output(
+            f"{'Timestamp':<18}  {'Prompts file':<28}  {'Total':>5}  {'Pass%':>6}  "
+            f"{'Fail':>4}  {'Gap':>4}  {'AvgRnds':>7}  {'AvgSec':>6}",
+            "info",
+        )
+    else:
+        label = entries[0][1] if entries else ""
+        ctx.output(f"Trend for: {label}", "info")
+        ctx.output(
+            f"{'Timestamp':<18}  {'Total':>5}  {'Pass%':>6}  {'Fail':>4}  "
+            f"{'Gap':>4}  {'AvgRnds':>7}  {'AvgSec':>6}",
+            "info",
+        )
+
+    ctx.output("-" * (80 if show_file_col else 62), "dim")
+
+    for ts_key, prompts_name, csv_path in entries:
+        # Parse timestamp into a readable form: YYYYMMDD_HHMMSS -> YYYY-MM-DD HH:MM
+        ts_display = f"{ts_key[:4]}-{ts_key[4:6]}-{ts_key[6:8]} {ts_key[9:11]}:{ts_key[11:13]}"
+
+        rows: list[dict] = []
+        try:
+            with csv_path.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        except OSError:
+            ctx.output(f"  {ts_display}  (unreadable)", "error")
+            continue
+
+        if not rows:
+            ctx.output(f"  {ts_display}  (empty)", "dim")
+            continue
+
+        total   = len(rows)
+        passes  = sum(1 for r in rows if r.get("outcome", "") == "PASS")
+        fails   = sum(1 for r in rows if r.get("outcome", "") == "FAIL")
+        gaps    = sum(1 for r in rows if r.get("outcome", "") == "GAP")
+        pass_pct = 100.0 * passes / total if total else 0.0
+
+        iter_vals = []
+        for r in rows:
+            try:
+                iter_vals.append(float(r.get("iterations_used", 0)))
+            except (ValueError, TypeError):
+                pass
+        avg_rounds = sum(iter_vals) / len(iter_vals) if iter_vals else 0.0
+
+        dur_vals = []
+        for r in rows:
+            try:
+                dur_vals.append(float(r.get("duration_seconds", 0)))
+            except (ValueError, TypeError):
+                pass
+        avg_dur = sum(dur_vals) / len(dur_vals) if dur_vals else 0.0
+
+        outcome_marker = "" if passes == total else " !"
+        if show_file_col:
+            ctx.output(
+                f"{ts_display:<18}  {prompts_name:<28}  {total:>5}  {pass_pct:>5.0f}%  "
+                f"{fails:>4}  {gaps:>4}  {avg_rounds:>7.1f}  {avg_dur:>6.1f}{outcome_marker}",
+                "success" if passes == total else "error" if fails > 0 else "dim",
+            )
+        else:
+            ctx.output(
+                f"{ts_display:<18}  {total:>5}  {pass_pct:>5.0f}%  {fails:>4}  "
+                f"{gaps:>4}  {avg_rounds:>7.1f}  {avg_dur:>6.1f}{outcome_marker}",
+                "success" if passes == total else "error" if fails > 0 else "dim",
+            )
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _cmd_version(arg: str, ctx: SlashCommandContext) -> None:
     from version import __version__
     ctx.output(f"MiniAgentFramework {__version__}", "info")
@@ -1219,6 +1333,7 @@ _REGISTRY: dict[str, Callable] = {
     "/scratchdump":   _cmd_scratchdump,
     "/deletelogs":    _cmd_deletelogs,
     "/test":          _cmd_test,
+    "/testtrend":     _cmd_testtrend,
     "/recall":        _cmd_recall,
     "/tasks":         _cmd_tasks,
     "/task":          _cmd_task,
@@ -1241,6 +1356,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/scratchdump":   "<on|off>  Write scratchpad contents to controldata/scratchpad_dump.txt on every change (default: off)",
     "/deletelogs":    "<days>  Delete log and chatsession date-folders older than N days (e.g. /deletelogs 10)",
     "/test":          "<prompts-file|all>  Run test_wrapper on a prompts file (or all files); streams results live",
+    "/testtrend":     "[prompts-file]  Show pass-rate trend across all historical test runs (filtered by prompts file if given)",
     "/recall":        "Show a summary of prior skill outputs stored in this session's context",
     "/tasks":         "List all scheduled tasks with status, schedule, and first prompt",
     "/task":          "enable|disable|add|delete|run <name> [schedule] [prompt]  Manage scheduled tasks; /task run <name> executes a task immediately",

@@ -92,6 +92,37 @@ Single JSON payload for orchestration planning.
       "param_descriptions": {}
     },
     {
+      "skill_name": "Delegate Skill",
+      "relative_path": "code/skills/Delegate/skill.md",
+      "purpose": "Create a fresh child orchestration context for a focused sub-task. The child gets its own",
+      "module": "code/skills/Delegate/delegate_skill.py",
+      "trigger_keyword": "delegate",
+      "triggers": [
+        "the task contains a clear sub-problem that should be solved independently",
+        "intermediate tool chatter from the sub-problem would pollute the parent context",
+        "you want a focused, isolated sub-investigation before final synthesis"
+      ],
+      "functions": [
+        "delegate(prompt: str, instructions: str = \"\", max_iterations: int = 3)",
+        "delegate(...)"
+      ],
+      "inputs": [],
+      "outputs": [
+        "`status` - \"ok\" or \"error\"",
+        "`answer` - compact final answer from the child run",
+        "`delegate_prompt` - the child prompt actually used",
+        "`depth` - delegation depth of the child run",
+        "`max_iterations` - child iteration budget used"
+      ],
+      "param_descriptions": {
+        "delegate": {
+          "prompt": "the child task to execute. Must be a complete, self-contained question or instruction.",
+          "instructions": "extra steering prepended to the child prompt, e.g. \"research thoroughly and return a concise answer with evidence\".",
+          "max_iterations": "maximum tool-calling rounds for the child run, 1-8 recommended."
+        }
+      }
+    },
+    {
       "skill_name": "FileAccess Skill",
       "relative_path": "code/skills/FileAccess/skill.md",
       "purpose": "Interface for all file read, write, append, and search operations. All relative paths resolve under `./data/`; a `\"./\"` prefix anchors a path at the workspace root instead. Paths that escape the workspace root are rejected.",

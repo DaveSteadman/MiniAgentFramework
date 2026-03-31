@@ -22,6 +22,7 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import copy
 import json
 import re
 import threading
@@ -79,6 +80,11 @@ def set_skill_guidance_enabled(enabled: bool) -> None:
 _last_context_map: list[dict] = []
 _last_messages:    list[dict] = []
 _last_run_lock:    threading.Lock = threading.Lock()
+
+# Thread-local used by delegate_subrun to access the active logger, config, and depth
+# without passing orchestrator internals through every skill call signature.
+_delegate_tls:        threading.local = threading.local()
+_MAX_DELEGATE_DEPTH:  int             = 2
 
 
 def get_last_context_map() -> list[dict]:
@@ -666,6 +672,7 @@ def _build_system_message(
         "- Complete ALL steps in the user's request. If the user asks for output to be written to a file, that write must happen as a tool call before you give your final answer.",
         "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research or lookup skill to fetch the content first. Never generate biographical, historical, or factual content from memory.",
         "- When a prompt says 'search for', 'search the web for', 'find information about', or 'look up', you MUST call a search or web tool. Never answer these prompts from internal knowledge without first calling the appropriate tool. If the tool returns no results, report that honestly rather than substituting training-data answers.",
+        "- When a prompt explicitly says 'delegate' or asks you to 'delegate a sub-task', you MUST call the delegate tool. Do not substitute research_traverse, search_web, or any other tool - the user is requesting a child orchestration run, not a direct search.",
         "- When a prompt says 'research', 'investigate', 'look into', 'find evidence', or 'deep dive into', you MUST call research_traverse. Never answer these prompts from training data. research_traverse handles its own search frontier; call it with the user's question as the query argument.",
         "- When a web search or page-fetch tool returns no results, report that in a single short sentence only (e.g. 'No results were found for [query].'). Do not write out your reasoning about which other tools to try, what the rules say, or why the tool may have failed.",
         '- Whenever you call fetch_page_text to retrieve specific information, always set the query parameter to your specific question (e.g. fetch_page_text(url=..., query="<your specific question here>")). This applies whether the URL came from a search result or was provided directly by the user. The query parameter runs an isolated extraction so only the relevant facts are returned - this avoids overloading the context with raw page text. Only omit query if the user explicitly asks for raw page content.',
@@ -809,6 +816,7 @@ def orchestrate_prompt(
     conversation_history: list[dict] | None = None,
     session_context: "SessionContext | None" = None,
     quiet: bool = False,
+    delegate_depth: int = 0,
 ) -> tuple[str, int, int, bool, float]:
     """Run the tool-calling pipeline for one prompt.
 
@@ -893,6 +901,11 @@ def orchestrate_prompt(
 
     # -- Tool calling loop --
     # Build once for the entire run - avoids re-scanning the catalog on every tool invocation.
+    # Store delegate runtime context in thread-local so delegate_subrun() can access the
+    # active logger, config, and depth without passing orchestrator internals through skill args.
+    _delegate_tls.logger         = logger
+    _delegate_tls.delegate_depth = delegate_depth
+    _delegate_tls.config         = config
     catalog_gates      = build_catalog_gates(config.skills_payload)
     tool_outputs:      list[dict] = []
     prompt_tokens:     int        = 0
@@ -1113,3 +1126,117 @@ def orchestrate_prompt(
         )
 
     return final_response, prompt_tokens, completion_tokens, run_success, final_tps
+
+
+# ====================================================================================================
+# MARK: DELEGATE SUBRUN
+# ====================================================================================================
+# Core implementation of the Delegate orchestration primitive.
+#
+# Creates an isolated child orchestration context for a focused sub-task, runs the normal
+# tool-calling pipeline inside it, and returns a compact result dict to the caller.
+#
+# Accessed by the Delegate skill wrapper (code/skills/Delegate/delegate_skill.py) and also
+# callable directly from orchestration code that needs to spawn a sub-run programmatically.
+#
+# Guard rails enforced here:
+#   - Maximum delegation depth: _MAX_DELEGATE_DEPTH
+#   - Child loses access to the Delegate tool by default (allow_recursive_delegate=False)
+#   - Child does not inherit parent conversation history or session context
+#   - Child iteration budget capped at 8 rounds
+
+# ----------------------------------------------------------------------------------------------------
+def delegate_subrun(
+    prompt: str,
+    instructions: str = "",
+    max_iterations: int = 3,
+    allow_recursive_delegate: bool = False,
+) -> dict:
+    """Run a child orchestration context for one isolated sub-task.
+
+    Reads the active logger, config, and depth from thread-local state set by
+    orchestrate_prompt() at the start of each run. Returns a compact result dict
+    suitable for direct use in the parent model's synthesis step.
+    """
+    prompt       = str(prompt or "").strip()
+    instructions = str(instructions or "").strip()
+
+    if not prompt:
+        return {
+            "status":          "error",
+            "answer":          "delegate() requires a non-empty prompt.",
+            "delegate_prompt": "",
+            "depth":           0,
+            "max_iterations":  max_iterations,
+        }
+
+    _logger = getattr(_delegate_tls, "logger", None)
+    _depth  = int(getattr(_delegate_tls, "delegate_depth", 0))
+    _config = getattr(_delegate_tls, "config", None)
+
+    if _logger is None or _config is None:
+        return {
+            "status":          "error",
+            "answer":          "Delegate runtime context is not available. Was delegate_subrun called outside an orchestration run?",
+            "delegate_prompt": prompt,
+            "depth":           _depth,
+            "max_iterations":  max_iterations,
+        }
+
+    if _depth >= _MAX_DELEGATE_DEPTH:
+        return {
+            "status":          "error",
+            "answer":          f"Maximum delegation depth ({_MAX_DELEGATE_DEPTH}) reached. Cannot delegate further.",
+            "delegate_prompt": prompt,
+            "depth":           _depth,
+            "max_iterations":  max_iterations,
+        }
+
+    child_prompt     = f"{instructions}\n\n{prompt}".strip() if instructions else prompt
+    child_iterations = max(1, min(int(max_iterations), 8))
+
+    # Build child skills payload - remove Delegate by default to prevent runaway recursion.
+    child_payload = copy.deepcopy(_config.skills_payload)
+    if not allow_recursive_delegate:
+        child_payload["skills"] = [
+            s for s in child_payload.get("skills", [])
+            if "Delegate" not in s.get("skill_name", "")
+        ]
+
+    child_config = OrchestratorConfig(
+        resolved_model      = _config.resolved_model,
+        num_ctx             = _config.num_ctx,
+        max_iterations      = child_iterations,
+        skills_payload      = child_payload,
+        skills_summary_path = None,
+        catalog_mtime       = 0.0,
+    )
+
+    _logger.log_file_only(
+        f"[delegate] spawning child run: depth={_depth + 1} max_iter={child_iterations} "
+        f"prompt={trunc(child_prompt, 80)}"
+    )
+
+    try:
+        answer, _, _, run_success, _ = orchestrate_prompt(
+            user_prompt          = child_prompt,
+            config               = child_config,
+            logger               = _logger,
+            conversation_history = None,
+            session_context      = None,
+            quiet                = True,
+            delegate_depth       = _depth + 1,
+        )
+        status = "ok" if run_success else "error"
+    except Exception as exc:
+        answer      = f"Delegate child run failed: {exc}"
+        status      = "error"
+
+    return {
+        "status":          status,
+        "answer":          answer,
+        "delegate_prompt": child_prompt,
+        "depth":           _depth + 1,
+        "max_iterations":  child_iterations,
+    }
+

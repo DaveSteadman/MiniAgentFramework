@@ -36,6 +36,24 @@
       "fact": "investigate what AI agent frameworks are available in Python in 2025 - examine at least 8 results",
       "access_count": 153,
       "last_accessed": "2026-03-30 23:46:46"
+    },
+    {
+      "id": "94dae6a8",
+      "stored": "2026-03-31 21:36:48",
+      "updated": null,
+      "category": "environment",
+      "fact": "First, delegate a sub-task to find out what Ollama is and what its latest version is",
+      "access_count": 4,
+      "last_accessed": "2026-03-31 21:46:40"
+    },
+    {
+      "id": "942cd74a",
+      "stored": "2026-03-31 21:36:48",
+      "updated": null,
+      "category": "environment",
+      "fact": "cpp is and what its latest version is",
+      "access_count": 4,
+      "last_accessed": "2026-03-31 21:46:40"
     }
   ]
 }
