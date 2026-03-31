@@ -174,6 +174,23 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
         from orchestration import _format_context_map
         ctx.output(_format_context_map(context_map, ctx.config.num_ctx), "item")
 
+    def _resolve_index(rest: str) -> tuple[list, list, int] | None:
+        # Validate and parse a context-map index string.
+        # Returns (context_map, messages, idx) on success; outputs an error and returns None on failure.
+        context_map, messages = _get_map_and_messages()
+        if not context_map:
+            ctx.output("No run context available - send a prompt first.", "error")
+            return None
+        try:
+            idx = int(rest)
+        except ValueError:
+            ctx.output(f"Invalid index '{rest}' - must be an integer.", "error")
+            return None
+        if idx < 0 or idx >= len(context_map):
+            ctx.output(f"Index {idx} out of range (0 - {len(context_map) - 1}).", "error")
+            return None
+        return context_map, messages, idx
+
     # /ctx - show map + window size.
     if not arg:
         context_map, _ = _get_map_and_messages()
@@ -212,18 +229,10 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
         if not rest:
             ctx.output("Usage: /ctx item <index>", "dim")
             return
-        context_map, messages = _get_map_and_messages()
-        if not context_map:
-            ctx.output("No run context available - send a prompt first.", "error")
+        resolved = _resolve_index(rest)
+        if resolved is None:
             return
-        try:
-            idx = int(rest)
-        except ValueError:
-            ctx.output(f"Invalid index '{rest}' - must be an integer.", "error")
-            return
-        if idx < 0 or idx >= len(context_map):
-            ctx.output(f"Index {idx} out of range (0 - {len(context_map) - 1}).", "error")
-            return
+        context_map, messages, idx = resolved
         entry   = context_map[idx]
         msg_idx = entry.get("msg_idx")
         ctx.output(f"Entry {idx}: role={entry.get('role')}  label={entry.get('label')}  chars={entry.get('chars'):,}", "info")
@@ -239,18 +248,10 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
         if not rest:
             ctx.output("Usage: /ctx compact <index>", "dim")
             return
-        context_map, messages = _get_map_and_messages()
-        if not context_map:
-            ctx.output("No run context available - send a prompt first.", "error")
+        resolved = _resolve_index(rest)
+        if resolved is None:
             return
-        try:
-            idx = int(rest)
-        except ValueError:
-            ctx.output(f"Invalid index '{rest}' - must be an integer.", "error")
-            return
-        if idx < 0 or idx >= len(context_map):
-            ctx.output(f"Index {idx} out of range (0 - {len(context_map) - 1}).", "error")
-            return
+        context_map, messages, idx = resolved
         entry = context_map[idx]
         if entry.get("msg_idx") is None:
             ctx.output(

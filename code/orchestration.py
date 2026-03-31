@@ -275,12 +275,11 @@ class SessionContext:
             items = []
             for item in result:
                 if isinstance(item, dict):
+                    title, url, snippet = _extract_result_fields(item)
                     items.append({
-                        "url":     item.get("url",     ""),
-                        "title":   item.get("title",   ""),
-                        "snippet": _truncate_words(
-                            item.get("snippet") or item.get("body", ""), 50
-                        ),
+                        "url":     url,
+                        "title":   title,
+                        "snippet": _truncate_words(snippet, 50),
                     })
             entry["results"] = items
             entry["summary"] = f"{len(items)} result(s) returned"
@@ -399,6 +398,16 @@ def _build_skill_selection_guidance(skills_payload: dict) -> str:
 # ====================================================================================================
 # MARK: LOG FORMATTING
 # ====================================================================================================
+def _extract_result_fields(item: dict) -> tuple[str, str, str]:
+    # Extract the canonical display fields from a single result-list dict item.
+    # Returns (title, url, snippet) with snippet falling back to the 'body' key.
+    title   = item.get("title", "")
+    url     = item.get("url", "")
+    snippet = item.get("snippet") or item.get("body", "")
+    return title, url, snippet
+
+
+# ----------------------------------------------------------------------------------------------------
 def _format_tool_outputs(tool_outputs: list[dict]) -> str:
     """Return a compact structural summary of executed tool calls and their results."""
     if not tool_outputs:
@@ -436,9 +445,7 @@ def _format_tool_outputs(tool_outputs: list[dict]) -> str:
             lines.append(f"  -> list  len={len(result)}")
             for item in result:
                 if isinstance(item, dict):
-                    title   = item.get("title", "")
-                    url     = item.get("url", "")
-                    snippet = item.get("snippet") or item.get("body", "")
+                    title, url, snippet = _extract_result_fields(item)
                     if title:
                         lines.append(f"  {trunc(title, 80)}")
                     if url:
@@ -477,9 +484,7 @@ def _build_fallback_answer(user_prompt: str, tool_outputs: list[dict]) -> str:
         if isinstance(result, list):
             for item in result:
                 if isinstance(item, dict):
-                    title   = item.get("title", "")
-                    url     = item.get("url", "")
-                    snippet = item.get("snippet") or item.get("body", "")
+                    title, url, snippet = _extract_result_fields(item)
                     if title:
                         lines.append(f"  - {title}")
                     if url:
