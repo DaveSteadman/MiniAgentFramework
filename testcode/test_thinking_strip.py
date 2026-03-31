@@ -1,3 +1,16 @@
+# ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# Unit tests for _strip_cot_preamble() in orchestration.py.
+#
+# When a model uses extended thinking (e.g. QwQ, DeepSeek-R1), it emits a reasoning
+# preamble before its final answer - phrases like "Let me think through this" or
+# "We should consider whether...". _strip_cot_preamble() detects and removes that
+# preamble so only the actual answer reaches the user.
+#
+# These tests run without an LLM and complete in under a second.
+# Called automatically by _run_post_test_checks after every /test run.
+# ====================================================================================================
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "code"))

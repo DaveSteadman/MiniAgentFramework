@@ -103,8 +103,9 @@ Single JSON payload for orchestration planning.
         "you want a focused, isolated sub-investigation before final synthesis"
       ],
       "functions": [
-        "delegate(prompt: str, instructions: str = \"\", max_iterations: int = 3)",
-        "delegate(...)"
+        "delegate(...)",
+        "delegate(prompt, instructions = \"\", max_iterations = 3)",
+        "delegate(prompt: str, instructions: str = \"\", max_iterations: int = 3)"
       ],
       "inputs": [],
       "outputs": [

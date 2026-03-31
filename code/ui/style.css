@@ -20,6 +20,15 @@
     --red:          #f87171;
     --blue:         #60a5fa;
     --yellow:       #facc15;
+    /* Semantic color tokens - shared by log and chat panels */
+    --clr-body:       rgba(255,255,255,0.70);
+    --clr-title:      rgba(255,255,255,0.90);
+    --clr-sep:        rgba(96,165,250,0.40);
+    --clr-tool-round: #22d3ee;
+    --clr-progress:   rgba(250,204,21,0.88);
+    --clr-thinking:   rgba(255,255,255,0.22);
+    --clr-user:       #60a5fa;
+    --clr-agent:      #4ade80;
     --bg-wrap-btn:        transparent;
     --bg-wrap-btn-active: rgba(174, 180, 7, 0.274);
     --font-mono:    "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace;
@@ -63,14 +72,33 @@ html, body {
 }
 
 #header .brand {
-    font-size: 11px;
-    letter-spacing: 0.28em;
+    display:        flex;
+    align-items:    baseline;
+    gap:            0;
+    font-family:    var(--font-mono);
+    font-size:      11px;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    user-select:    none;
 }
 
-#header .brand strong {
-    color: var(--text-hi);
+#header .brand-pre,
+#header .brand-post {
+    color:          rgba(255,255,255,0.30);
+    font-size:      10px;
+    font-weight:    400;
+    letter-spacing: 0.30em;
+}
+
+#header .brand-accent {
+    background:          linear-gradient(90deg, #60a5fa 0%, #a78bfa 50%, #22d3ee 100%);
+    -webkit-background-clip: text;
+    background-clip:     text;
+    -webkit-text-fill-color: transparent;
+    font-size:           13px;
+    font-weight:         700;
+    letter-spacing:      0.35em;
+    padding:             0 3px;
 }
 
 #header .sep {
@@ -114,12 +142,64 @@ html, body {
 
 #main-grid {
     display: grid;
-    grid-template-columns: 200px 1fr 1fr;
-    grid-template-rows: 1fr 120px;
-    gap: var(--gap);
+    grid-template-columns: 200px 5px 1fr 5px 1fr;
+    grid-template-rows: 1fr 5px 120px;
+    gap: 0;
     padding: var(--gap);
     height: 100%;
     overflow: hidden;
+}
+
+/* ============================================================
+   SPLITTERS
+   ============================================================ */
+
+.splitter {
+    background: transparent;
+    position: relative;
+    z-index: 5;
+    flex-shrink: 0;
+}
+
+.splitter::after {
+    content: "";
+    position: absolute;
+    background: transparent;
+    transition: background 0.15s;
+}
+
+.splitter:hover::after,
+.splitter.dragging::after {
+    background: var(--border-hi);
+}
+
+body.splitter-drag   { user-select: none; cursor: col-resize; }
+body.splitter-drag-h { user-select: none; cursor: row-resize; }
+
+.splitter-v {
+    grid-row: 1;
+    cursor: col-resize;
+    width: 5px;
+}
+
+.splitter-v::after {
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 1px;
+}
+
+.splitter-h {
+    grid-column: 1 / 6;
+    cursor: row-resize;
+    height: 5px;
+}
+
+.splitter-h::after {
+    left: 0;
+    right: 0;
+    top: 2px;
+    height: 1px;
 }
 
 /* ============================================================
@@ -316,23 +396,23 @@ html, body {
    ============================================================ */
 
 #panel-log {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 1;
 }
 
 .log-line {
     white-space: pre-wrap;
     word-break: break-all;
-    color: var(--text-dim);
+    color: var(--clr-body);
     font-size: 11px;
     line-height: 1.55;
 }
 
-.log-line.log-sep        { color: rgba(96,165,250,0.30); }
-.log-line.log-title      { color: rgba(255,255,255,0.75); font-weight: 600; }
-.log-line.log-tool-round { color: #5eead4; font-weight: 600; }
-.log-line.log-progress   { color: rgba(250,204,21,0.65); }
-.log-line.log-thinking   { color: rgba(255,255,255,0.25); font-style: italic; }
+.log-line.log-sep        { color: var(--clr-sep); }
+.log-line.log-title      { color: var(--clr-title); font-weight: 600; }
+.log-line.log-tool-round { color: var(--clr-tool-round); font-weight: 600; }
+.log-line.log-progress   { color: var(--clr-progress); }
+.log-line.log-thinking   { color: var(--clr-thinking); font-style: italic; }
 .log-line.error          { color: var(--red); }
 .log-line.success        { color: var(--green); }
 .log-line.sched          { color: var(--yellow); }
@@ -342,7 +422,7 @@ html, body {
    ============================================================ */
 
 #panel-chat {
-    grid-column: 3;
+    grid-column: 5;
     grid-row: 1;
 }
 
@@ -358,11 +438,11 @@ html, body {
     margin-bottom: 3px;
 }
 
-.chat-msg.user .msg-role  { color: var(--blue); }
-.chat-msg.agent .msg-role { color: var(--green); }
+.chat-msg.user .msg-role  { color: var(--clr-user); }
+.chat-msg.agent .msg-role { color: var(--clr-agent); }
 
 .chat-msg .msg-text {
-    color: var(--text);
+    color: var(--clr-body);
     white-space: pre-wrap;
     font-family: var(--font-mono);
     font-size: 12px;
@@ -394,8 +474,8 @@ html, body {
    ============================================================ */
 
 #panel-input {
-    grid-column: 1 / 4;
-    grid-row: 2;
+    grid-column: 1 / 6;
+    grid-row: 3;
     display: flex;
     align-items: stretch;
     gap: 0;
@@ -465,20 +545,27 @@ html, body {
 
 @media (max-width: 900px) {
     #main-grid {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr 5px 1fr;
+        grid-template-rows: 1fr 5px 120px;
     }
     #panel-timeline { display: none; }
+    #splitter-v1    { display: none; }
+    #splitter-v2    { grid-column: 2; }
     #panel-log      { grid-column: 1; }
-    #panel-chat     { grid-column: 2; }
-    #panel-input    { grid-column: 1 / 3; }
+    #panel-chat     { grid-column: 3; }
+    #panel-input    { grid-column: 1 / 4; }
+    #splitter-h1    { grid-column: 1 / 4; }
 }
 
 @media (max-width: 600px) {
     #main-grid {
         grid-template-columns: 1fr;
-        grid-template-rows: 1fr 1fr 100px;
+        grid-template-rows: 1fr 5px 1fr 5px 100px;
     }
-    #panel-log  { grid-column: 1; grid-row: 1; }
-    #panel-chat { grid-column: 1; grid-row: 2; }
-    #panel-input { grid-column: 1; grid-row: 3; }
+    #splitter-v1 { display: none; }
+    #splitter-v2 { display: none; }
+    #panel-log   { grid-column: 1; grid-row: 1; }
+    #splitter-h1 { grid-column: 1; grid-row: 2; }
+    #panel-chat  { grid-column: 1; grid-row: 3; }
+    #panel-input { grid-column: 1; grid-row: 5; }
 }

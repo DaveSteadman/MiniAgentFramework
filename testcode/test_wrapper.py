@@ -1,30 +1,33 @@
 # ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
-# External test wrapper for MiniAgentFramework.
+# Test runner for MiniAgentFramework.
 #
-# Invokes the framework as a full system via subprocess and captures each prompt-response cycle
-# with accurate timing. Results are written to a structured CSV file that uses proper quoting
-# so that fields containing commas or newlines do not cause parsing errors.
+# Invoked as a subprocess by the /test slash command in slash_commands.py.
+# Not intended for interactive use.
 #
-# This module is invoked as a subprocess by the /test slash command in slash_commands.py.
-# It is not intended to be run interactively from the command line.
+# Data flow:
+#   1. load_prompts_file()   -- reads a JSON array of plain prompts or multi-turn exchanges
+#   2. invoke_exchange()     -- spawns main.py via --chat-sequence-file and captures stdout
+#   3. Output parsers        -- extract turn responses, token metrics, log file path, assert results
+#   4. CSV writers           -- append one row per turn to the shared results CSV
+#   5. run_tests()           -- dispatches each item to _run_single_item or _run_exchange_item
 #
-# Prompts files are JSON arrays whose elements are either:
-#   - A plain string        -- single standalone prompt (original format, unchanged)
-#   - An exchange object    -- multi-turn sequence sharing ConversationHistory + SessionContext:
+# Prompt file format (JSON array):
+#   Plain string  -- single standalone prompt
+#   Exchange dict -- multi-turn sequence with optional per-turn assertions:
 #       {
 #           "exchange": "label",
 #           "turns": [
-#               { "user": "first turn prompt" },
-#               { "user": "follow-up?", "assert": "contains|expected text" }
+#               { "user": "first prompt" },
+#               { "user": "follow-up", "assert": "contains|expected text" }
 #           ]
 #       }
-#     Supported assert expressions (optional, one per turn):
-#       contains|<text>   -- final_output must contain <text> (case-insensitive)
-#       not_contains|<text> -- final_output must NOT contain <text> (case-insensitive)
-#       not_empty         -- final_output must be non-empty
-#       exit_code|<n>     -- overall exchange exit code must equal <n>
+#   Assert expressions:
+#       contains|<text>       -- output must contain text (case-insensitive)
+#       not_contains|<text>   -- output must NOT contain text (case-insensitive)
+#       not_empty             -- output must be non-empty
+#       exit_code|<n>         -- subprocess exit code must equal n
 # ====================================================================================================
 
 
@@ -53,9 +56,8 @@ from workspace_utils import get_test_results_dir
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-REPO_ROOT          = _REPO_ROOT
-MAIN_SCRIPT        = REPO_ROOT / "code" / "main.py"
-DEFAULT_OUTPUT_DIR = get_test_results_dir()
+REPO_ROOT = _REPO_ROOT
+MAIN_SCRIPT = REPO_ROOT / "code" / "main.py"
 
 # Maximum time in seconds to wait for a single framework invocation before aborting.
 SUBPROCESS_TIMEOUT_SECONDS = 300
@@ -88,19 +90,15 @@ def load_prompts_file(path: Path) -> list:
 
 
 # ====================================================================================================
-# MARK: INVOCATION
+# MARK: FRAMEWORK INVOCATION
 # ====================================================================================================
 def invoke_framework(
     prompt: str,
     model: str | None = None,
     ollama_host: str | None = None,
 ) -> tuple[float, int, str, str]:
-    """Invoke code/main.py with the given prompt and return (duration, exit_code, stdout, stderr).
-
-    Routes through --chat-sequence-file (single-element array) so the output is emitted
-    in the structured [TURN 1] Agent: format, consistent with exchange mode and parseable
-    by _parse_turn_outputs.
-    """
+    # Single-prompt convenience wrapper - routes through invoke_exchange so output
+    # is always in [TURN N] format, consistent with multi-turn exchanges.
     return invoke_exchange(
         [prompt],
         model=model,
@@ -114,10 +112,8 @@ def invoke_exchange(
     model: str | None = None,
     ollama_host: str | None = None,
 ) -> tuple[float, int, str, str]:
-    """Run a list of prompts as a shared-history exchange via --chat-sequence-file.
-
-    Returns (duration, exit_code, stdout, stderr) for the whole exchange.
-    """
+    # Writes prompts to a temp JSON file, passes it to main.py via --chat-sequence-file,
+    # and returns (duration_secs, exit_code, stdout, stderr).
     start_time = time.monotonic()
 
     with tempfile.NamedTemporaryFile(
@@ -147,8 +143,16 @@ def invoke_exchange(
     return duration, result.returncode, result.stdout, result.stderr
 
 
-# ----------------------------------------------------------------------------------------------------
+# ====================================================================================================
+# MARK: OUTPUT PARSING
+# Parse the structured stdout that main.py emits in --chat-sequence-file mode.
+# Each turn produces:
+#   [TURN N] User: <prompt>
+#   [TURN N] Agent: <response, may be multi-line>
+#   [TURN N] tokens=<n> tps=<f>
+# ====================================================================================================
 def extract_log_file(stdout_text: str) -> str:
+    # Pull the log file path from the SYSTEM STATUS header line.
     for line in stdout_text.splitlines():
         if line.strip().startswith("Log file:"):
             return line.split("Log file:", maxsplit=1)[1].strip()
@@ -157,7 +161,7 @@ def extract_log_file(stdout_text: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 def _parse_turn_outputs(stdout_text: str) -> dict[int, str]:
-    """Parse [TURN N] Agent: lines from a chat-sequence stdout into {turn_idx: response}."""
+    # Returns {turn_idx: agent_response_text} for every turn in the output.
     outputs: dict[int, str] = {}
     current_turn: int | None = None
     current_lines: list[str] = []
@@ -192,7 +196,7 @@ def _parse_turn_outputs(stdout_text: str) -> dict[int, str]:
 
 # ----------------------------------------------------------------------------------------------------
 def _parse_turn_metrics(stdout_text: str) -> dict[int, tuple[int, str]]:
-    """Parse [TURN N] tokens=<n> tps=<f> lines into {turn_idx: (tokens, tps_str)}."""
+    # Returns {turn_idx: (prompt_tokens, tps_str)} for every turn.
     metrics: dict[int, tuple[int, str]] = {}
     pattern = re.compile(r"^\[TURN\s+(\d+)\]\s+tokens=(\d+)\s+tps=([0-9.]+)$")
     for line in stdout_text.splitlines():
@@ -204,8 +208,14 @@ def _parse_turn_metrics(stdout_text: str) -> dict[int, tuple[int, str]]:
 
 
 # ----------------------------------------------------------------------------------------------------
+def extract_final_output(stdout_text: str) -> str:
+    # Convenience accessor for the single-prompt case: returns turn 1 agent response.
+    return _parse_turn_outputs(stdout_text).get(1, "").replace("\u202f", " ")
+
+
+# ----------------------------------------------------------------------------------------------------
 def _evaluate_assert(expression: str, final_output: str, exit_code: int) -> str:
-    """Evaluate an assert expression against outputs.  Returns 'PASS', 'FAIL', or 'SKIP'."""
+    # Returns 'PASS', 'FAIL', or 'SKIP' (no expression).
     if not expression:
         return "SKIP"
     op, _, value = expression.partition("|")
@@ -224,22 +234,9 @@ def _evaluate_assert(expression: str, final_output: str, exit_code: int) -> str:
     return "SKIP"
 
 
-# ----------------------------------------------------------------------------------------------------
-def extract_final_output(stdout_text: str) -> str:
-    """Extract the agent response from structured [TURN 1] Agent: output."""
-    return _parse_turn_outputs(stdout_text).get(1, "").replace("\u202f", " ")
-
-
 # ====================================================================================================
 # MARK: CSV OUTPUT
 # ====================================================================================================
-def build_output_path(output_dir: Path) -> Path:
-    now      = datetime.now()
-    date_dir = output_dir / now.strftime("%Y-%m-%d")
-    return date_dir / f"test_results_{now.strftime('%Y%m%d_%H%M%S')}.csv"
-
-
-# ----------------------------------------------------------------------------------------------------
 def initialize_csv(output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # Only write the header row when the file is new or empty so that
@@ -277,7 +274,7 @@ def append_csv_row(output_path: Path, row: dict) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 def _base_row(run_timestamp: str, source_file: str, prompt: str, exchange_name: str = "", turn_index: int = 0) -> dict:
-    """Return a pre-populated CSV row dict with all fields at safe defaults."""
+    # Pre-populated CSV row dict with all fields at safe defaults.
     return {
         "timestamp":        run_timestamp,
         "source_file":      source_file,
@@ -298,14 +295,11 @@ def _base_row(run_timestamp: str, source_file: str, prompt: str, exchange_name: 
 # ====================================================================================================
 def run_tests(
     prompts: list,
-    output_dir: Path,
+    output_path: Path,
     model: str | None = None,
     ollama_host: str | None = None,
-    output_path: Path | None = None,
     source_file: str = "",
 ) -> Path:
-    if output_path is None:
-        output_path = build_output_path(output_dir)
     initialize_csv(output_path)
     model_label = f" (model: {model})" if model else ""
     host_label  = f" (host: {ollama_host})" if ollama_host else ""
@@ -451,12 +445,11 @@ def _run_exchange_item(
 
 
 # ====================================================================================================
-# MARK: CLI
+# MARK: ENTRYPOINT
 # ====================================================================================================
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="External test wrapper for MiniAgentFramework. "
-                    "Invokes the framework as a subprocess and records results to CSV."
+        description="Test runner for MiniAgentFramework - invoked by /test slash command."
     )
     parser.add_argument(
         "--prompts-file",
@@ -492,15 +485,16 @@ def parse_args() -> argparse.Namespace:
 
 
 # ====================================================================================================
-# MARK: ENTRYPOINT
-# ====================================================================================================
 if __name__ == "__main__":
     args = parse_args()
+    if args.output_file is None:
+        _now = datetime.now()
+        _out_dir = get_test_results_dir() / _now.strftime("%Y-%m-%d")
+        args.output_file = _out_dir / f"test_results_{_now.strftime('%Y%m%d_%H%M%S')}.csv"
     run_tests(
         prompts=load_prompts_file(args.prompts_file),
-        output_dir=DEFAULT_OUTPUT_DIR,
+        output_path=args.output_file,
         model=args.model,
         ollama_host=args.ollama_host,
-        output_path=args.output_file,
         source_file=args.source_file or args.prompts_file.name,
     )

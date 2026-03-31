@@ -3,10 +3,9 @@
 # ====================================================================================================
 # WebSearch skill for the MiniAgentFramework.
 #
-# Searches DuckDuckGo HTML (no API key required) and returns structured result lists.
-# All network I/O uses Python stdlib (urllib) so there are no mandatory third-party dependencies.
-#
-# Searches DuckDuckGo HTML using a single-file skill pattern with a clean, model-callable function surface.
+# Searches DuckDuckGo Lite (lite.duckduckgo.com) - no API key, no JavaScript required.
+# Uses Python stdlib (urllib) only; no mandatory third-party dependencies.
+# Returns structured result lists suitable for direct LLM consumption.
 #
 # Related modules:
 #   - main.py                          -- orchestration entry point
@@ -21,6 +20,7 @@
 # ====================================================================================================
 import html as _html
 import re
+import time
 import urllib.parse
 
 from webpage_utils import fetch_html as _fetch_html
@@ -109,7 +109,7 @@ def _extract_ddg_results(html_text: str, max_results: int) -> list[dict]:
             title = _strip_html(anchor.group(2))
             url   = _decode_ddg_url(href)
 
-            if not title or not url or url.startswith("/") or _is_ddg_ad(url):
+            if not title or not url or url.startswith("/") or url.startswith("//") or _is_ddg_ad(url):
                 continue
 
             snippet = _strip_html(snippets[index].group(1)) if index < len(snippets) else ""
@@ -180,6 +180,9 @@ def search_web(
 
     if not results:
         return [{"rank": 0, "title": "No results", "url": "", "snippet": f"DuckDuckGo returned no results for: {query}"}]
+
+    # Throttle between successive calls to avoid rate-limiting on rapid multi-query tasks.
+    time.sleep(1.0)
 
     return results
 

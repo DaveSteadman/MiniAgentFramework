@@ -631,10 +631,10 @@ def _run_one_test_file(
 # ----------------------------------------------------------------------------------------------------
 def _run_post_test_checks(ctx, csv_path, testcode_dir, subprocess_mod, sys_mod) -> None:
     # Run quick unit tests and the results analyzer after a wrapper test run completes.
-    # Runs test_regressions.py and test_cot_preamble.py (no LLM, completes in seconds),
+    # Runs test_regressions.py and test_thinking_strip.py (no LLM, completes in seconds),
     # then test_analyzer.py on the CSV to produce _analysis.csv and _gaps.txt alongside it.
     ctx.output("--- Post-test checks ---", "dim")
-    for script_name in ("test_regressions.py", "test_cot_preamble.py"):
+    for script_name in ("test_regressions.py", "test_thinking_strip.py"):
         script = testcode_dir / script_name
         ctx.output(f"  {script_name} ...", "dim")
         try:
