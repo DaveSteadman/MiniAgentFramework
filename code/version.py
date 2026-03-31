@@ -9,8 +9,11 @@
 #   0.2        - next tagged release
 #   1.0-rc1    - release candidate
 #
+#   0001        - incrementing build number
+#
 # Bump __version__ to X.Y+dev immediately after tagging a release,
 # and to X.Y (no suffix) just before tagging the next one.
+# Bump build number on any code change. 
 # ====================================================================================================
 
-__version__ = "0.2+dev"
+__version__ = "[0.2+dev / 0001]"
