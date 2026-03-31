@@ -33,7 +33,7 @@ let _queueResizeObserver  = null;
 let _currentLogPath       = "";
 let _logLive              = true;   // when false, refreshLatestLogFile() is suppressed
 let _logScrollGuard       = false;  // true while a programmatic file load is settling
-let _onLatestFile         = true;   // true only when viewing the newest log file
+let _onLatestFile         = true;   // true only when the newest log file is showing
 
 // ====================================================================================================
 // MARK: DOM REFS
@@ -600,7 +600,6 @@ async function logNavStep(delta) {
     const next = allFiles[idx + delta];
     if (!next) return;  // already at boundary
 
-    // Track whether we've navigated to the newest file.
     _onLatestFile = (idx + delta === allFiles.length - 1);
 
     // Navigating away from live stream - pause live mode.
@@ -689,7 +688,10 @@ function listenRun(runId) {
                 }
                 appendThinking(runId);
             } else if (ev.type === "log_file") {
-                _switchLogStream(ev.path);
+                // Only follow the new log file if live mode is active.
+                if (_logLive) {
+                    _switchLogStream(ev.path);
+                }
             } else if (ev.type === "test_agent_response") {
                 const wrap = appendChatMessage("agent", ev.response, "turn " + ev.turn);
                 testTurnMessages.set(String(ev.turn), wrap);
@@ -878,7 +880,7 @@ function init() {
     dom.input().addEventListener("keydown", onInputKeydown);
     dom.sendBtn().addEventListener("click", submitPrompt);
 
-    // Scroll-to-pause/resume live mode on the log panel.
+    // Scroll controls live mode: up pauses it, bottom of active file re-engages it.
     dom.log().addEventListener("scroll", () => {
         if (_logScrollGuard) return;
         if (_isLogNearBottom()) {

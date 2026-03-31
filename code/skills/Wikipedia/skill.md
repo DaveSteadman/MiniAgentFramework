@@ -28,6 +28,17 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 
 ## Tool selection guidance
 
+**If `kiwix_url` is set in default.json, use the Kiwix skill instead.**
+`kiwix_search` + `kiwix_get_article` retrieves the full local Wikipedia snapshot, which is
+faster, richer, and not subject to rate limits. Only fall back to `lookup_wikipedia` when
+Kiwix is not configured.
+
+**Prefer `lookup_wikipedia` over `fetch_page_text` for Wikipedia content.**
+Never use `fetch_page_text` with a `wikipedia.org` URL. `lookup_wikipedia` calls the Wikipedia
+REST API directly, returns a clean pre-parsed extract, and is significantly faster and more
+reliable than scraping the HTML page. If the topic has a Wikipedia article, always call
+`lookup_wikipedia(topic)` instead of fetching the Wikipedia URL.
+
 **Check the scratchpad before calling Wikipedia.**
 If a Wikipedia article or related content was already fetched earlier in this session, it will
 be stored in the scratchpad. Use `scratch_query(key, question)` to extract the needed

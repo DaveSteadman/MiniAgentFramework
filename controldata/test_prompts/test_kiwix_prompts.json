@@ -1,0 +1,22 @@
+[
+    { "exchange": "kiwix_python_creator", "turns": [{ "user": "use kiwix to look up the Python programming language and tell me who designed it", "assert": "contains|Guido" }] },
+    { "exchange": "kiwix_transformer_concept", "turns": [{ "user": "search kiwix for the Transformer deep learning architecture and explain what attention means in that context", "assert": "contains|attention" }] },
+    { "exchange": "kiwix_periodic_table", "turns": [{ "user": "search kiwix for the periodic table and tell me how many chemical elements are currently recognised", "assert": "contains|118" }] },
+    { "exchange": "kiwix_project_gutenberg", "turns": [{ "user": "look up Project Gutenberg on kiwix and explain what it is in one sentence", "assert": "contains|public domain" }] },
+
+    { "exchange": "kiwix_attention_softmax", "turns": [{ "user": "use kiwix to find and read the article about attention in machine learning, then explain the role of softmax", "assert": "contains|softmax" }] },
+    { "exchange": "kiwix_french_revolution_year", "turns": [{ "user": "search kiwix for the French Revolution and tell me what year it began", "assert": "contains|1789" }] },
+    { "exchange": "kiwix_newton_laws", "turns": [{ "user": "use kiwix to look up Isaac Newton and describe his three laws of motion briefly", "assert": "contains|motion" }] },
+    { "exchange": "kiwix_relativity", "turns": [{ "user": "search kiwix for Einstein's theory of special relativity and summarise the key idea in two sentences", "assert": "contains|Einstein" }] },
+
+    { "exchange": "kiwix_moby_dick_opening", "turns": [{ "user": "search kiwix for Moby Dick and tell me the famous opening words of the novel", "assert": "contains|Ishmael" }] },
+    { "exchange": "kiwix_tcp_handshake", "turns": [{ "user": "use kiwix to read about TCP and explain what happens during the three-way handshake", "assert": "not_contains|no results" }] },
+
+    { "exchange": "kiwix_gutenberg_dickens", "turns": [{ "user": "search kiwix for Charles Dickens and list at least two books of his that are mentioned", "assert": "not_contains|no results" }] },
+    { "exchange": "kiwix_dna_structure", "turns": [{ "user": "search kiwix for DNA and tell me who discovered its double helix structure", "assert": "contains|Watson" }] },
+    { "exchange": "kiwix_python_typing_module", "turns": [{ "user": "use kiwix to look up the Python programming language and tell me what version introduced type hints", "assert": "not_contains|no results" }] },
+
+    { "exchange": "kiwix_multistep_attention_paper", "turns": [{ "user": "search kiwix for the paper Attention Is All You Need and tell me who the authors were", "assert": "not_contains|no results" }] },
+
+    "search kiwix for xyzzy12345nonsensequery and report what the result is"
+]

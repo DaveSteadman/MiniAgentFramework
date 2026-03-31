@@ -232,6 +232,34 @@ Single JSON payload for orchestration planning.
       }
     },
     {
+      "skill_name": "Kiwix Skill",
+      "relative_path": "code/skills/Kiwix/skill.md",
+      "purpose": "Search and retrieve articles from a local Kiwix server. Kiwix hosts offline snapshots of Wikipedia, Project Gutenberg, and other reference libraries. Use this skill for factual lookups, article content, and reference research when a Kiwix server is available on the local network. Because Kiwix is local there is no rate-limiting, no bot detection, and no internet dependency.",
+      "module": "code/skills/Kiwix/kiwix_skill.py",
+      "trigger_keyword": "kiwix",
+      "triggers": [],
+      "functions": [
+        "kiwix_get_article(article_path)",
+        "kiwix_get_article(article_path, max_words=600, timeout=15)",
+        "kiwix_search(\"Python programming language\")",
+        "kiwix_search(query, max_results=5, timeout=15)"
+      ],
+      "inputs": [],
+      "outputs": [],
+      "param_descriptions": {
+        "kiwix_search": {
+          "query": "search terms to look up across all installed Kiwix books.",
+          "max_results": "number of results to return.",
+          "timeout": "network timeout in seconds."
+        },
+        "kiwix_get_article": {
+          "article_path": "the path from a `kiwix_search` result, e.g. `/content/wikipedia_en_all_maxi_2025-08/Python_(programming_language)`.",
+          "max_words": "word cap on returned text.",
+          "timeout": "network timeout in seconds."
+        }
+      }
+    },
+    {
       "skill_name": "Memory Skill",
       "relative_path": "code/skills/Memory/skill.md",
       "purpose": "Persist and recall durable user-stated facts across sessions - identity, preferences, project context, and environment facts. A newer fact on the same subject supersedes the older one. Do not store questions, commands, or ephemeral data such as current time or system stats. Facts persist in `memory_store.json` with category, timestamps, and access tracking.",
@@ -714,6 +742,7 @@ Single JSON payload for orchestration planning.
         "lookup_wikipedia(\"Python programming language\")",
         "lookup_wikipedia(\"quantum entanglement\")",
         "lookup_wikipedia(...)",
+        "lookup_wikipedia(topic)",
         "lookup_wikipedia(topic, timeout = 15)",
         "lookup_wikipedia(topic: str, timeout: int = 15)"
       ],
