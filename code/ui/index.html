@@ -23,6 +23,7 @@
             <span id="ollama-ctx" class="info-chip"></span>
         </div>
         <div class="sep"></div>
+        <button class="wrap-btn" id="btn-reset-layout" onclick="resetLayout()">default layout</button>
         <div id="version-chip"></div>
     </header>
 
@@ -41,16 +42,23 @@
             <div id="timeline-queue"></div>
         </div>
 
+        <div class="splitter splitter-v" id="splitter-v1"></div>
+
         <!-- Log stream -->
         <div class="panel" id="panel-log">
             <div class="panel-header">
                 <div class="dot"></div>
                 <span id="log-panel-title">Log</span>
                 <span class="header-spacer"></span>
+                <button class="wrap-btn" id="log-btn-up"   onclick="logNavStep(-1)">&#x2191;</button>
+                <button class="wrap-btn" id="log-btn-down" onclick="logNavStep(+1)">&#x2193;</button>
+                <button class="wrap-btn wrap-active" id="log-btn-live" onclick="toggleLogLive()">live</button>
                 <button class="wrap-btn" id="wrap-btn-log" onclick="toggleWrap('log-body','wrap-btn-log')">wrap</button>
             </div>
             <div class="panel-body nowrap" id="log-body"></div>
         </div>
+
+        <div class="splitter splitter-v" id="splitter-v2"></div>
 
         <!-- Chat -->
         <div class="panel" id="panel-chat">
@@ -62,6 +70,8 @@
             </div>
             <div class="panel-body nowrap" id="chat-body"></div>
         </div>
+
+        <div class="splitter splitter-h" id="splitter-h1"></div>
 
         <!-- Input bar -->
         <div class="panel" id="panel-input">

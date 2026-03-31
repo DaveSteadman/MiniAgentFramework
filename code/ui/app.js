@@ -31,6 +31,7 @@ let _ollamaReachable   = true;   // updated by refreshOllamaStatus; used in subm
 let _timelineRefreshTimer = null;
 let _queueResizeObserver  = null;
 let _currentLogPath       = "";
+let _logLive              = true;   // when false, refreshLatestLogFile() is suppressed
 
 // ====================================================================================================
 // MARK: DOM REFS
@@ -232,10 +233,18 @@ function toggleWrap(bodyId, btnId) {
 // MARK: LOG STREAM (SSE)
 // ====================================================================================================
 
+let _prevLogWasSep = false;
+
 function _logLineClass(text) {
     if (!text) return "";
     const t = text.trim();
-    if (t.startsWith("=") && t.endsWith("=")) return "section";
+    if (t.startsWith("=") && t.endsWith("=")) return "log-sep";
+    if (_prevLogWasSep) {
+        if (/^TOOL ROUND\s+\d+/i.test(t))  return "log-tool-round";
+        return "log-title";
+    }
+    if (t.startsWith("[progress]"))            return "log-progress";
+    if (t.startsWith("[thinking]") || t.startsWith("[/thinking]")) return "log-thinking";
     if (t.includes("[SCHEDULER]"))             return "sched";
     if (/error|exception|failed/i.test(t))     return "error";
     if (/completed|success/i.test(t))          return "success";
@@ -246,7 +255,9 @@ function appendLogLine(text) {
     const el    = dom.log();
     const shouldStick = _isLogNearBottom();
     const div   = document.createElement("div");
+    const t     = text ? text.trim() : "";
     div.className = "log-line " + _logLineClass(text);
+    _prevLogWasSep = (t.startsWith("=") && t.endsWith("="));
     div.textContent = text;
     el.appendChild(div);
     _logLines.push(div);
@@ -262,6 +273,7 @@ function appendLogLine(text) {
 
 function clearLogLines() {
     _logLines = [];
+    _prevLogWasSep = false;
     dom.log().innerHTML = "";
 }
 
@@ -348,10 +360,65 @@ function _switchLogStream(path) {
 }
 
 async function refreshLatestLogFile() {
+    if (!_logLive) return;
     const data = await apiFetch("/logs/latest");
     if (!data || !data.path) return;
     if (data.path === _currentLogPath) return;
     _switchLogStream(data.path);
+}
+
+// ----------------------------------------------------------------------------------------------------
+
+function _setLiveBtn(on) {
+    const btn = $("log-btn-live");
+    if (!btn) return;
+    btn.classList.toggle(CSS_WRAP_ACTIVE, on);
+}
+
+function toggleLogLive() {
+    _logLive = !_logLive;
+    _setLiveBtn(_logLive);
+    if (_logLive) {
+        // Snap back to latest file and resume auto-scroll.
+        refreshLatestLogFile();
+        const el = dom.log();
+        el.scrollTop = el.scrollHeight;
+    }
+}
+
+// ----------------------------------------------------------------------------------------------------
+
+async function logNavStep(delta) {
+    // delta: -1 = older (up), +1 = newer (down).
+    const data = await apiFetch("/logs");
+    if (!data || !data.log_dirs) return;
+
+    // Flatten all files into a single chronological list (oldest first).
+    const allFiles = [];
+    const dirs = data.log_dirs.slice().reverse();   // /logs returns newest-first; reverse to oldest-first
+    for (const d of dirs) {
+        const files = d.files.slice().reverse();    // files also newest-first within a dir
+        for (const f of files) {
+            allFiles.push(d.date + "/" + f);
+        }
+    }
+
+    // Find current position by matching the tail of _currentLogPath.
+    const curTail = _currentLogPath.replace(/\\/g, "/").split("/logs/").pop() || "";
+    let idx = allFiles.findIndex(p => p === curTail);
+    if (idx < 0) idx = allFiles.length - 1;  // default to newest if unknown
+
+    const next = allFiles[idx + delta];
+    if (!next) return;  // already at boundary
+
+    // Navigating away from live stream - pause live mode.
+    if (_logLive) {
+        _logLive = false;
+        _setLiveBtn(false);
+    }
+
+    const logsDir = _currentLogPath.replace(/\\/g, "/").split("/logs/")[0] + "/logs/";
+    _switchLogStream(logsDir + next);
 }
 
 // ====================================================================================================

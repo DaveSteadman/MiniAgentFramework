@@ -328,10 +328,14 @@ html, body {
     line-height: 1.55;
 }
 
-.log-line.section { color: var(--blue); font-weight: 600; }
-.log-line.error   { color: var(--red); }
-.log-line.success { color: var(--green); }
-.log-line.sched   { color: var(--yellow); }
+.log-line.log-sep        { color: rgba(96,165,250,0.30); }
+.log-line.log-title      { color: rgba(255,255,255,0.75); font-weight: 600; }
+.log-line.log-tool-round { color: #5eead4; font-weight: 600; }
+.log-line.log-progress   { color: rgba(250,204,21,0.65); }
+.log-line.log-thinking   { color: rgba(255,255,255,0.25); font-style: italic; }
+.log-line.error          { color: var(--red); }
+.log-line.success        { color: var(--green); }
+.log-line.sched          { color: var(--yellow); }
 
 /* ============================================================
    CHAT PANEL  (col 3, row 1)

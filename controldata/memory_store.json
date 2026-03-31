@@ -43,8 +43,8 @@
       "updated": null,
       "category": "environment",
       "fact": "First, delegate a sub-task to find out what Ollama is and what its latest version is",
-      "access_count": 4,
-      "last_accessed": "2026-03-31 21:46:40"
+      "access_count": 7,
+      "last_accessed": "2026-03-31 22:09:11"
     },
     {
       "id": "942cd74a",
@@ -52,8 +52,17 @@
       "updated": null,
       "category": "environment",
       "fact": "cpp is and what its latest version is",
-      "access_count": 4,
-      "last_accessed": "2026-03-31 21:46:40"
+      "access_count": 6,
+      "last_accessed": "2026-03-31 22:09:07"
+    },
+    {
+      "id": "44a283a5",
+      "stored": "2026-03-31 22:17:08",
+      "updated": null,
+      "category": "general",
+      "fact": "Try several different search queries until you have at least 5 article URLs - for example: 'AI news today', 'artificial intelligence latest', 'machine learning research this week'",
+      "access_count": 1,
+      "last_accessed": "2026-03-31 22:17:08"
     }
   ]
 }

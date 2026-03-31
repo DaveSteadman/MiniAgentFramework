@@ -1,48 +1,16 @@
 {
   "tasks": [
     {
-      "name": "AINews_Mine",
+      "name": "AINews_Test",
       "enabled": false,
       "schedule": {
         "type": "daily",
         "time": "07:00"
       },
       "prompts": [
-        "Today is {longdate}. Your goal: save qualifying arXiv cs.AI papers to files for later analysis. Follow these steps EXACTLY.\n\nSTEP 1 - Fetch listing.\n  a) Call fetch_page_text(url=\"https://r.jina.ai/https://arxiv.org/list/cs.AI/new\", max_words=2500) - NO query parameter.\n  b) The result will be truncated. Find the key in the truncation notice (\"auto-saved to scratchpad key: _tc_r...\"). Call scratch_load with that key to get the complete listing.\n\nSTEP 2 - Extract candidates. From the FULL listing, note the arXiv ID (format: 2603.12345) and title of up to 10 papers.\n\nSTEP 3 - Process each candidate. For each of the 10 candidates:\n  a) Call fetch_page_text(url=\"https://r.jina.ai/https://arxiv.org/abs/<ID>\", max_words=1000) - NO query parameter.\n  b) From the truncated content shown in the tool result (do NOT call scratch_load), decide KEEP or DISCARD.\n     KEEP: new model, training technique, benchmark, dataset, or novel method with measurable results.\n     DISCARD: survey, position paper, or no concrete technical contribution.\n  c) If KEEP: call write_from_scratch(scratch_key=\"<key from truncation notice>\", path=\"webresearch/01-Mine/{today}/NNN-<slug>.md\")\n     (NNN = zero-padded counter from 001; slug = 3-5 hyphenated words from title)\n  d) If DISCARD: move to the next candidate.\n\nStop after writing 8 files or processing all 10 candidates. When done, reply with a brief list of the files written. Do NOT call web_search or scratch_load for abstract pages."
-      ]
-    },
-    {
-      "name": "AINews_Mine_Test",
-      "enabled": false,
-      "schedule": {
-        "type": "daily",
-        "time": "07:00"
-      },
-      "prompts": [
-        "Today is {longdate}. The goal is to find new AI News as save for later analysis.\nSTEP 1 - Find links: Search the internet for scientific papers, company announcements, and reports of new architectures. Save the links to an ai_headlines.json file of headlines and URLs."
-      ]
-    },
-    {
-      "name": "AINews_Analyse",
-      "enabled": false,
-      "schedule": {
-        "type": "daily",
-        "time": "07:30"
-      },
-      "prompts": [
-        "Today is {longdate}. This is an analysis task - all source material is already in webresearch/01-Mine/{today}/. Read every markdown file there. Synthesize a developer-focused AI daily newsletter with 6 to 8 items. Deduplicate: if two articles cover the same paper or topic, merge them into one entry. For each item write approximately 400 words covering exactly three sub-sections: (1) What it is - the technical contribution explained precisely, with key architecture choices, metrics, or results; (2) Why it matters - its significance to the broader research landscape; (3) How to apply it - concrete ways an AI developer could use this work today, e.g. a technique to try, a dataset to pull, a library to evaluate, or a line of research to follow. Order items by practical developer relevance (most actionable first). Open with a 2-3 sentence executive summary of the day's theme. Save the complete newsletter to webresearch/02-Analysis/{today}/ai_daily.md."
-      ]
-    },
-    {
-      "name": "AINews_Present",
-      "enabled": false,
-      "schedule": {
-        "type": "daily",
-        "time": "08:00"
-      },
-      "prompts": [
-        "Convert the AI news analysis at webresearch/02-Analysis/{today}/ai_daily.md to a polished HTML file. Use the dark angular template at controldata/html_template/tech_company_website_black_angular.jsx as the visual reference for style: dark background, angular geometric accents, monospace headings, high-contrast text. Each newsletter item should be a self-contained card section. Include a page header with the date {longdate} and a subtitle 'AI Research Daily - Developer Edition'. Save the output to webresearch/03-Presentation/{today}/ai_daily.html."
+        "STEP 1 - Search the web for recent AI news. Try several different search queries until you have at least 5 article URLs - for example: 'AI news today', 'artificial intelligence latest', 'machine learning research this week'. If one query returns no results, try the next without stopping. STEP 2 - For each article URL collected, delegate a sub-task. Each delegate should: decide if the article is substantive AI news (KEEP) or a link aggregator / landing page with no substance (DISCARD); if KEEP, fetch and translate the content into markdown and save to a scratchpad key, then return that key. STEP 3 - For each scratchpad key returned from the delegates, compose a daily briefing report with de-duplicated content and save to webresearch/02-Analyse/{today}/ai_daily.md."
       ]
     }
+
   ]
 }

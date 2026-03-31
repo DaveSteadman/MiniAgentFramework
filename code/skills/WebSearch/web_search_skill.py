@@ -29,19 +29,21 @@ from webpage_utils import fetch_html as _fetch_html
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-_DDG_URL      = "https://duckduckgo.com/html/?q={q}"
-_DDG_PAGE_URL = "https://duckduckgo.com/html/?q={q}&s={s}&dc={dc}"  # pagination (best-effort GET)
+_DDG_URL      = "https://lite.duckduckgo.com/lite/?q={q}"
+_DDG_PAGE_URL = "https://lite.duckduckgo.com/lite/?q={q}&s={s}&dc={dc}"  # pagination (best-effort GET)
 
 # DDG wraps outbound links in an internal redirect; decode to extract the real destination URL.
 _REDIRECT_RE = re.compile(r"/l/\?uddg=([^&\"'>]+)")
 
-# DuckDuckGo HTML result block patterns (same extraction approach as Gen2WebSearch reference).
+# DuckDuckGo Lite result block patterns.
+# Lite uses single-quoted attributes and puts href before class:
+#   <a rel="nofollow" href="//duckduckgo.com/l/?uddg=..." class='result-link'>Title</a>
 _ANCHOR_RE  = re.compile(
-    r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+    r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]+class=[\"']result-link[\"'][^>]*>(.*?)</a>",
     re.IGNORECASE | re.DOTALL,
 )
 _SNIPPET_RE = re.compile(
-    r'class="result__snippet"[^>]*>(.*?)</(?:a|div)>',
+    r"class=[\"']result-snippet[\"'][^>]*>(.*?)</(?:a|div|td)>",
     re.IGNORECASE | re.DOTALL,
 )
 _TAG_RE   = re.compile(r"<[^>]+>")

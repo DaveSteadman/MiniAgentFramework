@@ -983,9 +983,10 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
     from datetime import timedelta
     from workspace_utils import get_chatsessions_dir
     from workspace_utils import get_logs_dir
+    from workspace_utils import get_test_results_dir
 
     if not arg.strip():
-        ctx.output("Usage: /deletelogs <days>  |  delete log and chatsession date-folders older than N days", "dim")
+        ctx.output("Usage: /deletelogs <days>  |  delete log, chatsession, and test_results date-folders older than N days", "dim")
         return
 
     try:
@@ -1003,7 +1004,7 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
     deleted = []
     errors  = []
 
-    for base_dir in (get_logs_dir(), get_chatsessions_dir()):
+    for base_dir in (get_logs_dir(), get_chatsessions_dir(), get_test_results_dir()):
         if not base_dir.exists():
             continue
         for folder in sorted(base_dir.iterdir()):
@@ -1023,7 +1024,7 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
     stray_deleted = []
     stray_errors  = []
 
-    for base_dir in (get_logs_dir(), get_chatsessions_dir()):
+    for base_dir in (get_logs_dir(), get_chatsessions_dir(), get_test_results_dir()):
         if not base_dir.exists():
             continue
         for item in sorted(base_dir.iterdir()):
@@ -1246,14 +1247,11 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
 
     # ---- run ----
     if sub == "run":
-        import subprocess
-        import sys
-        from pathlib import Path
-        from ollama_client import get_active_host
         if not rest:
             ctx.output("Usage: /task run <name>", "dim")
             return
         found = _task_find(rest)
+        task_dict = None
         if found is None:
             # Fall back to substring match.
             hits = _task_find_substr(rest)
@@ -1266,40 +1264,57 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
                     ctx.output(f"  {d['tasks'][i]['name']}", "item")
                 return
             _, matched_data, matched_idx = hits[0]
-            rest = matched_data["tasks"][matched_idx]["name"]
+            rest      = matched_data["tasks"][matched_idx]["name"]
+            task_dict = matched_data["tasks"][matched_idx]
             ctx.output(f"Matched: {rest}", "dim")
-        main_py = Path(__file__).resolve().parent / "main.py"
-        cmd = [
-            sys.executable, "-X", "utf8", str(main_py),
-            "--scheduled-item", rest,
-            "--model", ctx.config.resolved_model,
-        ]
-        active_host = get_active_host()
-        if "localhost" not in active_host and "127.0.0.1" not in active_host:
-            cmd += ["--ollama-host", active_host]
+        else:
+            _, found_data, found_idx = found
+            task_dict = found_data["tasks"][found_idx]
+        prompts = task_dict.get("prompts", [])
+        if not prompts:
+            ctx.output(f"Task '{rest}' has no prompts.", "error")
+            return
         ctx.output(f"Running task '{rest}' ...", "info")
 
         def _run_task(
             _rest=rest,
-            _cmd=list(cmd),
+            _prompts=list(prompts),
             _ctx=ctx,
         ) -> None:
+            from orchestration import ConversationHistory
+            from orchestration import SessionContext
+            from orchestration import orchestrate_prompt
+            from runtime_logger import SessionLogger
+            from runtime_logger import create_log_file_path
+            from workspace_utils import get_chatsessions_day_dir
+            from workspace_utils import get_logs_dir
+            run_log_path = create_log_file_path(log_dir=get_logs_dir())
+            task_hist    = ConversationHistory(max_turns=10)
+            task_ctx     = SessionContext(
+                session_id   = f"task_{_rest}",
+                persist_path = get_chatsessions_day_dir() / f"task_{_rest}.json",
+            )
             try:
-                proc = subprocess.Popen(
-                    _cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                )
-                for line in proc.stdout:
-                    _ctx.output(line.rstrip(), "dim")
-                proc.wait()
-                if proc.returncode == 0:
-                    _ctx.output(f"Task '{_rest}' completed.", "success")
-                else:
-                    _ctx.output(f"Task '{_rest}' exited with code {proc.returncode}.", "error")
+                with SessionLogger(run_log_path) as run_logger:
+                    for prompt_text in _prompts:
+                        if isinstance(prompt_text, dict):
+                            prompt_text = prompt_text.get("prompt", "")
+                        if not prompt_text:
+                            continue
+                        _ctx.output(f"[task] {_rest}: {str(prompt_text)[:80]}", "dim")
+                        response, p_tokens, _c, _ok, tps = orchestrate_prompt(
+                            user_prompt          = str(prompt_text),
+                            config               = _ctx.config,
+                            logger               = run_logger,
+                            conversation_history = task_hist.as_list() or None,
+                            session_context      = task_ctx,
+                            quiet                = True,
+                        )
+                        task_hist.add(str(prompt_text), response)
+                        tps_str = f"{tps:.1f}" if tps > 0 else "0"
+                        _ctx.output(f"[task] {_rest}: done [{p_tokens:,} tok, {tps_str} tok/s]", "dim")
+                        _ctx.output(response, "info")
+                _ctx.output(f"Task '{_rest}' completed.", "success")
             except Exception as exc:
                 _ctx.output(f"Error running task: {exc}", "error")
 
@@ -1354,7 +1369,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/reskill":       "[min|max]  Rebuild skills catalog and set system prompt guidance mode (default: min)",
     "/sandbox":       "<on|off>  Enable/disable Python code execution sandbox (import whitelist + blocked builtins)",
     "/scratchdump":   "<on|off>  Write scratchpad contents to controldata/scratchpad_dump.txt on every change (default: off)",
-    "/deletelogs":    "<days>  Delete log and chatsession date-folders older than N days (e.g. /deletelogs 10)",
+    "/deletelogs":    "<days>  Delete log, chatsession, and test_results date-folders older than N days (e.g. /deletelogs 10)",
     "/test":          "<prompts-file|all>  Run test_wrapper on a prompts file (or all files); streams results live",
     "/testtrend":     "[prompts-file]  Show pass-rate trend across all historical test runs (filtered by prompts file if given)",
     "/recall":        "Show a summary of prior skill outputs stored in this session's context",

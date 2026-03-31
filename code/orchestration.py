@@ -855,6 +855,7 @@ def orchestrate_prompt(
     _log(f"Model:          {config.resolved_model}")
     _log(f"Context window: {config.num_ctx:,} tokens")
     _log(f"Max rounds:     {config.max_iterations}")
+    _log(f"Prompt:         {user_prompt[:300]}{' ...' if len(user_prompt) > 300 else ''}")
 
     # -- Memory --
     _log_file_only("[progress] Storing prompt memories...")
