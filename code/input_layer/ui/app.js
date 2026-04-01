@@ -39,9 +39,6 @@ let _currentLogPath       = "";
 let _logLive              = true;   // when false, refreshLatestLogFile() is suppressed
 let _logScrollGuard       = false;  // true while a programmatic file load is settling
 let _onLatestFile         = true;   // true only when the newest log file is showing
-let _logScrollTarget      = -1;     // target scrollTop for smooth-scroll animation
-let _logScrollRafId       = null;   // rAF handle; null when the animation loop is idle
-let _logScrollRafLastTop  = -1;     // scrollTop recorded after each rAF write; used to detect user drag
 let _chatScrollTarget     = -1;     // target scrollTop for chat smooth-scroll
 let _chatScrollRafId      = null;   // rAF handle for chat scroll loop
 let _chatLive             = true;   // when false, new messages do not auto-scroll
@@ -469,7 +466,6 @@ function _logLineClass(text) {
 
 function appendLogLine(text) {
     const el    = dom.log();
-    const shouldStick = _logLive || _logScrollRafId !== null;
     const div   = document.createElement("div");
     const t     = text ? text.trim() : "";
     div.className = "log-line " + _logLineClass(text);
@@ -482,8 +478,8 @@ function appendLogLine(text) {
         const old = _logLines.shift();
         old.remove();
     }
-    if (shouldStick) {
-        _scrollLogSmooth();
+    if (_logLive) {
+        _snapLogToBottom();
     }
 }
 
@@ -505,28 +501,10 @@ function _isLogNearBottom() {
     return remaining < 1;
 }
 
-// Smoothly animate the log panel to the current bottom using a rAF lerp loop.
-// Updating _logScrollTarget mid-flight just shifts the destination; no restart needed.
-function _scrollLogSmooth() {
+// Instantly clamp the log panel to the very bottom.
+function _snapLogToBottom() {
     const el = dom.log();
-    _logScrollTarget = el.scrollHeight - el.clientHeight;
-    if (_logScrollRafId !== null) return;  // loop already running; target was updated above
-
-    function step() {
-        const panel  = dom.log();
-        const target = _logScrollTarget;
-        const diff   = target - panel.scrollTop;
-        if (Math.abs(diff) < 1) {
-            panel.scrollTop      = target;
-            _logScrollRafId      = null;
-            _logScrollRafLastTop = -1;
-            return;
-        }
-        panel.scrollTop      += diff * 0.3;
-        _logScrollRafLastTop  = panel.scrollTop;   // record where rAF placed the thumb
-        _logScrollRafId = requestAnimationFrame(step);
-    }
-    _logScrollRafId = requestAnimationFrame(step);
+    el.scrollTop = el.scrollHeight - el.clientHeight;
 }
 
 function _isChatNearBottom() {
@@ -651,8 +629,7 @@ function toggleLogLive() {
         // Snap back to latest file and resume auto-scroll.
         _onLatestFile = true;
         refreshLatestLogFile();
-        const el = dom.log();
-        el.scrollTop = el.scrollHeight;
+        _snapLogToBottom();
     }
 }
 
@@ -972,32 +949,33 @@ function init() {
         }
     });
 
-    // Scroll controls live mode: up pauses it, bottom of active file re-engages it.
+    // Wheel event: any upward wheel scroll in the log panel exits live mode.
+    // Downward wheel is ignored - re-entry is handled by the scroll listener below.
+    dom.log().addEventListener("wheel", (e) => {
+        if (e.deltaY < 0 && _logLive) {
+            _logLive = false;
+            _setLiveBtn(false);
+        }
+    }, { passive: true });
+
+    // Scroll listener: re-engage live mode only when the user scrolls back to the
+    // very bottom of the latest file. Guard suppresses this during file loads.
+    // Also handles thumb-drag re-entry (pointerdown does not fire on scroll track).
     dom.log().addEventListener("scroll", () => {
         if (_logScrollGuard) return;
-        if (_logScrollRafId !== null) {
-            // rAF animation is running. The rAF always moves scrollTop upward (toward bottom).
-            // If scrollTop has dropped below what rAF last set, the user dragged the thumb up -
-            // cancel the animation immediately and break live mode.
-            if (_logScrollRafLastTop >= 0 && dom.log().scrollTop < _logScrollRafLastTop - 1) {
-                cancelAnimationFrame(_logScrollRafId);
-                _logScrollRafId      = null;
-                _logScrollRafLastTop = -1;
-                _logLive = false;
-                _setLiveBtn(false);
-            }
-            return;
+        if (_logLive) return;  // already live; nothing to do
+        if (_onLatestFile && _isLogNearBottom()) {
+            _logLive = true;
+            _setLiveBtn(true);
         }
-        if (_isLogNearBottom()) {
-            if (!_logLive && _onLatestFile) {
-                _logLive = true;
-                _setLiveBtn(true);
-            }
-        } else {
-            if (_logLive) {
-                _logLive = false;
-                _setLiveBtn(false);
-            }
+    });
+
+    // Pointer (mouse/touch) down inside the log panel: exit live mode so thumb drags
+    // do not get overridden by _snapLogToBottom firing on the next content append.
+    dom.log().addEventListener("pointerdown", () => {
+        if (_logLive) {
+            _logLive = false;
+            _setLiveBtn(false);
         }
     });
 
@@ -1009,10 +987,10 @@ function init() {
         _queueResizeObserver.observe(dom.timelineQueue());
 
         // Re-anchor log to bottom on panel resize (e.g. window shrink, splitter drag).
-        // Calling _scrollLogSmooth() sets _logScrollRafId non-null synchronously, so the
-        // scroll listener will suppress any scroll event the resize induces.
+        // Snap instantly so the resize scroll event fires with us already at the bottom,
+        // which means _isLogNearBottom() returns true - live mode stays engaged.
         new ResizeObserver(() => {
-            if (_logLive) _scrollLogSmooth();
+            if (_logLive) _snapLogToBottom();
         }).observe(dom.log());
     }
 

@@ -235,10 +235,10 @@ def write_from_scratch(scratch_key: str, path: str) -> str:
     call arguments where JSON encoding can cause errors.
     """
     import sys as _sys
-    _code_dir = str(Path(__file__).resolve().parents[2])
+    _code_dir = str(Path(__file__).resolve().parents[3])
     if _code_dir not in _sys.path:
         _sys.path.insert(0, _code_dir)
-    from scratchpad import scratch_load as _scratch_load
+    from agent_core.scratchpad import scratch_load as _scratch_load
 
     content = _scratch_load(scratch_key)
     if "not found" in content.lower() and len(content) < 200:

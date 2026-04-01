@@ -1,5 +1,10 @@
 
 
+# Version 0.3-rc1 #
+
+[ALL TESTS COMPLETE]  host=http://MONTBLANC:11434  model=nemotron-3-nano:30b  elapsed=33m 7s  pass rate=89% (130/146)  prompt tokens=4,470,615  avg tok/s=191.8
+- Failed a bunch of web skills - DDG performance
+
 # Version 0.2+dev #
 
 [ALL TESTS COMPLETE]  host=http://MONTBLANC:11434  model=gpt-oss:20b  elapsed=6m 16s  passed=124/124  
