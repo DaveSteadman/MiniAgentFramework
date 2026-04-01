@@ -16,6 +16,7 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import json
 from pathlib import Path
 
 from utils.workspace_utils import get_workspace_root
@@ -119,6 +120,23 @@ def read_file(path: str, max_chars: int = 8000) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
+def _normalise_keywords(keywords: list[str] | str) -> list[str]:
+    # Models sometimes send a JSON array as a plain string (e.g. '["foo","bar"]')
+    # despite the tool schema specifying type:array. Parse it back to a list.
+    if isinstance(keywords, str):
+        stripped = keywords.strip()
+        if stripped.startswith("["):
+            try:
+                keywords = json.loads(stripped)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        if isinstance(keywords, str):
+            # Fallback: treat as a single keyword.
+            keywords = [stripped] if stripped else []
+    return [str(k).strip().lower() for k in (keywords or []) if str(k).strip()]
+
+
+# ----------------------------------------------------------------------------------------------------
 def find_files(keywords: list[str], search_root: str = "") -> str:
     """Search the workspace for files whose name contains all of the given keyword fragments.
 
@@ -126,7 +144,7 @@ def find_files(keywords: list[str], search_root: str = "") -> str:
     Pass an empty list (or omit keywords) to list all files.
     Pass search_root (e.g. 'data') to restrict the search to a subdirectory.
     """
-    keywords_clean = [str(k).strip().lower() for k in (keywords or []) if str(k).strip()]
+    keywords_clean = _normalise_keywords(keywords)
 
     if search_root and search_root.strip() not in (".", ""):
         try:
@@ -163,7 +181,7 @@ def find_folders(keywords: list[str], search_root: str = "") -> str:
     Pass an empty list (or omit keywords) to list all folders.
     Pass search_root (e.g. 'data') to restrict the search to a subdirectory.
     """
-    keywords_clean = [str(k).strip().lower() for k in (keywords or []) if str(k).strip()]
+    keywords_clean = _normalise_keywords(keywords)
 
     if search_root and search_root.strip() not in (".", ""):
         try:

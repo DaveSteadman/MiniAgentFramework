@@ -178,11 +178,13 @@ def search_web(
 
     results = _extract_ddg_results(html_text, max_results)
 
+    # Throttle between successive calls to avoid rate-limiting on rapid multi-query tasks.
+    # Always sleep - including on empty results - to prevent rapid-fire requests when DDG
+    # is returning a rate-limit/CAPTCHA page (which has no result-link elements).
+    time.sleep(2.0)
+
     if not results:
         return [{"rank": 0, "title": "No results", "url": "", "snippet": f"DuckDuckGo returned no results for: {query}"}]
-
-    # Throttle between successive calls to avoid rate-limiting on rapid multi-query tasks.
-    time.sleep(1.0)
 
     return results
 

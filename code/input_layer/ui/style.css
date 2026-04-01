@@ -441,6 +441,7 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
     margin-bottom: 3px;
 }
 
+.chat-msg.user            { text-align: right; }
 .chat-msg.user .msg-role  { color: var(--clr-user); }
 .chat-msg.agent .msg-role { color: var(--clr-agent); }
 

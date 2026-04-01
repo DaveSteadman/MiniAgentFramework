@@ -1,5 +1,5 @@
 
-# Version 0.2+dev #
+# Version 0.3 #
 - Web Navigate skill and adjustments to consolidate with other web skills.
 - Adding Web UI, removing other modes for simplicity.
 - Delegate skill
