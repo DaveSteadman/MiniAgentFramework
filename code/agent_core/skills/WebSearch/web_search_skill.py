@@ -217,9 +217,9 @@ def search_web_text(
                 break
 
     effective_max = num_results if num_results is not None else (limit if limit is not None else (n if n is not None else max_results))
-    results = search_web(query=query, max_results=int(effective_max), timeout_seconds=timeout_seconds, offset=offset)
+    results = search_web(query=query, max_results=int(effective_max), timeout_seconds=int(timeout_seconds), offset=int(offset))
 
-    char_cap = max(0, min(int(max_chars_per_result), MAX_CHARS_PER_RESULT_CAP)) if max_chars_per_result > 0 else 0
+    char_cap = max(0, min(int(max_chars_per_result), MAX_CHARS_PER_RESULT_CAP)) if int(max_chars_per_result) > 0 else 0
 
     lines = [f"Web search results for: {query}", ""]
     for r in results:

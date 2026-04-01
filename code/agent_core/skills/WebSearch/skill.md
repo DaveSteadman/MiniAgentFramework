@@ -6,7 +6,7 @@ Search the web using DuckDuckGo and return ranked results with title, URL, and s
 ## Trigger keyword: search
 
 ## Interface
-- Module: `code/skills/WebSearch/web_search_skill.py`
+- Module: `code/agent_core/skills/WebSearch/web_search_skill.py`
 - Functions:
   - `search_web(query: str, max_results: int = 5, timeout_seconds: int = 15, offset: int = 0)`
   - `search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15, max_chars_per_result: int = 500, offset: int = 0)`

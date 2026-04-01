@@ -31,7 +31,7 @@ from pathlib import Path
 
 # Ensure the code/ directory is on the path so that the shared scratchpad module is importable
 # when this skill file is loaded dynamically from the workspace root by skill_executor.py.
-_code_dir = str(Path(__file__).resolve().parents[2])
+_code_dir = str(Path(__file__).resolve().parents[3])
 if _code_dir not in sys.path:
     sys.path.insert(0, _code_dir)
 

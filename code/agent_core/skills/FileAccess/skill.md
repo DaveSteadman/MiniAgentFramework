@@ -6,7 +6,7 @@ Interface for all file read, write, append, and search operations. All relative 
 ## Trigger keyword: file
 
 ## Interface
-- Module: `code/skills/FileAccess/file_access_skill.py`
+- Module: `code/agent_core/skills/FileAccess/file_access_skill.py`
 - Functions:
   - `write_file(path: str, content: str)`
   - `append_file(path: str, content: str)`

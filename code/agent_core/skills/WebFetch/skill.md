@@ -6,7 +6,7 @@ Fetch a web page by URL and extract its readable prose content, stripping all HT
 ## Trigger keyword: fetch
 
 ## Interface
-- Module: `code/skills/WebFetch/web_fetch_skill.py`
+- Module: `code/agent_core/skills/WebFetch/web_fetch_skill.py`
 - Entry point: `fetch_page_text(url: str, max_words: int = 1000, timeout_seconds: int = 15, query: str | None = None)`
 
 ## Parameters

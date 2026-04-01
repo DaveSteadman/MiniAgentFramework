@@ -25,7 +25,7 @@ Running `main.py` with no special mode flags starts the FastAPI server and brows
 ```powershell
 python .\code\main.py
 python .\code\main.py --ollamahost MONTBLANC
-python .\code\main.py --agenthost 0.0.0.0:8010 --model 20b --ctx 65536
+python .\code\main.py --agentport 8010 --model 20b --ctx 65536
 ```
 
 What this mode provides:
@@ -34,7 +34,7 @@ What this mode provides:
 - Prompt queue with a separate total queued prompt count and a preview of the next prompts to be serviced.
 - REST API endpoints used by the UI for queue, timeline, logs, history, and prompt submission.
 
-Open the browser UI at `http://localhost:8000/` unless you changed `--agenthost`.
+Open the browser UI at `http://localhost:8000/` unless you changed `--agentport`.
 
 ---
 
@@ -46,8 +46,8 @@ All options are optional. Unrecognised options are rejected at startup with a us
 |---|---|---|
 | `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` resolve to the first installed model whose tag contains that string. |
 | `--ctx N` | `131072` | Context window size used for LLM calls. |
-| `--agenthost HOST:PORT` | `0.0.0.0:8000` | Bind address for the web UI/API server. |
-| `--ollamahost URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address such as `http://MONTBLANC:11434` or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. |
+| `--agentport PORT` | `8000` | Port for the web UI/API server. Always binds to 0.0.0.0. |
+| `--ollamahost URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address such as `http://MONTBLANC:11434` or `https://api.ollama.com`. Falls back to `OLLAMAHOST` env var. |
 
 ### Default overrides file
 
@@ -56,9 +56,9 @@ All options are optional. Unrecognised options are rejected at startup with a us
 ```json
 {
   "model":       "20b",
-  "num_ctx":     131072,
-  "agenthost":   "0.0.0.0:8000",
-  "ollama_host": "http://localhost:11434"
+  "ctx":         131072,
+  "agentport":   8000,
+  "ollamahost":  "http://localhost:11434"
 }
 ```
 
@@ -129,6 +129,8 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/task delete <name>` | Permanently delete a task and remove its JSON file if it becomes empty. |
 | `/task run <name>` | Execute a task immediately, outside its normal schedule. Runs the same pipeline as the scheduler - useful for testing a task definition or triggering a one-off run. |
 | `/version` | Show framework version, active model, and context size. |
+| `/stopall` | Cancel the active LLM run (after its current round finishes) and clear all pending queued prompts. Executes immediately - does not wait in the queue. Pending prompts receive a "Cancelled by /stopall" response. |
+| `/kiwixhost <url>` | Set the Kiwix server URL and save it to `controldata/default.json` (e.g. `/kiwixhost http://192.168.1.33:8080`). The URL is verified before saving. Takes effect immediately - no restart required. |
 
 ### Host targeting
 
@@ -146,7 +148,7 @@ Any bare hostname or IP address (no `://`) is automatically wrapped as `http://<
 
 Connectivity to the host is **not** checked at switch time. The connection is verified lazily on the first LLM call made after the switch. This means `/host` always succeeds immediately, and any connectivity problem is reported precisely when an LLM call is attempted - not before. Slash commands continue to work regardless of whether the active host is reachable.
 
-New slash commands can be added in [code/slash_commands.py](code/slash_commands.py) by adding a handler function and registering it in `_REGISTRY` and `_DESCRIPTIONS`.
+New slash commands can be added in [code/input_layer/slash_commands.py](code/input_layer/slash_commands.py) by adding a handler function and registering it in `_REGISTRY` and `_DESCRIPTIONS`.
 
 ---
 
@@ -183,7 +185,7 @@ The `TaskManagement` skill exposes the same operations as proper skill functions
 | `"update the DailyWeather prompt to ask about London"` | `set_task_prompt("DailyWeather", "...")` |
 | `"delete the OldTask task"` | `delete_task("OldTask")` |
 
-The skills catalog (`code/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` is newer than the summary - so newly added skills are always available to the model without any manual step. Use `/reskill` to force a rebuild during an active session.
+The skills catalog (`code/agent_core/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` is newer than the summary - so newly added skills are always available to the model without any manual step. Use `/reskill` to force a rebuild during an active session.
 
 ### 3. Direct JSON editing
 
@@ -218,13 +220,13 @@ Each task lives in its own `controldata/schedules/task_<name>.json` file and can
 ### Inspect tool definitions
 Useful for debugging which tools are visible to the model and verifying that skill signatures are parsed correctly:
 ```powershell
-python .\code\preprocess_prompt.py
-python .\code\preprocess_prompt.py --output tool_definitions.json
+python .\code\agent_core\preprocess_prompt.py
+python .\code\agent_core\preprocess_prompt.py --output tool_definitions.json
 ```
 
 | Option | Default | Description |
 |---|---|---|
-| `--skills-summary PATH` | `code/skills/skills_summary.md` | Path to the skills catalog file. |
+| `--skills-summary PATH` | `code/agent_core/skills/skills_summary.md` | Path to the skills catalog file. |
 | `--output PATH` | *(stdout)* | Optional path to write the JSON Schema tool definitions. Omit to print to stdout. |
 
 ### Monitor Ollama memory usage

@@ -10,7 +10,7 @@
 ## Trigger keyword: calculate
 
 ## Interface
-- Module: `code/skills/CodeExecute/code_execute_skill.py`
+- Module: `code/agent_core/skills/CodeExecute/code_execute_skill.py`
 - Functions:
   - `run_python_snippet(code: str)`
 
@@ -20,6 +20,7 @@
 - `code` *(required)* - a complete, self-contained Python snippet as a string. Must use `print()` for all output.
   - Allowed stdlib imports: `math`, `itertools`, `collections`, `csv`, `io`, `json`, `re`, `random`, `statistics`, `datetime`, `decimal`, `fractions`, `functools`, `operator`, `string`, `textwrap`, `heapq`, `bisect`, `array`, `calendar`, `time`, `cmath`.
   - Blocked when sandbox is enabled (default): `os`, `sys`, `subprocess`, `open`, `eval`, `exec`, and all file I/O.
+  - To process file content inside a snippet: call `read_file` first, then use `io.StringIO(content)` in the snippet - e.g. `csv.reader(io.StringIO(_data))` where `_data` is injected by embedding the content in the code string.
   - Execution timeout: 15 seconds. Sandbox state can be toggled at runtime with `/sandbox on|off`.
 
 ## Output

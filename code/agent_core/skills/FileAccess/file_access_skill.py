@@ -107,6 +107,11 @@ def read_file(path: str, max_chars: int = 8000) -> str:
     if not target_path.exists():
         return f"File not found: {target_path.relative_to(WORKSPACE_ROOT).as_posix()}"
 
+    try:
+        max_chars = int(max_chars)
+    except (TypeError, ValueError):
+        max_chars = 8000
+
     content = target_path.read_text(encoding="utf-8")
     if len(content) <= max_chars:
         return content
@@ -125,8 +130,9 @@ def find_files(keywords: list[str], search_root: str = "") -> str:
 
     if search_root and search_root.strip() not in (".", ""):
         try:
-            base = _resolve_safe_path(search_root if "/" in search_root else search_root + "/placeholder")
-            base = base.parent if base.suffix else base
+            sr   = search_root.strip().replace("\\", "/").lstrip("/")
+            base = (WORKSPACE_ROOT / sr).resolve()
+            base.relative_to(DEFAULT_DATA_DIR)
         except ValueError:
             return f"Error: search_root '{search_root}' escapes workspace."
     else:
@@ -161,8 +167,9 @@ def find_folders(keywords: list[str], search_root: str = "") -> str:
 
     if search_root and search_root.strip() not in (".", ""):
         try:
-            base = _resolve_safe_path(search_root if "/" in search_root else search_root + "/placeholder")
-            base = base.parent if base.suffix else base
+            sr   = search_root.strip().replace("\\", "/").lstrip("/")
+            base = (WORKSPACE_ROOT / sr).resolve()
+            base.relative_to(DEFAULT_DATA_DIR)
         except ValueError:
             return f"Error: search_root '{search_root}' escapes workspace."
     else:

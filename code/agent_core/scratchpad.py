@@ -226,10 +226,15 @@ def scratch_query(key: str, query: str, save_result_key: str = "") -> str:
     content = _STORE[validated]
 
     # Lazy imports to avoid circular deps at module load time.
+    # Must use the fully-qualified package path so we share the same module
+    # object (and the same _active_model global) as the rest of the app.
+    # A bare 'from ollama_client import' would create a second independent
+    # module instance (sys.modules["ollama_client"] != sys.modules["agent_core.ollama_client"])
+    # because code/agent_core/ can end up on sys.path via scratchpad_skill.py.
     try:
-        from ollama_client import call_llm_chat as _call_llm_chat
-        from ollama_client import get_active_model as _get_active_model
-        from ollama_client import get_active_num_ctx as _get_active_num_ctx
+        from agent_core.ollama_client import call_llm_chat as _call_llm_chat
+        from agent_core.ollama_client import get_active_model as _get_active_model
+        from agent_core.ollama_client import get_active_num_ctx as _get_active_num_ctx
     except Exception as exc:
         return f"Error importing LLM client: {exc}"
 

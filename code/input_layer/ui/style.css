@@ -32,7 +32,6 @@
     --bg-wrap-btn:        transparent;
     --bg-wrap-btn-active: rgba(174, 180, 7, 0.274);
     --font-mono:    "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace;
-    --font-ui:      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --radius:       2px;
     --gap:          8px;
     --header-h:     44px;
@@ -42,7 +41,7 @@ html, body {
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font-family: var(--font-ui);
+    font-family: var(--font-mono);
     font-size: 13px;
     line-height: 1.5;
     overflow: hidden;
@@ -98,7 +97,7 @@ html, body {
 }
 
 #header .brand-accent {
-    background:              linear-gradient(90deg, #60a5fa 0%, #22d3ee 100%);
+    background:              linear-gradient(90deg, #60a5fa 0%, rgba(34,211,238,0.45) 100%);
     -webkit-background-clip: text;
     background-clip:         text;
     -webkit-text-fill-color: transparent;
@@ -500,8 +499,8 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-hi);
-    font-family: var(--font-ui);
-    font-size: 13px;
+    font-family: var(--font-mono);
+    font-size: 12px;
     padding: 8px 12px;
     resize: none;
     outline: none;
@@ -522,7 +521,7 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
     letter-spacing: 0.22em;
     text-transform: uppercase;
     cursor: pointer;
-    font-family: var(--font-ui);
+    font-family: var(--font-mono);
     font-weight: 600;
     transition: background 0.15s, color 0.15s;
     flex-shrink: 0;

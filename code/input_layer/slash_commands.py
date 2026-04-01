@@ -504,6 +504,66 @@ def _cmd_recall(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
+def _cmd_stopall(arg: str, ctx: SlashCommandContext) -> None:
+    # In API mode this command is intercepted and handled by api.py before it reaches here,
+    # so this stub only runs in non-API contexts (e.g. TUI, tests).
+    # It sets the orchestration stop event so the active run exits after its current round.
+    from agent_core.orchestration import request_stop
+    request_stop()
+    ctx.output("Stop requested. Active run will halt after its current LLM round.", "info")
+
+
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_kiwixhost(arg: str, ctx: SlashCommandContext) -> None:
+    import json
+    import urllib.request
+    from utils.workspace_utils import get_controldata_dir
+
+    defaults_path = get_controldata_dir() / "default.json"
+
+    def _load_defaults() -> dict:
+        try:
+            return json.loads(defaults_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    if not arg:
+        current = _load_defaults().get("kiwix_url", "(not set)")
+        ctx.output(f"Usage: /kiwixhost <url>  |  current: {current}", "dim")
+        return
+
+    raw = arg.strip().rstrip("/")
+    if "://" not in raw:
+        raw = f"http://{raw}"
+
+    # Verify the host responds before saving.
+    try:
+        req = urllib.request.Request(f"{raw}/", method="HEAD")
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as exc:
+        ctx.output(f"Cannot reach '{raw}': {exc}", "error")
+        ctx.output("Kiwix host not changed.", "dim")
+        return
+
+    cfg = _load_defaults()
+    old = cfg.get("kiwix_url", "(not set)")
+    cfg["kiwix_url"] = raw
+    try:
+        defaults_path.write_text(
+            json.dumps(cfg, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        ctx.output(f"Error saving default.json: {exc}", "error")
+        return
+
+    ctx.output(f"Kiwix host updated: {old} -> {raw}", "success")
+    ctx.output("Takes effect immediately - no restart required.", "dim")
+
+
+# ----------------------------------------------------------------------------------------------------
+
 def _cmd_host(arg: str, ctx: SlashCommandContext) -> None:
     from agent_core.ollama_client import configure_host, get_active_host, list_ollama_models
 
@@ -572,22 +632,58 @@ def _run_one_test_file(
             text=True,
             encoding="utf-8",
         )
-        for line in proc.stdout:
-            stripped = line.rstrip()
-            m = _summary_re.match(stripped)
-            if m:
-                test_passed = int(m.group(1))
-                test_total  = int(m.group(2))
-            else:
-                metrics_match = _metrics_re.match(stripped)
-                if metrics_match:
-                    prompt_tokens_total += int(metrics_match.group(2))
-                    turn_tps = float(metrics_match.group(3))
-                    if turn_tps > 0:
-                        tps_sum     += turn_tps
-                        tps_samples += 1
-                ctx.output(stripped, "dim")
-        proc.wait()
+        # Watcher thread: kill the subprocess promptly when /stopall is requested.
+        # test_wrapper runs the full orchestration pipeline in a child process so the
+        # orchestration stop-event is not visible here - we must terminate the OS process.
+        import threading as _threading
+        import time as _time
+        _stopped_by_user = [False]
+        _watcher_done    = [False]
+
+        def _watch(_p=proc) -> None:
+            from agent_core.orchestration import is_stop_requested
+            while not _watcher_done[0]:
+                if is_stop_requested():
+                    _stopped_by_user[0] = True
+                    try:
+                        _p.terminate()
+                    except Exception:
+                        pass
+                    return
+                _time.sleep(0.2)
+
+        _wt = _threading.Thread(target=_watch, daemon=True)
+        _wt.start()
+        try:
+            for line in proc.stdout:
+                stripped = line.rstrip()
+                m = _summary_re.match(stripped)
+                if m:
+                    test_passed = int(m.group(1))
+                    test_total  = int(m.group(2))
+                else:
+                    metrics_match = _metrics_re.match(stripped)
+                    if metrics_match:
+                        prompt_tokens_total += int(metrics_match.group(2))
+                        turn_tps = float(metrics_match.group(3))
+                        if turn_tps > 0:
+                            tps_sum     += turn_tps
+                            tps_samples += 1
+                    ctx.output(stripped, "dim")
+            proc.wait()
+        finally:
+            _watcher_done[0] = True
+            _wt.join(timeout=1.0)
+
+        if _stopped_by_user[0]:
+            ctx.output("[Test stopped by /stopall]", "error")
+            return {
+                "passed":        0,
+                "total":         0,
+                "prompt_tokens": prompt_tokens_total,
+                "tps_sum":       tps_sum,
+                "tps_samples":   tps_samples,
+            }
     except Exception as exc:
         ctx.output(f"Error running {candidate.name}: {exc}", "error")
         return {
@@ -1336,7 +1432,9 @@ _REGISTRY: dict[str, Callable] = {
     "/help":          _cmd_help,
     "/models":        _cmd_models,
     "/model":         _cmd_model,
+    "/stopall":       _cmd_stopall,
     "/ollamahost":    _cmd_host,
+    "/kiwixhost":     _cmd_kiwixhost,
     "/ctx":           _cmd_ctx,
     "/rounds":        _cmd_rounds,
     "/timeout":       _cmd_timeout,
@@ -1359,7 +1457,9 @@ _DESCRIPTIONS: dict[str, str] = {
     "/help":          "List available slash commands",
     "/models":        "List installed Ollama models",
     "/model":         "<name>  Switch active model for all subsequent runs",
+    "/stopall":       "Cancel the active LLM run (after its current round) and clear all pending queued prompts",
     "/ollamahost":    "<hostname|url|local>  Switch active Ollama host (LAN, cloud, or local)",
+    "/kiwixhost":     "<url>  Set the Kiwix server URL and save to default.json (takes effect immediately)",
     "/ctx":           "Show context map + window size; sub-cmds: size [<n>], item <n>, compact <n>",
     "/rounds":        "<n>  Set max tool-call rounds per prompt (e.g. /rounds 6)",
     "/timeout":       "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",

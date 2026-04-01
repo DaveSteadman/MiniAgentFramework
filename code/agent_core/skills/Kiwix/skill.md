@@ -6,7 +6,7 @@ Search and retrieve articles from a local Kiwix server. Kiwix hosts offline snap
 ## Trigger keyword: kiwix
 
 ## Interface
-- Module: `code/skills/Kiwix/kiwix_skill.py`
+- Module: `code/agent_core/skills/Kiwix/kiwix_skill.py`
 - Functions:
   - `kiwix_search(query, max_results=5, timeout=15)`
   - `kiwix_get_article(article_path, max_words=600, timeout=15)`

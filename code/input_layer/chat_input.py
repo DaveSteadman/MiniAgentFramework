@@ -16,6 +16,7 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import json
+import threading
 from pathlib import Path
 
 from utils.workspace_utils import get_workspace_root
@@ -26,6 +27,7 @@ from utils.workspace_utils import get_workspace_root
 # ====================================================================================================
 _HISTORY_FILE = get_workspace_root() / "controldata" / "chathistory.json"
 _MAX_HISTORY  = 32    # hard cap; oldest entries are dropped when exceeded
+_HISTORY_LOCK = threading.Lock()
 
 
 # ====================================================================================================
@@ -62,7 +64,8 @@ def append_to_history(text: str) -> None:
     text = text.strip()
     if not text:
         return
-    entries = load_history()
-    entries = [e for e in entries if e != text]
-    entries.append(text)
-    _save_history(entries)
+    with _HISTORY_LOCK:
+        entries = load_history()
+        entries = [e for e in entries if e != text]
+        entries.append(text)
+        _save_history(entries)

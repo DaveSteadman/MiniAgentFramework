@@ -33,6 +33,7 @@ import gzip
 import html as _html
 import re
 import ssl
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -113,7 +114,8 @@ _MAX_FETCH_RETRIES = 1
 # In-process LRU URL cache - avoids re-fetching the same URL within a single session
 # (e.g. when a seed search result also appears as a hop target in research_traverse).
 _HTML_CACHE_MAX  = 32
-_html_cache: OrderedDict[str, tuple[str, str]] = OrderedDict()
+_html_cache:      OrderedDict[str, tuple[str, str]] = OrderedDict()
+_html_cache_lock: threading.Lock = threading.Lock()
 
 
 # ====================================================================================================
@@ -127,8 +129,9 @@ def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT) -> tuple[str, str]:
     Results are cached in-process (up to 32 URLs) to avoid redundant round-trips.
     Raises on persistent network error - never silently swallows exceptions.
     """
-    if url in _html_cache:
-        return _html_cache[url]
+    with _html_cache_lock:
+        if url in _html_cache:
+            return _html_cache[url]
 
     last_exc: Exception | None = None
     for attempt in range(_MAX_FETCH_RETRIES + 1):
@@ -156,9 +159,10 @@ def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT) -> tuple[str, str]:
                 result = raw.decode("utf-8", errors="replace"), final_url
 
             # Store in cache, evicting the oldest entry if at capacity.
-            if len(_html_cache) >= _HTML_CACHE_MAX:
-                _html_cache.popitem(last=False)
-            _html_cache[url] = result
+            with _html_cache_lock:
+                if len(_html_cache) >= _HTML_CACHE_MAX:
+                    _html_cache.popitem(last=False)
+                _html_cache[url] = result
             return result
 
         except urllib.error.HTTPError as exc:

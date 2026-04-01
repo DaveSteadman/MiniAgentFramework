@@ -10,7 +10,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "CodeExecute Skill",
       "relative_path": "agent_core/skills/CodeExecute/skill.md",
       "purpose": "- Execute a self-contained Python code snippet and return the captured stdout.",
-      "module": "code/skills/CodeExecute/code_execute_skill.py",
+      "module": "code/agent_core/skills/CodeExecute/code_execute_skill.py",
       "trigger_keyword": "calculate",
       "triggers": [
         "calculate",
@@ -40,14 +40,11 @@ Single JSON payload for orchestration planning.
         "from 1 to N"
       ],
       "functions": [
-        "print()",
         "run_python_snippet(...)",
         "run_python_snippet(code)",
         "run_python_snippet(code: str)",
         "run_python_snippet(code=\"import math\\nfor i in range(1, 6):\\n    print(i, math.factorial(i))\")",
-        "run_python_snippet(code=\"print('index,square')\\nfor i in range(1, 6):\\n    print(i, i*i)\")",
-        "scratch_save(\"codeout\", <output>)",
-        "write_file(\"data/result.txt\", \"{scratch:codeout}\")"
+        "run_python_snippet(code=\"print('index,square')\\nfor i in range(1, 6):\\n    print(i, i*i)\")"
       ],
       "inputs": [],
       "outputs": [
@@ -63,7 +60,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "DateTime Skill",
       "relative_path": "agent_core/skills/DateTime/skill.md",
       "purpose": "Return the current date, time, day name, and month name. Prefer `get_datetime_data()` in all cases - it returns both date and time in a single call. Use `get_day_name()` or `get_month_name()` only when you specifically need just that one value.",
-      "module": "code/skills/DateTime/datetime_skill.py",
+      "module": "code/agent_core/skills/DateTime/datetime_skill.py",
       "trigger_keyword": "current date, time, day of the week, or month name",
       "triggers": [
         "what is the date",
@@ -98,7 +95,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "Delegate Skill",
       "relative_path": "agent_core/skills/Delegate/skill.md",
       "purpose": "Create a fresh child orchestration context for a focused sub-task. The child gets its own",
-      "module": "code/skills/Delegate/delegate_skill.py",
+      "module": "code/agent_core/skills/Delegate/delegate_skill.py",
       "trigger_keyword": "delegate",
       "triggers": [
         "the task contains a clear sub-problem that should be solved independently",
@@ -130,7 +127,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "FileAccess Skill",
       "relative_path": "agent_core/skills/FileAccess/skill.md",
       "purpose": "Interface for all file read, write, append, and search operations. All relative paths resolve under `./data/`; a `\"./\"` prefix anchors a path at the workspace root instead. Paths that escape the workspace root are rejected.",
-      "module": "code/skills/FileAccess/file_access_skill.py",
+      "module": "code/agent_core/skills/FileAccess/file_access_skill.py",
       "trigger_keyword": "file",
       "triggers": [
         "write to file",
@@ -238,11 +235,10 @@ Single JSON payload for orchestration planning.
       "skill_name": "Kiwix Skill",
       "relative_path": "agent_core/skills/Kiwix/skill.md",
       "purpose": "Search and retrieve articles from a local Kiwix server. Kiwix hosts offline snapshots of Wikipedia, Project Gutenberg, and other reference libraries. Use this skill for factual lookups, article content, and reference research when a Kiwix server is available on the local network. Because Kiwix is local there is no rate-limiting, no bot detection, and no internet dependency.",
-      "module": "code/skills/Kiwix/kiwix_skill.py",
+      "module": "code/agent_core/skills/Kiwix/kiwix_skill.py",
       "trigger_keyword": "kiwix",
       "triggers": [],
       "functions": [
-        "fetch_page_text(\"https://en.wikipedia.org/...\")",
         "kiwix_get_article(article_path)",
         "kiwix_get_article(article_path, max_words=600, timeout=15)",
         "kiwix_search(\"Python programming language\")",
@@ -267,7 +263,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "Memory Skill",
       "relative_path": "agent_core/skills/Memory/skill.md",
       "purpose": "Persist and recall durable user-stated facts across sessions - identity, preferences, project context, and environment facts. A newer fact on the same subject supersedes the older one. Do not store questions, commands, or ephemeral data such as current time or system stats. Facts persist in `memory_store.json` with category, timestamps, and access tracking.",
-      "module": "code/skills/Memory/memory_skill.py",
+      "module": "code/agent_core/skills/Memory/memory_skill.py",
       "trigger_keyword": "memory",
       "triggers": [
         "remember",
@@ -325,7 +321,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "Scratchpad Skill",
       "relative_path": "agent_core/skills/Scratchpad/skill.md",
       "purpose": "Store and retrieve named working values within a session so that bulk data returned by other skills",
-      "module": "code/skills/Scratchpad/scratchpad_skill.py",
+      "module": "code/agent_core/skills/Scratchpad/scratchpad_skill.py",
       "trigger_keyword": "scratchpad",
       "triggers": [
         "save to scratchpad",
@@ -355,7 +351,6 @@ Single JSON payload for orchestration planning.
         "run query on scratchpad key"
       ],
       "functions": [
-        "fetch_page_text(query=...)",
         "scratch_delete(\"webresult\")",
         "scratch_delete(...)",
         "scratch_delete(key)",
@@ -384,9 +379,7 @@ Single JSON payload for orchestration planning.
         "scratch_search(\"error\")",
         "scratch_search(...)",
         "scratch_search(substring)",
-        "scratch_search(substring: str)",
-        "write_file(\"data/out.txt\", \"{scratch:webresult}\")",
-        "write_file(\"data/result.txt\", \"{scratch:webresult}\")"
+        "scratch_search(substring: str)"
       ],
       "inputs": [],
       "outputs": [
@@ -429,7 +422,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "SystemInfo Skill",
       "relative_path": "agent_core/skills/SystemInfo/skill.md",
       "purpose": "Provide runtime system information including OS name, Python and Ollama versions, RAM usage, and disk usage. Use this for any prompt about the machine, hardware, runtime environment, available resources, or version details. Do not use this for web or file queries.",
-      "module": "code/skills/SystemInfo/system_info_skill.py",
+      "module": "code/agent_core/skills/SystemInfo/system_info_skill.py",
       "trigger_keyword": "system info, RAM or disk space, available memory, or OS and runtime version details",
       "triggers": [
         "system info",
@@ -473,7 +466,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "TaskManagement Skill",
       "relative_path": "agent_core/skills/TaskManagement/skill.md",
       "purpose": "Create, query, update, enable, disable, and delete scheduled tasks stored as JSON files in `controldata/schedules/`. Each task defines a schedule and a prompt string that the scheduler runs automatically on each firing.",
-      "module": "code/skills/TaskManagement/task_management_skill.py",
+      "module": "code/agent_core/skills/TaskManagement/task_management_skill.py",
       "trigger_keyword": "task",
       "triggers": [
         "create task",
@@ -549,7 +542,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "WebFetch Skill",
       "relative_path": "agent_core/skills/WebFetch/skill.md",
       "purpose": "Fetch a web page by URL and extract its readable prose content, stripping all HTML markup, navigation, scripts, advertisements, and other non-content noise. Returns clean text ready for LLM synthesis or summarization.",
-      "module": "code/skills/WebFetch/web_fetch_skill.py",
+      "module": "code/agent_core/skills/WebFetch/web_fetch_skill.py",
       "trigger_keyword": "fetch",
       "triggers": [
         "fetch the page",
@@ -563,12 +556,7 @@ Single JSON payload for orchestration planning.
         "fetch_page_text(\"https://example.com/asyncio-guide\", query=\"summarise the key asyncio concepts\")",
         "fetch_page_text(url, max_words, timeout_seconds, query)",
         "fetch_page_text(url, query=...)",
-        "fetch_page_text(url: str, max_words: int = 1000, timeout_seconds: int = 15, query: str | None = None)",
-        "get_page_links_text(url)",
-        "scratch_query(key, question)",
-        "scratch_save(\"asyncio_article\", {result from step 2})",
-        "search_web(\"python asyncio tutorial\")",
-        "search_web_text(query)"
+        "fetch_page_text(url: str, max_words: int = 1000, timeout_seconds: int = 15, query: str | None = None)"
       ],
       "inputs": [],
       "outputs": [
@@ -589,7 +577,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "WebNavigate Skill",
       "relative_path": "agent_core/skills/WebNavigate/skill.md",
       "purpose": "Extract all navigable hyperlinks from a web page and return them as a numbered list with anchor text and resolved absolute URLs. Use this when you land on a hub or listing page (news front page, GitHub topic, forum index, search results page) and need to see what links are available before deciding which ones to read. This is the middle link in the web navigation chain - between `search_web` (discovery) and `fetch_page_text` (reading content). Navigation chrome (menus, login, subscribe, cookie notices) is filtered automatically.",
-      "module": "code/skills/WebNavigate/web_navigate_skill.py",
+      "module": "code/agent_core/skills/WebNavigate/web_navigate_skill.py",
       "trigger_keyword": "links, navigate",
       "triggers": [
         "get links from",
@@ -639,7 +627,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "WebResearch Skill",
       "relative_path": "agent_core/skills/WebResearch/skill.md",
       "purpose": "Search the web, visit multiple relevant pages, extract the useful text, optionally follow promising links, and return a compact evidence-led research bundle.",
-      "module": "code/skills/WebResearch/web_research_skill.py",
+      "module": "code/agent_core/skills/WebResearch/web_research_skill.py",
       "trigger_keyword": "",
       "triggers": [
         "research this",
@@ -651,8 +639,6 @@ Single JSON payload for orchestration planning.
         "gather evidence from the web"
       ],
       "functions": [
-        "fetch_page_text(query=...)",
-        "fetch_page_text(url=..., query=...)",
         "research_traverse(\"What changed in Python 3.14 packaging guidance?\", max_pages=8, max_hops=1)",
         "research_traverse(\"Which Ferrari drivers have won the Monaco Grand Prix?\")",
         "research_traverse(query, max_search_results = 5, max_pages = 6, max_hops = 1, same_domain_only_for_hops = True, timeout_seconds = 15, max_words_per_page = 450, max_evidence_quotes = 3)",
@@ -689,7 +675,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "WebSearch Skill",
       "relative_path": "agent_core/skills/WebSearch/skill.md",
       "purpose": "Search the web using DuckDuckGo and return ranked results with title, URL, and snippet. No API key required. Use `search_web_text` for direct synthesis - results come back as formatted text ready to read inline. Use `search_web` when you need to iterate over individual result fields (url, title, snippet) programmatically or pass them selectively to another skill. This skill only returns results - it does not persist or save anything.",
-      "module": "code/skills/WebSearch/web_search_skill.py",
+      "module": "code/agent_core/skills/WebSearch/web_search_skill.py",
       "trigger_keyword": "search",
       "triggers": [
         "search the web for",
@@ -700,11 +686,6 @@ Single JSON payload for orchestration planning.
         "find recent"
       ],
       "functions": [
-        "fetch_page_text(url, query=...)",
-        "get_page_links_text(url)",
-        "lookup_wikipedia(topic)",
-        "research_traverse(query)",
-        "scratch_save(\"searchresult\", <output>)",
         "search_web(\"Eiffel Tower height\")",
         "search_web(...)",
         "search_web(query, max_results = 5, timeout_seconds = 15, offset = 0)",
@@ -713,8 +694,7 @@ Single JSON payload for orchestration planning.
         "search_web_text(\"Python 3.14 release notes\", max_results=3)",
         "search_web_text(...)",
         "search_web_text(query, max_results = 5, timeout_seconds = 15, max_chars_per_result = 500, offset = 0)",
-        "search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15, max_chars_per_result: int = 500, offset: int = 0)",
-        "write_file(\"data/results.txt\", \"{scratch:searchresult}\")"
+        "search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15, max_chars_per_result: int = 500, offset: int = 0)"
       ],
       "inputs": [],
       "outputs": [
@@ -741,7 +721,7 @@ Single JSON payload for orchestration planning.
       "skill_name": "Wikipedia Skill",
       "relative_path": "agent_core/skills/Wikipedia/skill.md",
       "purpose": "Look up a topic on Wikipedia and return a plain-text article summary. Use this for authoritative factual reference data about a person, place, concept, event, or technology. For current news or live data, use WebSearch instead.",
-      "module": "code/skills/Wikipedia/wikipedia_skill.py",
+      "module": "code/agent_core/skills/Wikipedia/wikipedia_skill.py",
       "trigger_keyword": "wikipedia",
       "triggers": [
         "what is",
@@ -764,10 +744,7 @@ Single JSON payload for orchestration planning.
         "lookup_wikipedia(...)",
         "lookup_wikipedia(topic)",
         "lookup_wikipedia(topic, timeout = 15)",
-        "lookup_wikipedia(topic: str, timeout: int = 15)",
-        "scratch_query(key, question)",
-        "scratch_save(\"wikiarticle\", <output>)",
-        "write_file(\"data/article.txt\", \"{scratch:wikiarticle}\")"
+        "lookup_wikipedia(topic: str, timeout: int = 15)"
       ],
       "inputs": [],
       "outputs": [

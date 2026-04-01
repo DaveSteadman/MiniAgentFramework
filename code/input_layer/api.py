@@ -17,7 +17,7 @@
 #   GET  /runs/{id}/stream          SSE: stream events for a specific enqueued run
 #
 # SSE events are plain text/event-stream with a "data: <json>\n\n" envelope.
-# All endpoints are CORS-open for localhost origins so the bundled static UI can reach them.
+# CORS is restricted to localhost origins only - requests from external sites are blocked.
 #
 # Instantiated once in modes/api_mode.py, then served by uvicorn.
 #
@@ -63,6 +63,7 @@ from agent_core.orchestration import ConversationHistory
 from agent_core.orchestration import OrchestratorConfig
 from agent_core.orchestration import SessionContext
 from agent_core.orchestration import orchestrate_prompt
+from agent_core.orchestration import request_stop
 from utils.runtime_logger import SessionLogger
 from utils.runtime_logger import create_log_file_path
 from input_layer.chat_input import append_to_history
@@ -80,6 +81,8 @@ from utils.version import __version__
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
 _LOG_DIR             = get_logs_dir()
 _WEB_DIR             = Path(__file__).resolve().parent / "ui"
 _MAX_CHAT_HISTORY    = 10
@@ -147,7 +150,13 @@ def _queue_run_event(run_q: queue.Queue, event: dict | None, priority: bool = Fa
         try:
             dropped = run_q.get_nowait()
             if dropped is None:
-                continue
+                # Sentinel marks stream completion - reinsert it and stop draining.
+                # Discarding it would cause the SSE consumer to wait forever.
+                try:
+                    run_q.put_nowait(None)
+                except queue.Full:
+                    pass
+                return
         except queue.Empty:
             return
 
@@ -158,8 +167,19 @@ def _queue_run_event(run_q: queue.Queue, event: dict | None, priority: bool = Fa
             continue
 
 
+def _validate_session_id(session_id: str) -> None:
+    """Raise HTTP 400 if session_id contains characters that could form a path traversal."""
+    if not _SESSION_ID_RE.match(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session_id: use only letters, digits, hyphens and underscores")
+
+
 def finish_run_event_queue(run_id: str) -> None:
-    """Signal that a run is complete (sends None sentinel to all listeners)."""
+    """Signal that a run is complete by sending None sentinel to the queue.
+
+    Does NOT pop the queue entry here - stream_run's _generate() does that when it receives
+    the sentinel. This is critical: fast runs (e.g. slash commands completing in milliseconds)
+    must keep the queue entry alive so the SSE client can still connect and read all events.
+    """
     with _run_queues_lock:
         q = _run_event_queues.get(run_id)
     if q:
@@ -174,9 +194,10 @@ def finish_run_event_queue(run_id: str) -> None:
 # ====================================================================================================
 app = FastAPI(title="MiniAgentFramework API", version="1.0")
 
+# Restrict CORS to localhost only. External pages cannot trigger prompt or history endpoints.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -392,6 +413,52 @@ def _task_at_slot(slot_dt: datetime, now_min: datetime) -> str | None:
 
 
 # ====================================================================================================
+# MARK: STOPALL
+# ====================================================================================================
+# /stopall is the only slash command that bypasses the task queue entirely.
+# It executes immediately inside post_prompt so it can act on the currently-running
+# LLM call without waiting for it to finish.  Two things happen:
+#   1. request_stop() sets a threading.Event that orchestrate_prompt() checks between
+#      rounds - the current HTTP call to Ollama finishes naturally, then the loop exits.
+#   2. clear_pending() drains every not-yet-started item from the task queue and returns
+#      their run_ids so we can push cancellation events to their SSE clients.
+
+def _handle_stopall_immediate(run_id: str, run_q: "queue.Queue") -> None:
+    """Immediately signal the active run to stop and cancel all pending queue items."""
+    # Signal the orchestration loop to exit after its current LLM round.
+    request_stop()
+
+    # Drain all pending items from the task queue.
+    cancelled_ids = task_queue.clear_pending()
+
+    # Push a cancellation response + sentinel to each pending run's SSE client.
+    cancel_msg = "Cancelled by /stopall."
+    with _run_queues_lock:
+        for rid in cancelled_ids:
+            q = _run_event_queues.get(rid)
+            if q is None:
+                continue
+            try:
+                q.put_nowait({"type": "response", "run_id": rid, "response": cancel_msg, "tokens": 0, "tps": "0"})
+            except queue.Full:
+                pass
+            try:
+                q.put_nowait(None)
+            except queue.Full:
+                pass
+
+    n = len(cancelled_ids)
+    active_note = "Active run will halt after its current LLM round. " if True else ""
+    summary = (
+        f"{active_note}{n} pending prompt{'s' if n != 1 else ''} cancelled."
+        if n else
+        f"{active_note}No prompts were queued."
+    )
+    _queue_run_event(run_q, {"type": "response", "run_id": run_id, "response": summary, "tokens": 0, "tps": "0"}, priority=True)
+    finish_run_event_queue(run_id)
+
+
+# ====================================================================================================
 # MARK: SESSION ENDPOINTS
 # ====================================================================================================
 
@@ -406,6 +473,8 @@ def post_prompt(session_id: str, body: PromptRequest):
     Slash commands (inputs starting with '/') are routed through the slash command
     processor rather than orchestrate_prompt.
     """
+    _validate_session_id(session_id)
+
     if not body.prompt or not body.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt cannot be empty")
 
@@ -416,11 +485,18 @@ def post_prompt(session_id: str, body: PromptRequest):
     run_id      = f"api_{session_id}_{uuid.uuid4().hex}"
     run_q       = _make_run_event_queue(run_id)
 
-    persist = get_chatsessions_day_dir() / f"{session_id}.json"
-    ctx     = SessionContext(session_id=session_id, persist_path=persist)
-    history = _load_session_history(session_id)
+    # /stopall is handled immediately - it must not join the queue because its
+    # entire purpose is to act on the currently-running and pending items.
+    if prompt_text.lower() == "/stopall":
+        _handle_stopall_immediate(run_id, run_q)
+        return {"run_id": run_id, "session_id": session_id, "queued": True}
 
     def _run(_prompt=prompt_text) -> None:
+        # Load history and session context at execution time, not enqueue time.
+        # This prevents rapid back-to-back requests from overwriting each other's turns.
+        persist = get_chatsessions_day_dir() / f"{session_id}.json"
+        ctx     = SessionContext(session_id=session_id, persist_path=persist)
+        history = _load_session_history(session_id)
         _queue_run_event(run_q, {"type": "start", "run_id": run_id, "prompt": _prompt}, priority=True)
         try:
             if _prompt.startswith("/"):
@@ -574,6 +650,7 @@ def _load_session_history(session_id: str) -> ConversationHistory:
 @app.get("/sessions/{session_id}/history")
 def get_session_history(session_id: str):
     """Return the conversation history for a session."""
+    _validate_session_id(session_id)
     history = _load_session_history(session_id)
     return {"session_id": session_id, "turns": history.as_list()}
 
@@ -801,7 +878,10 @@ def stream_run(run_id: str):
             try:
                 item = run_q.get(timeout=2.0)
                 if item is None:
-                    # Sentinel: run finished.
+                    # Sentinel: run finished. Clean up the queue entry now that we have
+                    # consumed all events (including this sentinel).
+                    with _run_queues_lock:
+                        _run_event_queues.pop(run_id, None)
                     yield _sse({"type": "done", "run_id": run_id})
                     break
                 yield _sse(item)

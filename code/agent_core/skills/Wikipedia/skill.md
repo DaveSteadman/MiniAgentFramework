@@ -6,7 +6,7 @@ Look up a topic on Wikipedia and return a plain-text article summary. Use this f
 ## Trigger keyword: wikipedia
 
 ## Interface
-- Module: `code/skills/Wikipedia/wikipedia_skill.py`
+- Module: `code/agent_core/skills/Wikipedia/wikipedia_skill.py`
 - Functions:
   - `lookup_wikipedia(topic: str, timeout: int = 15)`
 

@@ -10,7 +10,7 @@ facts that should survive across sessions - use the Memory skill for that.
 ## Trigger keyword: scratchpad
 
 ## Interface
-- Module: `code/skills/Scratchpad/scratchpad_skill.py`
+- Module: `code/agent_core/skills/Scratchpad/scratchpad_skill.py`
 - Functions:
   - `scratch_save(key: str, value: str)`
   - `scratch_load(key: str)`

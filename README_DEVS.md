@@ -14,12 +14,12 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - Main entrypoint; starts the FastAPI server and Web UI.
   - Loads the skills catalog, resolves the model alias, configures the active Ollama host, and hands off to `modes/api_mode.py`.
 
-- `code/chat_input.py`
+- `code/input_layer/chat_input.py`
   - Provides the persisted history store used by the API history endpoints.
   - Exposes `load_history()` and `append_to_history()` used by `api.py`.
   - History is stored in `controldata/chathistory.json` (max 32 entries, duplicates de-duped by full text match).
 
-- `code/orchestration.py`
+- `code/agent_core/orchestration.py`
   - Core tool-calling loop called by `main.py` for every mode.
   - Builds the messages thread, calls the LLM, dispatches tool calls via `skill_executor`, and loops until the model returns a plain-text answer or `MAX_ITERATIONS` is exhausted.
   - **Context management constants:** `_TOOL_MSG_AUTO_SCRATCH_MIN = 600` (chars at which a tool result is auto-saved to the scratchpad) and `_TOOL_MSG_MAX_CHARS = 1500` (hard cap applied after the scratchpad save; excess is replaced with a pointer note).
@@ -36,17 +36,17 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - Optionally persisted: pass a `persist_path` to the constructor to save and reload state across process restarts. The file is a plain JSON object with a `"turns"` list. Scheduled tasks use this to carry state from a mining phase into an analysis phase even when the framework is restarted between runs.
   - **Cross-task injection**: three-phase tasks (mine -> analyze -> present) share one `SessionContext`. After Phase 1 writes mined files, Phase 2 receives the file paths via `as_inject_block()` without any explicit parameter wiring. The scheduler creates one `SessionContext` per task name and persists it under `controldata/chatsessions/<task_name>.json`.
 
-- `code/slash_commands.py`
+- `code/input_layer/slash_commands.py`
   - Registers and dispatches all `/` commands available in the Web UI chat input and scheduled-task prompts.
   - Each command is a plain function `_cmd_<name>(arg, ctx)` registered in `_REGISTRY` (handler map) and `_DESCRIPTIONS` (help text map).
   - `SlashCommandContext` dataclass carries the mutable runtime state (model, num_ctx, host, flags) plus an `output(text, style)` callback so handlers can write to the browser-facing runtime without depending on the transport.
   - **`/ctx` unified subcommand:** bare `/ctx` shows the context map and window size; `/ctx size [<n>]` reads or sets the window; `/ctx item <n>` prints the raw message content for a given map index; `/ctx compact <n>` compacts an entry in place and prints the before/after table.
 
 ### 2) LLM + Ollama client layer
-- `code/ollama_client.py`
+- `code/agent_core/ollama_client.py`
   - Supports local Ollama, LAN-hosted Ollama machines, and Ollama Cloud via `configure_host(host)`.
   - The active host is module-level state (same pattern as `_DEFAULT_LLM_TIMEOUT`); all public functions resolve to it automatically so no caller needs to pass a host.
-  - `configure_host` is called from `main()` at startup using `--ollamahost` / `OLLAMA_HOST` env var.
+  - `configure_host` is called from `main()` at startup using `--ollamahost` / `OLLAMAHOST` env var.
   - `_is_local_host()` guards features that only make sense locally: `ensure_ollama_running` will not attempt to auto-start `ollama serve` for remote/cloud hosts. `get_ollama_ps_rows` calls `_get_ollama_ps_rows_local()` for local hosts (subprocess `ollama ps`) and `_get_ollama_ps_rows_remote()` for remote/cloud hosts (Ollama `/api/ps` HTTP endpoint).
   - Model discovery and alias resolution (`list_ollama_models`, `resolve_model_name`). Short aliases like `"20b"` resolve to the first installed model whose tag contains that string.
   - Primary LLM interface: `call_llm_chat` calls `/v1/chat/completions` with optional tool definitions and returns a `ChatCallResult` with token metrics and any tool call requests.
@@ -54,17 +54,17 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - `ChatCallResult` carries `message`, `finish_reason`, `prompt_tokens`, `completion_tokens`, and `tokens_per_second`.
 
 ### 3) Debug CLI tools
-- `code/preprocess_prompt.py`
+- `code/agent_core/preprocess_prompt.py`
   - Standalone CLI that loads the skills catalog and prints the JSON Schema tool definitions sent to the model via `/v1/chat/completions`. Useful for debugging which functions are visible to the model and verifying that skill signatures are parsed correctly.
 
 ### 4) Skill execution layer
-- `code/skill_executor.py`
+- `code/agent_core/skill_executor.py`
   - Executes individual skill (tool) calls requested by the LLM tool-calling pipeline.
   - Resolves `{{token}}` placeholders in string arguments via `prompt_tokens.resolve_tokens`.
   - Dynamically imports only approved skill modules/functions - unknown names are rejected before any import is attempted.
 
 ### 5) Logging
-- `code/runtime_logger.py`
+- `code/utils/runtime_logger.py`
   - Sectioned logger with large horizontal separators.
   - Writes evidence logs to `controldata/logs/YYYY-MM-DD/run_YYYYMMDD_HHMMSS.txt`.
   - Stores the full orchestration evidence used by the Web UI log panel and the test runner.
@@ -73,22 +73,29 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 - Each skill folder contains a `skill.md` definition file. When adding or editing a skill, follow the
   standard schema defined in [SKILL_TEMPLATE.md](SKILL_TEMPLATE.md).
 
-- `code/skills_catalog_builder.py`
-  - Scans `code/skills/**/skill.md`.
-  - Generates `code/skills/skills_summary.md` as a single JSON catalog.
+- `code/agent_core/skills_catalog_builder.py`
+  - Scans `code/agent_core/skills/**/skill.md`.
+  - Generates `code/agent_core/skills/skills_summary.md` as a single JSON catalog.
   - `build_tool_definitions(skills_payload)` converts the catalog into JSON Schema tool definitions for the `/v1/chat/completions` API.
   - Rebuilt automatically (fast local path) at startup whenever any `skill.md` is newer than the summary; `/reskill` forces a full LLM-quality rebuild.
 
-- `code/skills/DateTime/` - date and time skill functions.
-- `code/skills/SystemInfo/` - runtime system info (Python version, Ollama version, RAM, disk, OS).
-- `code/skills/FileAccess/` - sandboxed file read/write/list functions.
-- `code/skills/Memory/`
+- `code/agent_core/skills/DateTime/` - date and time skill functions.
+- `code/agent_core/skills/SystemInfo/` - runtime system info (Python version, Ollama version, RAM, disk, OS).
+- `code/agent_core/skills/FileAccess/` - sandboxed file read/write/list functions.
+- `code/agent_core/skills/Memory/`
   - Extracts and recalls durable environment facts via keyword relevance scoring.
-  - Persists facts across runs in `code/skills/Memory/memory_store.json` (JSON, schema v2.0).
+  - Persists facts across runs in `code/agent_core/skills/Memory/memory_store.json` (JSON, schema v2.0).
   - Auto-migrates legacy `memory_store.txt` on first run.
-- `code/skills/WebSearch/` - searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
-- `code/skills/TaskManagement/` - CRUD operations on scheduled task JSON files in `controldata/schedules/`. Exposes `list_tasks()`, `get_task(name)`, `create_task(name, schedule, prompt)`, `set_task_enabled(name, enabled)`, `set_task_schedule(name, schedule)`, `set_task_prompt(name, prompt)`, and `delete_task(name)` as skill functions the model can invoke from natural-language prompts. Each task is stored in its own `task_<name>.json` file; the API scheduler hot-reloads changes within its next poll cycle.
-- `code/skills/Scratchpad/`
+- `code/agent_core/skills/WebSearch/` - searches the web via DuckDuckGo (no API key required), returning ranked results with title, URL, and snippet.
+- `code/agent_core/skills/WebFetch/` - fetches and extracts readable prose from a known URL; optionally runs a focused LLM extraction pass when `query=` is supplied.
+- `code/agent_core/skills/WebNavigate/` - extracts all navigable hyperlinks from a page as a numbered list; sits between `search_web` (discovery) and `fetch_page_text` (reading) in the web chain.
+- `code/agent_core/skills/WebResearch/` - multi-hop research traversal across search results and linked pages; returns a ranked evidence bundle.
+- `code/agent_core/skills/Wikipedia/` - looks up a topic on Wikipedia and returns a plain-text article summary via the Wikipedia API.
+- `code/agent_core/skills/Kiwix/` - searches and retrieves articles from a local Kiwix server (offline Wikipedia/Gutenberg snapshots); no rate-limiting or internet dependency.
+- `code/agent_core/skills/CodeExecute/` - executes a self-contained Python stdlib snippet and returns captured stdout; preferred over recall for calculations, sequences, and data generation.
+- `code/agent_core/skills/Delegate/` - creates a fresh child orchestration context for a focused sub-task; the child runs its own tool-calling loop and returns a compact answer to the parent without polluting the parent context.
+- `code/agent_core/skills/TaskManagement/` - CRUD operations on scheduled task JSON files in `controldata/schedules/`. Exposes `list_tasks()`, `get_task(name)`, `create_task(name, schedule, prompt)`, `set_task_enabled(name, enabled)`, `set_task_schedule(name, schedule)`, `set_task_prompt(name, prompt)`, and `delete_task(name)` as skill functions the model can invoke from natural-language prompts. Each task is stored in its own `task_<name>.json` file; the API scheduler hot-reloads changes within its next poll cycle.
+- `code/agent_core/skills/Scratchpad/`
   - In-session key/value store backed by the module-level `_STORE` dict in `code/scratchpad.py`.
   - Does not persist to disk; lives only for the duration of the process.
   - Skill functions: `scratch_save(key, content)`, `scratch_load(key)`, `scratch_list()`, `scratch_delete(key)`, `scratch_search(substring)`, `scratch_peek(key, substring, context_chars=250)`.
@@ -96,26 +103,27 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - Auto-save: tool results >= 600 chars are automatically saved by `orchestration.py` under keys of the form `_tc_r<round>_<func_name>` so the model can retrieve them with `scratch_load` or inspect them with `scratch_peek`.
 
 ### 7) Scheduler
-- `code/scheduler.py`
+- `code/scheduler/scheduler.py`
   - `load_schedules_dir(dir)` - globs all `*.json` files in the given directory, merges their `"tasks"` lists, and skips malformed files with a stderr warning.
   - `is_task_due(task, last_run, now)` - evaluates `"interval"` (minutes since last run) and `"daily"` (HH:MM wall clock) task types.
   - `TaskQueue.get_state(pending_limit=...)` - returns an internal queue snapshot used by the API layer to build the public queue DTO.
   - `llm_lock` - module-level alias for `task_queue.run_lock`; imported by all code paths that must serialise LLM access.
 
 ### 8) Web UI and API
-- `code/api.py`
+- `code/input_layer/api.py`
   - Defines the FastAPI app, REST endpoints, SSE endpoints, and static asset handlers for the browser UI.
   - `/queue` returns a minimal public DTO: `queued_prompt_count`, `next_prompts`, `next_prompts_limit`, and `updated_at`.
   - `/runs/{id}/stream` provides per-run SSE events; `/logs/stream` and `/logs/file` provide global and per-run log tailing.
 
-- `code/modes/api_mode.py`
+- `code/input_layer/api_mode.py`
   - Starts uvicorn, publishes shared scheduler state into `api.py`, and runs the background scheduler thread.
   - On Windows it selects the selector event loop policy before starting uvicorn to avoid noisy Proactor disconnect callbacks under browser/SSE churn.
 
-- `code/ui/index.html`, `code/ui/app.js`, `code/ui/style.css`
+- `code/input_layer/ui/index.html`, `code/input_layer/ui/app.js`, `code/input_layer/ui/style.css`
   - Static browser UI assets served directly by `api.py` with `Cache-Control: no-store`.
   - `app.js` drives queue polling, schedule timeline rendering, prompt submission, input history, and SSE run/log streams.
   - The queue subpanel shows a separate queued prompt total and the next prompts to be serviced.
+  - All UI assets use the project monospace font stack (`JetBrains Mono`, `Cascadia Code`, `Fira Code`) for a consistent terminal aesthetic.
 
 ### 9) Test tooling
 - `code/testing/test_wrapper.py`
@@ -133,7 +141,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - Invoked directly as a CLI script.
 
 ### 10) Workspace path management
-- `code/workspace_utils.py`
+- `code/utils/workspace_utils.py`
   - Single source of truth for all well-known directory paths. All modules import from here rather than constructing paths independently.
   - All accessors use `@lru_cache(maxsize=1)` - paths are computed once per process.
 
@@ -148,7 +156,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 | `get_chatsessions_dir()` | `<repo_root>/controldata/chatsessions/` |
 | `get_chatsessions_day_dir()` | `<repo_root>/controldata/chatsessions/<YYYY-MM-DD>/` |
 
-- `code/webpage_utils.py`
+- `code/utils/webpage_utils.py`
   - Shared HTTP fetching, HTML extraction, and text utilities used by web skill modules.
   - Skills import `fetch_html`, `extract_content`, and `truncate_to_words` from here rather than defining their own copies.
   - Uses BeautifulSoup when available and falls back to a pure-stdlib `html.parser` extractor automatically.
@@ -197,7 +205,7 @@ pip install -r requirements.txt
 ollama pull gemma3:20b
 
 # 4. Regenerate the skills catalog
-python .\code\skills_catalog_builder.py
+python .\code\agent_core\skills_catalog_builder.py
 ```
 
 ---
@@ -227,7 +235,7 @@ The orchestration design is intentionally singular: one pipeline, one LLM, one n
 
 ## Prompt Tokens
 
-`code/prompt_tokens.py` provides date/time token resolution used throughout the framework.
+`code/agent_core/prompt_tokens.py` provides date/time token resolution used throughout the framework.
 
 | Token | Example output (today = 2026-03-11) |
 |-------|--------------------------------------|
@@ -277,20 +285,40 @@ These values come directly from Ollama's `eval_duration` field and reflect model
 ## Folder Layout
 
 ```
-code/                        Main Python source; all imports are relative to this directory.
-  skills/                    One subdirectory per skill; each has skill.md + implementation.
-  ui/                        Browser UI static assets (index.html, app.js, style.css).
+code/                            Main Python source; main.py is the entrypoint.
+  agent_core/                    LLM orchestration, skill execution, and catalog.
+    skills/                      One subdirectory per skill; each has skill.md + implementation.
+    orchestration.py             Core tool-calling loop.
+    skill_executor.py            Dispatches individual skill calls.
+    skills_catalog_builder.py    Builds skills_summary.md from skill.md files.
+    ollama_client.py             Ollama API client (local, LAN, cloud).
+    scratchpad.py                In-session key/value store.
+    prompt_tokens.py             Date/time token resolution.
+    preprocess_prompt.py         Standalone CLI for debug tool definitions.
+  input_layer/                   Web UI, API server, and chat input handling.
+    api.py                       FastAPI app, REST and SSE endpoints.
+    api_mode.py                  Uvicorn startup and background scheduler thread.
+    chat_input.py                Persisted input history store.
+    slash_commands.py            Slash command registry and handlers.
+    ui/                          Browser UI static assets (index.html, app.js, style.css).
+  scheduler/                     Task scheduling.
+    scheduler.py                 Schedule loader, due-time evaluation, and TaskQueue.
+  testing/                       Test scripts.
+    test_wrapper.py              Invokes main.py per prompt; records CSV results.
+    test_analyzer.py             Reads CSV results and classifies pass/fail.
+  utils/                         Shared utilities.
+    runtime_logger.py            Sectioned evidence logger.
+    workspace_utils.py           Single source of truth for all well-known paths.
+    webpage_utils.py             HTTP fetch, HTML extraction, and text utilities.
+    system_check.py              Ollama memory usage sampler.
+    version.py                   Framework version constant.
 controldata/
-  logs/YYYY-MM-DD/            Runtime evidence logs (run_YYYYMMDD_HHMMSS.txt) in dated subfolders.
-  schedules/                 Schedule definition JSON files (*.json).
-  test_prompts/              Prompt suite JSON files for the test wrapper.
-  test_results/              CSV results and analysis files from test runs.
-code/testing/               Test scripts (test_wrapper, test_analyzer, regressions).
-data/                        Miscellaneous data files (e.g. systemstats.csv).
-webresearch/
-  01-Mine/                   Raw fetched content (URLs and search results as .md files).
-  02-Analysis/               Processed and summarised research artefacts.
-  03-Presentation/           Final polished outputs for sharing or reporting.
+  logs/YYYY-MM-DD/               Runtime evidence logs (run_YYYYMMDD_HHMMSS.txt) in dated subfolders.
+  schedules/                     Schedule definition JSON files (*.json).
+  test_prompts/                  Prompt suite JSON files for the test wrapper.
+  test_results/                  CSV results and analysis files from test runs.
+  chatsessions/                  Persisted SessionContext files for multi-phase scheduled tasks.
+data/                            Miscellaneous data files used by skills during runs.
 ```
 
 ---
@@ -350,7 +378,7 @@ Pass the host as a CLI argument or set the environment variable before launching
 ```
 python code/main.py --ollamahost http://MONTBLANC:11434
 # or via env var:
-set OLLAMA_HOST=http://MONTBLANC:11434
+set OLLAMAHOST=http://MONTBLANC:11434
 ```
 
 | Name | URL | Models | Notes |

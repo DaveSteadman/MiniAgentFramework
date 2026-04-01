@@ -9,7 +9,7 @@ without polluting the parent context with intermediate tool chatter.
 ## Trigger keyword: delegate
 
 ## Interface
-- Module: `code/skills/Delegate/delegate_skill.py`
+- Module: `code/agent_core/skills/Delegate/delegate_skill.py`
 - Functions:
   - `delegate(prompt: str, instructions: str = "", max_iterations: int = 3)`
 

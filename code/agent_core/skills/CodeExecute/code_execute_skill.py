@@ -90,6 +90,15 @@ def _make_restricted_globals() -> dict:
         if k not in _BLOCKED_BUILTINS and not k.startswith("__")
     }
     safe_builtins["__import__"] = _make_safe_import(_ALLOWED_MODULES)
+
+    def _no_open(*args, **kwargs):
+        raise RuntimeError(
+            "open() is blocked in the sandbox. "
+            "Call read_file() first to get the file content as a string, "
+            "then pass it into this snippet via io.StringIO(content)."
+        )
+    safe_builtins["open"] = _no_open
+
     return {"__builtins__": safe_builtins}
 
 
@@ -162,10 +171,14 @@ def run_python_snippet(code: str) -> str:
             sys.stdout = old_stdout
 
     thread = threading.Thread(target=_run, daemon=True)
+    _caller_stdout = sys.stdout  # capture before starting so we can restore on timeout
     thread.start()
     thread.join(timeout=_EXECUTION_TIMEOUT_S)
 
     if thread.is_alive():
+        # The thread's finally block may never run (e.g. infinite loop). Restore stdout here
+        # on the calling thread so log/print output is not silently lost.
+        sys.stdout = _caller_stdout
         return f"Error: Code execution timed out after {_EXECUTION_TIMEOUT_S}s."
     if error_slot:
         return error_slot[0]

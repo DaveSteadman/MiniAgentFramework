@@ -41,8 +41,10 @@ let _logScrollGuard       = false;  // true while a programmatic file load is se
 let _onLatestFile         = true;   // true only when the newest log file is showing
 let _logScrollTarget      = -1;     // target scrollTop for smooth-scroll animation
 let _logScrollRafId       = null;   // rAF handle; null when the animation loop is idle
+let _logScrollRafLastTop  = -1;     // scrollTop recorded after each rAF write; used to detect user drag
 let _chatScrollTarget     = -1;     // target scrollTop for chat smooth-scroll
 let _chatScrollRafId      = null;   // rAF handle for chat scroll loop
+let _chatLive             = true;   // when false, new messages do not auto-scroll
 
 // ====================================================================================================
 // MARK: DOM REFS
@@ -417,11 +419,30 @@ function toggleWrap(bodyId, btnId) {
     const body = $(bodyId);
     const btn  = $(btnId);
     if (!body || !btn) return;
+
+    // Capture anchor before reflow: first child whose bottom edge meets the panel midpoint.
+    const bodyRect = body.getBoundingClientRect();
+    const midY     = bodyRect.top + bodyRect.height / 2;
+    let anchor     = null;
+    for (const child of body.children) {
+        if (child.getBoundingClientRect().bottom >= midY) { anchor = child; break; }
+    }
+    const anchorTopBefore = anchor ? anchor.getBoundingClientRect().top : null;
+
+    // Toggle class - triggers browser reflow.
     const nowrapOn = body.classList.toggle(CSS_NOWRAP);
-    // Button is lit (wrap-active) when wrapping is ON, dim when nowrap is ON.
     btn.classList.toggle(CSS_WRAP_ACTIVE, !nowrapOn);
-    // Scroll to bottom when returning to wrap mode so content is visible.
-    if (!nowrapOn) body.scrollTop = body.scrollHeight;
+
+    // After reflow the anchor may have moved in viewport coords (content height changed).
+    // Compensate by exactly that delta so the anchor stays at the same screen position.
+    if (anchor !== null && anchorTopBefore !== null) {
+        const delta = anchor.getBoundingClientRect().top - anchorTopBefore;
+        if (delta !== 0) {
+            if (bodyId === "log-body") _logScrollGuard = true;
+            body.scrollTop += delta;
+            if (bodyId === "log-body") setTimeout(() => { _logScrollGuard = false; }, 100);
+        }
+    }
 }
 
 // ====================================================================================================
@@ -481,7 +502,7 @@ function _displayLogPath(path) {
 function _isLogNearBottom() {
     const el = dom.log();
     const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
-    return remaining <= 12;
+    return remaining < 1;
 }
 
 // Smoothly animate the log panel to the current bottom using a rAF lerp loop.
@@ -496,18 +517,27 @@ function _scrollLogSmooth() {
         const target = _logScrollTarget;
         const diff   = target - panel.scrollTop;
         if (Math.abs(diff) < 1) {
-            panel.scrollTop  = target;
-            _logScrollRafId  = null;
+            panel.scrollTop      = target;
+            _logScrollRafId      = null;
+            _logScrollRafLastTop = -1;
             return;
         }
-        panel.scrollTop += diff * 0.3;
+        panel.scrollTop      += diff * 0.3;
+        _logScrollRafLastTop  = panel.scrollTop;   // record where rAF placed the thumb
         _logScrollRafId = requestAnimationFrame(step);
     }
     _logScrollRafId = requestAnimationFrame(step);
 }
 
+function _isChatNearBottom() {
+    const el = dom.chat();
+    return (el.scrollHeight - el.scrollTop - el.clientHeight) <= 4;
+}
+
 // Smooth scroll for the chat panel - mirrors _scrollLogSmooth.
+// Only scrolls when _chatLive is true or a rAF loop is already in flight.
 function _scrollChatSmooth() {
+    if (!_chatLive && _chatScrollRafId === null) return;
     const el = dom.chat();
     _chatScrollTarget = el.scrollHeight - el.clientHeight;
     if (_chatScrollRafId !== null) return;
@@ -932,10 +962,32 @@ function init() {
     dom.input().addEventListener("input", () => { _historyIdx = -1; });
     dom.sendBtn().addEventListener("click", submitPrompt);
 
+    // Chat scroll listener: up pauses auto-scroll, reaching the bottom re-engages it.
+    dom.chat().addEventListener("scroll", () => {
+        if (_chatScrollRafId !== null) return;  // programmatic scroll; ignore
+        if (_isChatNearBottom()) {
+            _chatLive = true;
+        } else {
+            _chatLive = false;
+        }
+    });
+
     // Scroll controls live mode: up pauses it, bottom of active file re-engages it.
     dom.log().addEventListener("scroll", () => {
         if (_logScrollGuard) return;
-        if (_logScrollRafId !== null) return;  // programmatic smooth-scroll; ignore intermediate positions
+        if (_logScrollRafId !== null) {
+            // rAF animation is running. The rAF always moves scrollTop upward (toward bottom).
+            // If scrollTop has dropped below what rAF last set, the user dragged the thumb up -
+            // cancel the animation immediately and break live mode.
+            if (_logScrollRafLastTop >= 0 && dom.log().scrollTop < _logScrollRafLastTop - 1) {
+                cancelAnimationFrame(_logScrollRafId);
+                _logScrollRafId      = null;
+                _logScrollRafLastTop = -1;
+                _logLive = false;
+                _setLiveBtn(false);
+            }
+            return;
+        }
         if (_isLogNearBottom()) {
             if (!_logLive && _onLatestFile) {
                 _logLive = true;

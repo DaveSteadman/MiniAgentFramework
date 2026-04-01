@@ -6,7 +6,7 @@ Extract all navigable hyperlinks from a web page and return them as a numbered l
 ## Trigger keyword: links, navigate
 
 ## Interface
-- Module: `code/skills/WebNavigate/web_navigate_skill.py`
+- Module: `code/agent_core/skills/WebNavigate/web_navigate_skill.py`
 - Functions:
   - `get_page_links(url: str, filter_text: str = "", max_links: int = 30, timeout_seconds: int = 15)`
   - `get_page_links_text(url: str, filter_text: str = "", max_links: int = 30, timeout_seconds: int = 15)`

@@ -151,6 +151,20 @@ class TaskQueue:
         }
 
     # ----------------------------------------------------------------------------------------------------
+    def clear_pending(self) -> list[str]:
+        """Remove all not-yet-started items from the queue.
+
+        Returns the names of every cancelled item so callers can close their associated
+        event queues.  The currently active item is not affected.
+        """
+        with self._state_lock:
+            cancelled = [item["name"] for item in self._deque]
+            self._deque.clear()
+            self._queued_names.clear()
+        self._write_state()
+        return cancelled
+
+    # ----------------------------------------------------------------------------------------------------
     def stop(self) -> None:
         """Request worker shutdown.  The in-flight task runs to completion."""
         self._shutdown.set()

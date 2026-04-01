@@ -18,8 +18,12 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import contextlib
 import json
+import os
 import re
+import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +39,44 @@ from utils.workspace_utils import get_controldata_dir
 MEMORY_STORE_PATH        = get_controldata_dir() / "memory_store.json"
 MEMORY_STORE_LEGACY_PATH = Path(__file__).resolve().parent / "memory_store.txt"
 MEMORY_SCHEMA_VERSION    = "2.0"
+
+# In-process lock for all memory store read-modify-write cycles.
+_MEMORY_LOCK      = threading.Lock()
+# Advisory lock file used to serialise access across independent subprocesses (e.g. test runs).
+_MEMORY_LOCK_FILE = MEMORY_STORE_PATH.with_suffix(".lock")
+_LOCK_TIMEOUT_S   = 5.0
+
+
+@contextlib.contextmanager
+def _memory_store_locked():
+    """Acquire in-process threading lock then an advisory file lock.
+
+    The file lock serialises concurrent writes from independent subprocesses (e.g. multiple
+    test_wrapper.py processes). A stale lock older than _LOCK_TIMEOUT_S is force-released.
+    """
+    with _MEMORY_LOCK:
+        deadline = time.monotonic() + _LOCK_TIMEOUT_S
+        while True:
+            try:
+                fd = os.open(str(_MEMORY_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                os.close(fd)
+                break
+            except FileExistsError:
+                if time.monotonic() >= deadline:
+                    # Stale lock (process crashed while holding it) - force-release.
+                    try:
+                        _MEMORY_LOCK_FILE.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                else:
+                    time.sleep(0.02)
+        try:
+            yield
+        finally:
+            try:
+                _MEMORY_LOCK_FILE.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 ENVIRONMENT_HINT_PATTERNS = [
     re.compile(r"[A-Za-z]:\\\\[^\s,;]+"),
@@ -234,7 +276,10 @@ def _read_store() -> dict:
 # ----------------------------------------------------------------------------------------------------
 def _write_store(store: dict) -> None:
     MEMORY_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MEMORY_STORE_PATH.write_text(json.dumps(store, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Write to a temp file then atomically replace, so readers never see a partially-written JSON.
+    tmp = MEMORY_STORE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(store, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(str(tmp), str(MEMORY_STORE_PATH))
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -303,50 +348,51 @@ def store_prompt_memories(user_prompt: str) -> str:
         _read_store()  # ensure store is initialized / migrated
         return "No new environment-specific facts detected in prompt."
 
-    store     = _read_store()
-    entries   = store.setdefault("entries", [])
-    timestamp = _utc_now_iso()
+    with _memory_store_locked():
+        store     = _read_store()
+        entries   = store.setdefault("entries", [])
+        timestamp = _utc_now_iso()
 
-    added_count   = 0
-    updated_count = 0
+        added_count   = 0
+        updated_count = 0
 
-    for fact in facts:
-        normalized = _normalize_fact(fact)
-        category   = _categorize_fact(fact)
+        for fact in facts:
+            normalized = _normalize_fact(fact)
+            category   = _categorize_fact(fact)
 
-        # Exact duplicate - skip
-        if any(_normalize_fact(e["fact"]) == normalized for e in entries):
-            continue
+            # Exact duplicate - skip
+            if any(_normalize_fact(e["fact"]) == normalized for e in entries):
+                continue
 
-        # Supersede match - update the existing entry in place
-        superseded = next(
-            (e for e in entries
-             if _facts_supersede(_normalize_fact(e["fact"]), normalized, e["category"], category)),
-            None,
-        )
-        if superseded:
-            superseded["fact"]     = fact
-            superseded["updated"]  = timestamp
-            superseded["category"] = category
-            updated_count += 1
-            continue
+            # Supersede match - update the existing entry in place
+            superseded = next(
+                (e for e in entries
+                 if _facts_supersede(_normalize_fact(e["fact"]), normalized, e["category"], category)),
+                None,
+            )
+            if superseded:
+                superseded["fact"]     = fact
+                superseded["updated"]  = timestamp
+                superseded["category"] = category
+                updated_count += 1
+                continue
 
-        entries.append({
-            "id":            _short_id(),
-            "stored":        timestamp,
-            "updated":       None,
-            "category":      category,
-            "fact":          fact,
-            "access_count":  0,
-            "last_accessed": None,
-        })
-        added_count += 1
+            entries.append({
+                "id":            _short_id(),
+                "stored":        timestamp,
+                "updated":       None,
+                "category":      category,
+                "fact":          fact,
+                "access_count":  0,
+                "last_accessed": None,
+            })
+            added_count += 1
 
-    if added_count == 0 and updated_count == 0:
-        return "No new memories were stored (all detected facts already existed)."
+        if added_count == 0 and updated_count == 0:
+            return "No new memories were stored (all detected facts already existed)."
 
-    store["schema_version"] = MEMORY_SCHEMA_VERSION
-    _write_store(store)
+        store["schema_version"] = MEMORY_SCHEMA_VERSION
+        _write_store(store)
 
     parts = []
     if added_count:
@@ -358,41 +404,51 @@ def store_prompt_memories(user_prompt: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 def recall_relevant_memories(user_prompt: str, limit: int = 5, min_score: float = 0.25) -> str:
-    store   = _read_store()
-    entries = store.get("entries", [])
-    if not entries:
-        return "No memories stored yet."
+    try:
+        limit     = int(limit)
+        min_score = float(min_score)
+    except (TypeError, ValueError):
+        limit     = 5
+        min_score = 0.25
 
     query_tokens = _tokenize(user_prompt)
     if not query_tokens:
         return "No memories recalled (query had no meaningful tokens)."
 
-    scored = []
-    for entry in entries:
-        fact        = entry["fact"]
-        fact_tokens = _tokenize(fact)
-        if not fact_tokens:
-            continue
-        overlap = query_tokens & fact_tokens
-        if not overlap:
-            continue
-        score = len(overlap) / max(len(query_tokens), 1)
-        if score < min_score and user_prompt.lower() not in fact.lower() and fact.lower() not in user_prompt.lower():
-            continue
-        scored.append((score, entry))
+    # Hold the lock for the entire read-score-write cycle so access stats are consistent
+    # even when multiple processes or threads run recall concurrently.
+    with _memory_store_locked():
+        store   = _read_store()
+        entries = store.get("entries", [])
+        if not entries:
+            return "No memories stored yet."
 
-    if not scored:
-        return "No relevant memories matched this prompt."
+        scored = []
+        for entry in entries:
+            fact        = entry["fact"]
+            fact_tokens = _tokenize(fact)
+            if not fact_tokens:
+                continue
+            overlap = query_tokens & fact_tokens
+            if not overlap:
+                continue
+            score = len(overlap) / max(len(query_tokens), 1)
+            if score < min_score and user_prompt.lower() not in fact.lower() and fact.lower() not in user_prompt.lower():
+                continue
+            scored.append((score, entry))
 
-    scored.sort(key=lambda item: (-item[0], item[1]["stored"]))
-    selected = scored[: max(limit, 1)]
+        if not scored:
+            return "No relevant memories matched this prompt."
 
-    # Update access stats
-    timestamp = _utc_now_iso()
-    for _, entry in selected:
-        entry["access_count"]  = entry.get("access_count", 0) + 1
-        entry["last_accessed"] = timestamp
-    _write_store(store)
+        scored.sort(key=lambda item: (-item[0], item[1]["stored"]))
+        selected = scored[: max(limit, 1)]
+
+        # Update access stats inside the lock so they are written atomically.
+        timestamp = _utc_now_iso()
+        for _, entry in selected:
+            entry["access_count"]  = entry.get("access_count", 0) + 1
+            entry["last_accessed"] = timestamp
+        _write_store(store)
 
     lines = ["Relevant memories:"]
     for score, entry in selected:

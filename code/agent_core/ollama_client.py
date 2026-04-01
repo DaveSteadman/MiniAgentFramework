@@ -40,18 +40,23 @@ from utils.workspace_utils import trunc
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-DEFAULT_OLLAMA_HOST   = "http://localhost:11434"
+DEFAULT_OLLAMAHOST   = "http://localhost:11434"
 OLLAMA_CLOUD_HOST     = "https://api.ollama.com"
 _DEFAULT_LLM_TIMEOUT: int = 600   # seconds; updated at runtime by /timeout slash command
 
 # Active host - set once at startup via configure_host().
-# Default to local Ollama; overridden by --ollamahost / OLLAMA_HOST env var.
-_active_host: str = DEFAULT_OLLAMA_HOST
+# Default to local Ollama; overridden by --ollamahost / OLLAMAHOST env var.
+_active_host: str = DEFAULT_OLLAMAHOST
 
 # Active session model and context window - set once at startup via register_session_config().
 # Skills use get_active_model() / get_active_num_ctx() instead of accepting these as parameters.
 _active_model:   str = ""
 _active_num_ctx: int = 131072
+
+# Cache of last successful Ollama health-check time per host.
+# Avoids an HTTP round-trip on every LLM call (25 calls/prompt = 25 unnecessary /api/tags hits).
+_ollama_health_cache: dict[str, float] = {}  # host -> monotonic time of last healthy check
+_OLLAMA_HEALTH_TTL_S: float = 30.0           # re-check if not confirmed healthy within this window
 
 
 def get_llm_timeout() -> int:
@@ -126,8 +131,8 @@ def get_active_num_ctx() -> int:
 
 # Well-known host aliases accepted by configure_host() and the --ollamahost CLI flag.
 HOST_ALIASES: dict[str, str] = {
-    "local":      DEFAULT_OLLAMA_HOST,
-    "localhost":  DEFAULT_OLLAMA_HOST,
+    "local":      DEFAULT_OLLAMAHOST,
+    "localhost":  DEFAULT_OLLAMAHOST,
 }
 
 
@@ -264,7 +269,14 @@ def ensure_ollama_running(
     verbose: bool = False,
 ) -> None:
     host = host or _active_host
+
+    # Skip the health-check HTTP round-trip if this host was confirmed healthy recently.
+    now = time.monotonic()
+    if now - _ollama_health_cache.get(host, 0.0) < _OLLAMA_HEALTH_TTL_S:
+        return
+
     if is_ollama_running(host=host):
+        _ollama_health_cache[host] = time.monotonic()
         return
 
     if not start_if_needed or not _is_local_host(host):
@@ -277,6 +289,7 @@ def ensure_ollama_running(
     deadline = time.time() + wait_seconds
     while time.time() < deadline:
         if is_ollama_running(host=host):
+            _ollama_health_cache[host] = time.monotonic()
             if verbose:
                 print("Ollama is ready.", flush=True)
             return

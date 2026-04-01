@@ -95,10 +95,10 @@ pip install -r requirements.txt
 
 ## 7. Regenerate the skills catalog
 
-The skills catalog (`code/skills/skills_summary.md`) maps all available tools for the LLM. Build it once before first use:
+The skills catalog (`code/agent_core/skills/skills_summary.md`) maps all available tools for the LLM. Build it once before first use:
 
 ```powershell
-python .\code\skills_catalog_builder.py
+python .\code\agent_core\skills_catalog_builder.py
 ```
 
 This step is also run automatically at startup whenever any `skill.md` file is newer than the catalog, so it only needs to be run manually after a fresh clone or after editing a `skill.md`.
@@ -146,5 +146,5 @@ ollama list
 |---|---|---|
 | `ollama: command not found` | Ollama not in PATH | Reinstall Ollama and restart terminal |
 | Model returns "I cannot" for date/web | Wrong or small model | Try a larger model with `--model 27b` |
-| Skills catalog empty | Never built | Run `python .\code\skills_catalog_builder.py` |
+| Skills catalog empty | Never built | Run `python .\code\agent_core\skills_catalog_builder.py` |
 | LLM call times out | Model too large for VRAM | Use a smaller model or increase swap |

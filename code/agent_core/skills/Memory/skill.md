@@ -6,7 +6,7 @@ Persist and recall durable user-stated facts across sessions - identity, prefere
 ## Trigger keyword: memory
 
 ## Interface
-- Module: `code/skills/Memory/memory_skill.py`
+- Module: `code/agent_core/skills/Memory/memory_skill.py`
 - Functions:
   - `store_prompt_memories(user_prompt: str)`
   - `recall_relevant_memories(user_prompt: str, limit: int = 5, min_score: float = 0.25)`

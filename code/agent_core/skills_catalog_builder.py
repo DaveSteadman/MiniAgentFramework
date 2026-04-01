@@ -124,18 +124,6 @@ def find_skill_files(skills_root: Path) -> list[Path]:
 
 
 # ----------------------------------------------------------------------------------------------------
-def extract_json_block(text: str) -> dict | None:
-    first_object_match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not first_object_match:
-        return None
-
-    try:
-        return json.loads(first_object_match.group(0))
-    except json.JSONDecodeError:
-        return None
-
-
-# ----------------------------------------------------------------------------------------------------
 def summarize_with_llm(skill_md_path: Path, model_name: str, num_ctx: int) -> dict | None:
     skill_text = skill_md_path.read_text(encoding="utf-8")
 
@@ -158,7 +146,10 @@ def summarize_with_llm(skill_md_path: Path, model_name: str, num_ctx: int) -> di
     )
 
     llm_response = call_ollama(model_name=model_name, prompt=prompt, num_ctx=num_ctx)
-    return extract_json_block(llm_response)
+    try:
+        return json.loads(extract_first_json_object(llm_response))
+    except (RuntimeError, json.JSONDecodeError):
+        return None
 
 
 # ----------------------------------------------------------------------------------------------------

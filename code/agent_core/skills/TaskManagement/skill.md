@@ -6,7 +6,7 @@ Create, query, update, enable, disable, and delete scheduled tasks stored as JSO
 ## Trigger keyword: task
 
 ## Interface
-- Module: `code/skills/TaskManagement/task_management_skill.py`
+- Module: `code/agent_core/skills/TaskManagement/task_management_skill.py`
 - Functions:
   - `list_tasks()`
   - `get_task(name: str)`

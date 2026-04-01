@@ -59,23 +59,32 @@ SKILLS_SUMMARY_PATH  = Path(__file__).resolve().parent / "agent_core" / "skills"
 LOG_DIR              = get_logs_dir()
 DEFAULTS_FILE        = get_controldata_dir() / "default.json"
 
-# Keys accepted from default.json - any other keys are silently ignored.
-_DEFAULTS_KEYS = {"model", "num_ctx", "agenthost", "ollama_host"}
+# Keys accepted from default.json - must match the argparse dest names exactly.
+_DEFAULTS_KEYS = {"model", "ctx", "agentport", "ollamahost"}
 
 
 # ====================================================================================================
 # MARK: DEFAULTS LOADING
 # ====================================================================================================
 def _load_defaults() -> dict:
-    # Returns only recognised keys from default.json; silently ignores unrecognised ones.
-    # Returns an empty dict if the file is absent or malformed.
+    # Returns only recognised keys from default.json.
+    # Prints a startup warning listing any keys present in the file but not recognised.
     if not DEFAULTS_FILE.exists():
         return {}
     try:
         raw = json.loads(DEFAULTS_FILE.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             return {}
-        return {k: v for k, v in raw.items() if k in _DEFAULTS_KEYS}
+        accepted  = {k: v for k, v in raw.items() if k in _DEFAULTS_KEYS}
+        unknown   = [k for k in raw if k not in _DEFAULTS_KEYS]
+        if unknown:
+            known_list = ", ".join(sorted(_DEFAULTS_KEYS))
+            print(
+                f"[default.json] Unrecognised key(s) ignored: {', '.join(sorted(unknown))}. "
+                f"Recognised keys: {known_list}.",
+                flush=True,
+            )
+        return accepted
     except Exception:
         return {}
 
@@ -83,14 +92,6 @@ def _load_defaults() -> dict:
 # ====================================================================================================
 # MARK: CLI
 # ====================================================================================================
-def _parse_agenthost(agenthost: str) -> tuple[str, int]:
-    # Splits "HOST:PORT" into (host, port). Falls back to port 8000 if absent or non-numeric.
-    host, _, port_str = agenthost.rpartition(":")
-    if host and port_str.isdigit():
-        return host, int(port_str)
-    return agenthost, 8000
-
-# ----------------------------------------------------------------------------------------------------
 def parse_main_args() -> argparse.Namespace:
     # Priority: factory defaults < default.json < command-line args.
     file_defaults = _load_defaults()
@@ -109,18 +110,18 @@ def parse_main_args() -> argparse.Namespace:
         help="Context window for LLM calls.",
     )
     parser.add_argument(
-        "--agenthost",
-        type=str,
-        default="0.0.0.0:8000",
-        metavar="HOST:PORT",
-        help="Bind address for the web UI server as HOST:PORT (default 0.0.0.0:8000).",
+        "--agentport",
+        type=int,
+        default=8000,
+        metavar="PORT",
+        help="Port for the web UI server (default 8000). Always binds to 0.0.0.0.",
     )
     parser.add_argument(
         "--ollamahost",
         type=str,
-        default=os.environ.get("OLLAMA_HOST", ollama_client.DEFAULT_OLLAMA_HOST),
+        default=os.environ.get("OLLAMAHOST", ollama_client.DEFAULT_OLLAMAHOST),
         metavar="URL",
-        help="Ollama host URL. Defaults to http://localhost:11434. Also read from OLLAMA_HOST env var.",
+        help="Ollama host URL. Defaults to http://localhost:11434. Also read from OLLAMAHOST env var.",
     )
     # Apply file defaults between factory defaults and CLI; set_defaults() is overridden
     # by any explicit CLI value but overrides argparse's own default= values.
@@ -290,8 +291,7 @@ def _run(args, logger, log_path) -> None:
         run_chat_sequence_mode(sequence_file=sequence_file_path, config=config, logger=logger, log_path=log_path)
         return
 
-    _host, _port = _parse_agenthost(args.agenthost)
-    run_api_mode(config=config, logger=logger, log_path=log_path, host=_host, port=_port)
+    run_api_mode(config=config, logger=logger, log_path=log_path, host="0.0.0.0", port=args.agentport)
 
 
 # ----------------------------------------------------------------------------------------------------

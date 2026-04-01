@@ -152,9 +152,11 @@ def execute_tool_call(
     module_path, function_name = resolved
 
     # Fill {{today}}, {{yesterday}} etc. in any string argument before passing to the function.
+    # Strip blank keys that some models emit for no-argument functions (e.g. {'': ''}).
     resolved_args = {
         k: (resolve_tokens(v) if isinstance(v, str) else v)
         for k, v in arguments.items()
+        if k != ""
     }
 
     # Load (with caching) and invoke the skill function. The index lookup above is the security gate.
