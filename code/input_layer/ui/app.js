@@ -448,7 +448,7 @@ function _logLineClass(text) {
 
 function appendLogLine(text) {
     const el    = dom.log();
-    const shouldStick = _isLogNearBottom();
+    const shouldStick = _logLive || _logScrollRafId !== null;
     const div   = document.createElement("div");
     const t     = text ? text.trim() : "";
     div.className = "log-line " + _logLineClass(text);
@@ -935,6 +935,7 @@ function init() {
     // Scroll controls live mode: up pauses it, bottom of active file re-engages it.
     dom.log().addEventListener("scroll", () => {
         if (_logScrollGuard) return;
+        if (_logScrollRafId !== null) return;  // programmatic smooth-scroll; ignore intermediate positions
         if (_isLogNearBottom()) {
             if (!_logLive && _onLatestFile) {
                 _logLive = true;
@@ -954,6 +955,13 @@ function init() {
             _scheduleTimelineRefresh();
         });
         _queueResizeObserver.observe(dom.timelineQueue());
+
+        // Re-anchor log to bottom on panel resize (e.g. window shrink, splitter drag).
+        // Calling _scrollLogSmooth() sets _logScrollRafId non-null synchronously, so the
+        // scroll listener will suppress any scroll event the resize induces.
+        new ResizeObserver(() => {
+            if (_logLive) _scrollLogSmooth();
+        }).observe(dom.log());
     }
 
     // Redraw timeline on resize so the row window recentres correctly.
