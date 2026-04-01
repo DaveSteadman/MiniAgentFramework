@@ -24,8 +24,8 @@ Running `main.py` with no special mode flags starts the FastAPI server and brows
 
 ```powershell
 python .\code\main.py
-python .\code\main.py --ollama-host MONTBLANC
-python .\code\main.py --api-port 8010 --model 20b --num-ctx 65536
+python .\code\main.py --ollamahost MONTBLANC
+python .\code\main.py --agenthost 0.0.0.0:8010 --model 20b --ctx 65536
 ```
 
 What this mode provides:
@@ -34,7 +34,7 @@ What this mode provides:
 - Prompt queue with a separate total queued prompt count and a preview of the next prompts to be serviced.
 - REST API endpoints used by the UI for queue, timeline, logs, history, and prompt submission.
 
-Open the browser UI at `http://localhost:8000/` unless you changed `--api-port`.
+Open the browser UI at `http://localhost:8000/` unless you changed `--agenthost`.
 
 ---
 
@@ -45,10 +45,9 @@ All options are optional. Unrecognised options are rejected at startup with a us
 | Option | Default | Description |
 |---|---|---|
 | `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` resolve to the first installed model whose tag contains that string. |
-| `--num-ctx N` | `131072` | Context window size used for LLM calls. |
-| `--api-port PORT` | `8000` | Port for the web UI/API server. |
-| `--api-host HOST` | `0.0.0.0` | Bind host for the web UI/API server. |
-| `--ollama-host URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address such as `http://MONTBLANC:11434` or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. |
+| `--ctx N` | `131072` | Context window size used for LLM calls. |
+| `--agenthost HOST:PORT` | `0.0.0.0:8000` | Bind address for the web UI/API server. |
+| `--ollamahost URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address such as `http://MONTBLANC:11434` or `https://api.ollama.com`. Falls back to `OLLAMA_HOST` env var. |
 
 ### Default overrides file
 
@@ -58,8 +57,7 @@ All options are optional. Unrecognised options are rejected at startup with a us
 {
   "model":       "20b",
   "num_ctx":     131072,
-  "api_port":    8000,
-  "api_host":    "0.0.0.0",
+  "agenthost":   "0.0.0.0:8000",
   "ollama_host": "http://localhost:11434"
 }
 ```
@@ -232,13 +230,13 @@ python .\code\preprocess_prompt.py --output tool_definitions.json
 ### Monitor Ollama memory usage
 Samples Ollama process RSS before and during model inference to characterise memory requirements:
 ```powershell
-python .\code\system_check.py
-python .\code\system_check.py --num-ctx 4096
+python .\code\utils\system_check.py
+python .\code\utils\system_check.py --ctx 4096
 ```
 
 | Option | Default | Description |
 |---|---|---|
-| `--num-ctx N` | none | Optional context window size to request during the test inference call. |
+| `--ctx N` | none | Optional context window size to request during the test inference call. |
 
 ---
 

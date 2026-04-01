@@ -13,7 +13,7 @@
 #   - modes/api_mode.py         -- run_api_mode (FastAPI + uvicorn + scheduler)
 #   - ollama_client.py          -- Ollama server management and LLM calls
 #   - skills_catalog_builder.py -- load_skills_payload, tool definitions
-#   - runtime_logger.py         -- SessionLogger, create_log_file_path
+#   - utils/runtime_logger.py   -- SessionLogger, create_log_file_path
 # ====================================================================================================
 
 
@@ -30,24 +30,24 @@ from pathlib import Path
 if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-import ollama_client
-from modes.api_mode import run_api_mode
-from ollama_client import format_running_model_report
-from ollama_client import get_llm_timeout
-from ollama_client import register_llm_call_logger
-from orchestration import ConversationHistory
-from orchestration import OrchestratorConfig
-from orchestration import SessionContext
-from orchestration import orchestrate_prompt
-from orchestration import resolve_execution_model
-from skills_catalog_builder import load_skills_payload
-from runtime_logger import create_log_file_path
-from runtime_logger import SessionLogger
-from slash_commands import SlashCommandContext
-from slash_commands import handle as handle_slash
-from workspace_utils import get_chatsessions_day_dir
-from workspace_utils import get_controldata_dir
-from workspace_utils import get_logs_dir
+import agent_core.ollama_client as ollama_client
+from input_layer.api_mode import run_api_mode
+from agent_core.ollama_client import format_running_model_report
+from agent_core.ollama_client import get_llm_timeout
+from agent_core.ollama_client import register_llm_call_logger
+from agent_core.orchestration import ConversationHistory
+from agent_core.orchestration import OrchestratorConfig
+from agent_core.orchestration import SessionContext
+from agent_core.orchestration import orchestrate_prompt
+from agent_core.orchestration import resolve_execution_model
+from agent_core.skills_catalog_builder import load_skills_payload
+from utils.runtime_logger import create_log_file_path
+from utils.runtime_logger import SessionLogger
+from input_layer.slash_commands import SlashCommandContext
+from input_layer.slash_commands import handle as handle_slash
+from utils.workspace_utils import get_chatsessions_day_dir
+from utils.workspace_utils import get_controldata_dir
+from utils.workspace_utils import get_logs_dir
 
 
 # ====================================================================================================
@@ -55,12 +55,12 @@ from workspace_utils import get_logs_dir
 # ====================================================================================================
 DEFAULT_NUM_CTX      = 131072
 MAX_ITERATIONS       = 25   # safety cap; model exits naturally via native tool calling
-SKILLS_SUMMARY_PATH  = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
+SKILLS_SUMMARY_PATH  = Path(__file__).resolve().parent / "agent_core" / "skills" / "skills_summary.md"
 LOG_DIR              = get_logs_dir()
 DEFAULTS_FILE        = get_controldata_dir() / "default.json"
 
 # Keys accepted from default.json - any other keys are silently ignored.
-_DEFAULTS_KEYS = {"model", "num_ctx", "api_port", "api_host", "ollama_host"}
+_DEFAULTS_KEYS = {"model", "num_ctx", "agenthost", "ollama_host"}
 
 
 # ====================================================================================================
@@ -83,6 +83,14 @@ def _load_defaults() -> dict:
 # ====================================================================================================
 # MARK: CLI
 # ====================================================================================================
+def _parse_agenthost(agenthost: str) -> tuple[str, int]:
+    # Splits "HOST:PORT" into (host, port). Falls back to port 8000 if absent or non-numeric.
+    host, _, port_str = agenthost.rpartition(":")
+    if host and port_str.isdigit():
+        return host, int(port_str)
+    return agenthost, 8000
+
+# ----------------------------------------------------------------------------------------------------
 def parse_main_args() -> argparse.Namespace:
     # Priority: factory defaults < default.json < command-line args.
     file_defaults = _load_defaults()
@@ -95,39 +103,24 @@ def parse_main_args() -> argparse.Namespace:
         help="Ollama model alias or tag to use (e.g. '20b', 'llama3:8b').",
     )
     parser.add_argument(
-        "--num-ctx",
+        "--ctx",
         type=int,
         default=DEFAULT_NUM_CTX,
         help="Context window for LLM calls.",
     )
     parser.add_argument(
-        "--api-port",
-        type=int,
-        default=8000,
-        metavar="PORT",
-        help="Port for the web UI server (default 8000).",
-    )
-    parser.add_argument(
-        "--api-host",
+        "--agenthost",
         type=str,
-        default="0.0.0.0",
-        metavar="HOST",
-        help="Bind host for the web UI server (default 0.0.0.0).",
+        default="0.0.0.0:8000",
+        metavar="HOST:PORT",
+        help="Bind address for the web UI server as HOST:PORT (default 0.0.0.0:8000).",
     )
     parser.add_argument(
-        "--ollama-host",
+        "--ollamahost",
         type=str,
         default=os.environ.get("OLLAMA_HOST", ollama_client.DEFAULT_OLLAMA_HOST),
         metavar="URL",
         help="Ollama host URL. Defaults to http://localhost:11434. Also read from OLLAMA_HOST env var.",
-    )
-    # Internal arg used by the test runner (test_wrapper.py) only - hidden from help.
-    parser.add_argument(
-        "--chat-sequence-file",
-        type=Path,
-        default=None,
-        metavar="FILE",
-        help=argparse.SUPPRESS,
     )
     # Apply file defaults between factory defaults and CLI; set_defaults() is overridden
     # by any explicit CLI value but overrides argparse's own default= values.
@@ -151,7 +144,7 @@ def _make_task_session(
 
 # ====================================================================================================
 # MARK: CHAT SEQUENCE MODE
-# Used by test_wrapper.py via --chat-sequence-file (internal, suppressed from --help).
+# Used by test_wrapper.py via the CHAT_SEQUENCE_FILE environment variable (internal).
 # ====================================================================================================
 def run_chat_sequence_mode(
     sequence_file: Path,
@@ -244,7 +237,7 @@ def _run(args, logger, log_path) -> None:
     register_llm_call_logger(logger.log_file_only)
 
     # Set the active host once; all subsequent Ollama calls use this value.
-    ollama_client.configure_host(args.ollama_host)
+    ollama_client.configure_host(args.ollamahost)
 
     # Ensure Ollama is running before starting the UI. For local hosts, ollama serve is
     # auto-started if needed. For remote/cloud hosts a warning is printed but startup
@@ -265,25 +258,26 @@ def _run(args, logger, log_path) -> None:
 
     config = OrchestratorConfig(
         resolved_model      = resolved_model,
-        num_ctx             = args.num_ctx,
+        num_ctx             = args.ctx,
         max_iterations      = MAX_ITERATIONS,
         skills_payload      = skills_payload,
         skills_summary_path = SKILLS_SUMMARY_PATH,
         catalog_mtime       = catalog_mtime,
     )
 
-    ollama_client.register_session_config(resolved_model, args.num_ctx)
+    ollama_client.register_session_config(resolved_model, args.ctx)
 
     logger.log_section("SYSTEM STATUS")
     logger.log(f"Ollama host:     {ollama_client.get_active_host()}")
     logger.log(f"Requested model: {args.model}")
     logger.log(f"Resolved model:  {resolved_model}")
+    sequence_file_path = Path(os.environ["CHAT_SEQUENCE_FILE"]) if os.environ.get("CHAT_SEQUENCE_FILE") else None
     mode_label = (
-        f"chat-sequence:{args.chat_sequence_file.name}" if args.chat_sequence_file else
+        f"chat-sequence:{sequence_file_path.name}" if sequence_file_path else
         "api"
     )
     logger.log(f"Mode:            {mode_label}")
-    logger.log(f"num_ctx:         {args.num_ctx}")
+    logger.log(f"ctx:             {args.ctx}")
     logger.log(f"LLM timeout:     {get_llm_timeout()}s")
     logger.log(f"Max iterations:  {MAX_ITERATIONS}")
     try:
@@ -292,11 +286,12 @@ def _run(args, logger, log_path) -> None:
         logger.log(f"Model runtime status: unavailable ({exc})")
     logger.log(f"Log file:        {log_path.as_posix()}")
 
-    if args.chat_sequence_file:
-        run_chat_sequence_mode(sequence_file=args.chat_sequence_file, config=config, logger=logger, log_path=log_path)
+    if sequence_file_path:
+        run_chat_sequence_mode(sequence_file=sequence_file_path, config=config, logger=logger, log_path=log_path)
         return
 
-    run_api_mode(config=config, logger=logger, log_path=log_path, host=args.api_host, port=args.api_port)
+    _host, _port = _parse_agenthost(args.agenthost)
+    run_api_mode(config=config, logger=logger, log_path=log_path, host=_host, port=_port)
 
 
 # ----------------------------------------------------------------------------------------------------

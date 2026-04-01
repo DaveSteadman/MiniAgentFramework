@@ -2,6 +2,10 @@
 # Version 0.2+dev #
 - Web Navigate skill and adjustments to consolidate with other web skills.
 - Adding Web UI, removing other modes for simplicity.
+- Delegate skill
+- /testtrend test result analysis
+- Multiple rounds of robustness/maturity fixes
+- WebUI logfile navigation
 
 # Version 0.2 #
 - Addition of WebResearch skill, to better navigate web search and analysis prompts.

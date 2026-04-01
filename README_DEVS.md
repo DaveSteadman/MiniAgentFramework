@@ -46,7 +46,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
 - `code/ollama_client.py`
   - Supports local Ollama, LAN-hosted Ollama machines, and Ollama Cloud via `configure_host(host)`.
   - The active host is module-level state (same pattern as `_DEFAULT_LLM_TIMEOUT`); all public functions resolve to it automatically so no caller needs to pass a host.
-  - `configure_host` is called from `main()` at startup using `--ollama-host` / `OLLAMA_HOST` env var.
+  - `configure_host` is called from `main()` at startup using `--ollamahost` / `OLLAMA_HOST` env var.
   - `_is_local_host()` guards features that only make sense locally: `ensure_ollama_running` will not attempt to auto-start `ollama serve` for remote/cloud hosts. `get_ollama_ps_rows` calls `_get_ollama_ps_rows_local()` for local hosts (subprocess `ollama ps`) and `_get_ollama_ps_rows_remote()` for remote/cloud hosts (Ollama `/api/ps` HTTP endpoint).
   - Model discovery and alias resolution (`list_ollama_models`, `resolve_model_name`). Short aliases like `"20b"` resolve to the first installed model whose tag contains that string.
   - Primary LLM interface: `call_llm_chat` calls `/v1/chat/completions` with optional tool definitions and returns a `ChatCallResult` with token metrics and any tool call requests.
@@ -118,14 +118,14 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - The queue subpanel shows a separate queued prompt total and the next prompts to be serviced.
 
 ### 9) Test tooling
-- `testcode/test_wrapper.py`
+- `code/testing/test_wrapper.py`
   - Invokes `code/main.py` as a subprocess for each prompt in a configurable test suite.
   - Records timing, exit code, final LLM output, and log file path to a timestamped CSV in `controldata/test_results/`.
   - Prompt suites are JSON files in `controldata/test_prompts/` and are loaded via `--prompts-file`.
-  - Accepts `--ollama-host` to run the full suite against a LAN or cloud Ollama host.
+  - Accepts `--ollamahost` to run the full suite against a LAN or cloud Ollama host.
   - Invoked by the `/test` slash command; not intended for direct use.
 
-- `testcode/test_analyzer.py`
+- `code/testing/test_analyzer.py`
   - Reads a test results CSV and parses each run's log file for structured diagnostics.
   - Classifies every prompt as `PASS`, `FAIL`, `TIMEOUT`, or `GAP` (capability gap admission).
   - Extracts: tools called (`skills_selected`), tool-calling mode (`TOOL_CALLS` / `DIRECT` / `UNKNOWN`), tool round count, validation result.
@@ -285,7 +285,7 @@ controldata/
   schedules/                 Schedule definition JSON files (*.json).
   test_prompts/              Prompt suite JSON files for the test wrapper.
   test_results/              CSV results and analysis files from test runs.
-testcode/                    External test scripts (test_wrapper, test_analyzer, regressions).
+code/testing/               Test scripts (test_wrapper, test_analyzer, regressions).
 data/                        Miscellaneous data files (e.g. systemstats.csv).
 webresearch/
   01-Mine/                   Raw fetched content (URLs and search results as .md files).
@@ -348,7 +348,7 @@ The framework resolves the active Ollama host at startup via `ollama_client.conf
 Pass the host as a CLI argument or set the environment variable before launching.
 
 ```
-python code/main.py --ollama-host http://MONTBLANC:11434
+python code/main.py --ollamahost http://MONTBLANC:11434
 # or via env var:
 set OLLAMA_HOST=http://MONTBLANC:11434
 ```

@@ -119,7 +119,7 @@ http://localhost:8000/
 
 Example - target a different Ollama host:
 ```powershell
-python .\code\main.py --ollama-host http://MONTBLANC:11434
+python .\code\main.py --ollamahost http://MONTBLANC:11434
 ```
 
 ---
@@ -130,7 +130,7 @@ The `--model` flag accepts a short alias that is matched against installed model
 
 ```powershell
 python .\code\main.py --model 27b
-python .\code\main.py --model 12b --num-ctx 16384
+python .\code\main.py --model 12b --ctx 16384
 ```
 
 List installed models directly via Ollama:
