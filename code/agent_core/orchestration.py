@@ -86,7 +86,7 @@ _last_run_lock:    threading.Lock = threading.Lock()
 _delegate_tls:        threading.local = threading.local()
 _MAX_DELEGATE_DEPTH:  int             = 2
 
-# Stop event: set by /stopall to request early termination of the active run.
+# Stop event: set by /stoprun to request early termination of the active run.
 # The orchestration loop checks this between rounds; the current in-flight LLM call
 # completes normally, then the loop exits. Cleared at the start of each new run.
 _stop_event: threading.Event = threading.Event()
@@ -98,7 +98,7 @@ def request_stop() -> None:
 
 
 def is_stop_requested() -> bool:
-    """Return True if a /stopall has been requested and not yet cleared."""
+    """Return True if a /stoprun has been requested and not yet cleared."""
     return _stop_event.is_set()
 
 
@@ -935,15 +935,15 @@ def orchestrate_prompt(
     run_success:       bool       = False
     final_response:    str        = ""
 
-    # Clear any leftover stop signal from a previous /stopall before entering the loop.
+    # Clear any leftover stop signal from a previous /stoprun before entering the loop.
     _stop_event.clear()
 
     for round_num in range(1, config.max_iterations + 1):
-        # Check for /stopall signal before starting a new round.
+        # Check for /stoprun signal before starting a new round.
         if _stop_event.is_set():
             _stop_event.clear()
-            _log("[/stopall] Stop requested - halting before round {round_num}.")
-            final_response = "[Run stopped by /stopall. The previous response may be incomplete.]"
+            _log("[/stoprun] Stop requested - halting before round {round_num}.")
+            final_response = "[Run stopped by /stoprun. The previous response may be incomplete.]"
             break
 
         _log_section(f"TOOL ROUND {round_num}")

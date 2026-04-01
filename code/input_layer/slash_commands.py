@@ -504,7 +504,7 @@ def _cmd_recall(arg: str, ctx: SlashCommandContext) -> None:
 
 # ----------------------------------------------------------------------------------------------------
 
-def _cmd_stopall(arg: str, ctx: SlashCommandContext) -> None:
+def _cmd_stoprun(arg: str, ctx: SlashCommandContext) -> None:
     # In API mode this command is intercepted and handled by api.py before it reaches here,
     # so this stub only runs in non-API contexts (e.g. TUI, tests).
     # It sets the orchestration stop event so the active run exits after its current round.
@@ -632,7 +632,7 @@ def _run_one_test_file(
             text=True,
             encoding="utf-8",
         )
-        # Watcher thread: kill the subprocess promptly when /stopall is requested.
+        # Watcher thread: kill the subprocess promptly when /stoprun is requested.
         # test_wrapper runs the full orchestration pipeline in a child process so the
         # orchestration stop-event is not visible here - we must terminate the OS process.
         import threading as _threading
@@ -676,7 +676,7 @@ def _run_one_test_file(
             _wt.join(timeout=1.0)
 
         if _stopped_by_user[0]:
-            ctx.output("[Test stopped by /stopall]", "error")
+            ctx.output("[Test stopped by /stoprun]", "error")
             return {
                 "passed":        0,
                 "total":         0,
@@ -1432,7 +1432,7 @@ _REGISTRY: dict[str, Callable] = {
     "/help":          _cmd_help,
     "/models":        _cmd_models,
     "/model":         _cmd_model,
-    "/stopall":       _cmd_stopall,
+    "/stoprun":       _cmd_stoprun,
     "/ollamahost":    _cmd_host,
     "/kiwixhost":     _cmd_kiwixhost,
     "/ctx":           _cmd_ctx,
@@ -1457,7 +1457,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/help":          "List available slash commands",
     "/models":        "List installed Ollama models",
     "/model":         "<name>  Switch active model for all subsequent runs",
-    "/stopall":       "Cancel the active LLM run (after its current round) and clear all pending queued prompts",
+    "/stoprun":       "Cancel the active LLM run (after its current round) and clear all pending queued prompts",
     "/ollamahost":    "<hostname|url|local>  Switch active Ollama host (LAN, cloud, or local)",
     "/kiwixhost":     "<url>  Set the Kiwix server URL and save to default.json (takes effect immediately)",
     "/ctx":           "Show context map + window size; sub-cmds: size [<n>], item <n>, compact <n>",

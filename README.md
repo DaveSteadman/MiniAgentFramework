@@ -106,21 +106,25 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/help` | List all available slash commands |
 | `/models` | List installed Ollama models; the active model is marked with `►` |
 | `/model <name>` | Switch the active model for all subsequent runs (e.g. `/model 8b`). Accepts the same short aliases as `--model`. Clears conversation history. |
-| `/host <target>` | Switch the active Ollama host without restarting. Clears conversation history. See [Host targeting](#host-targeting) below. |
+| `/ollamahost <target>` | Switch the active Ollama host without restarting. Clears conversation history. See [Host targeting](#host-targeting) below. |
 | `/ctx` | Show the context map for the last run - index, round, label, char count, and compaction state - plus the current window size. |
 | `/ctx size` | Show the current context window size only. |
 | `/ctx size <n>` | Set the context window size for all subsequent runs (e.g. `/ctx size 32768`). Accepts integers with optional commas or underscores. |
 | `/ctx item <n>` | Print the raw message content for context-map entry N. Useful for inspecting what was sent to the model in a specific round. |
 | `/ctx compact <n>` | Compact context-map entry N in place - replaces the message content with a one-line summary and saves the original to the scratchpad. Prints the before/after table. |
+| `/rounds <n>` | Set the max tool-call rounds per prompt (e.g. `/rounds 6`). |
 | `/timeout <seconds>` | Set the LLM generation timeout (e.g. `/timeout 1800` for heavy analysis tasks). |
+| `/stoprun` | Cancel the active LLM run (after its current round finishes) and clear all pending queued prompts. Executes immediately - does not wait in the queue. Pending prompts receive a `Cancelled by /stoprun.` response. |
 | `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
 | `/clearmemory` | Delete the memory store file (`memory_store.json`), starting the next session with a blank memory. |
 | `/newchat` | Clear conversation history and session context, starting a fresh chat without restarting. |
-| `/reskill` | Rebuild the skills catalog from `skill.md` files (fast local path) and hot-reload into the current session. The catalog is also rebuilt automatically at startup whenever any `skill.md` is newer than `skills_summary.md`. |
+| `/reskill [min\|max]` | Rebuild the skills catalog and set system prompt guidance mode. Defaults to `min` if omitted. |
 | `/sandbox <on\|off>` | Toggle the Python sandbox for `CodeExecute` skill. `on` (default) enforces the built-in allow-list; `off` removes restrictions (use with care). |
+| `/scratchdump <on\|off>` | Write scratchpad contents to `controldata/scratchpad_dump.txt` on every change. Defaults to `off`. |
 | `/deletelogs <days>` | Delete log date-folders under `controldata/logs/` older than N days. Each folder is named `YYYY-MM-DD` and contains all runs from that day. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
 | `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. The argument is matched as a case-insensitive substring, so `/test web` matches `test_web_skill_prompts.json`. |
 | `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. All results are written to a single combined CSV file (`test_results_<timestamp>_all.csv`) with a banner printed between each suite. Prints a final summary with host, model, elapsed time, and cumulative pass/fail count. |
+| `/testtrend [prompts-file]` | Show pass-rate trend across all historical test runs, optionally filtered by prompts file. |
 | `/recall` | Show a summary of all skill outputs stored in the current session context (URLs fetched, files written, search results, etc.). |
 | `/tasks` | List all scheduled tasks with their status (on/off), schedule, and prompt preview. |
 | `/task enable <name>` | Enable a task by name. The API scheduler picks up the change on its next reload cycle. |
@@ -128,25 +132,24 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/task add <name> <schedule> <prompt>` | Create a new task. `schedule` is either a number of minutes (e.g. `60`) or a daily wall-clock time (e.g. `08:30`). |
 | `/task delete <name>` | Permanently delete a task and remove its JSON file if it becomes empty. |
 | `/task run <name>` | Execute a task immediately, outside its normal schedule. Runs the same pipeline as the scheduler - useful for testing a task definition or triggering a one-off run. |
-| `/version` | Show framework version, active model, and context size. |
-| `/stopall` | Cancel the active LLM run (after its current round finishes) and clear all pending queued prompts. Executes immediately - does not wait in the queue. Pending prompts receive a "Cancelled by /stopall" response. |
+| `/version` | Show the framework version. |
 | `/kiwixhost <url>` | Set the Kiwix server URL and save it to `controldata/default.json` (e.g. `/kiwixhost http://192.168.1.33:8080`). The URL is verified before saving. Takes effect immediately - no restart required. |
 
 ### Host targeting
 
-`/host` accepts several forms, all equivalent in meaning:
+`/ollamahost` accepts several forms, all equivalent in meaning:
 
 | Input | Resolves to |
 |---|---|
-| `/host local` | `http://localhost:11434` |
-| `/host MONTBLANC` | `http://MONTBLANC:11434` |
-| `/host 192.168.1.169` | `http://192.168.1.169:11434` |
-| `/host http://192.168.1.169:11434` | `http://192.168.1.169:11434` (unchanged) |
-| `/host https://api.ollama.com` | `https://api.ollama.com` (unchanged) |
+| `/ollamahost local` | `http://localhost:11434` |
+| `/ollamahost MONTBLANC` | `http://MONTBLANC:11434` |
+| `/ollamahost 192.168.1.169` | `http://192.168.1.169:11434` |
+| `/ollamahost http://192.168.1.169:11434` | `http://192.168.1.169:11434` (unchanged) |
+| `/ollamahost https://api.ollama.com` | `https://api.ollama.com` (unchanged) |
 
 Any bare hostname or IP address (no `://`) is automatically wrapped as `http://<name>:11434` - the standard Ollama default port. Full URLs are passed through unchanged, so custom ports and HTTPS cloud endpoints work too.
 
-Connectivity to the host is **not** checked at switch time. The connection is verified lazily on the first LLM call made after the switch. This means `/host` always succeeds immediately, and any connectivity problem is reported precisely when an LLM call is attempted - not before. Slash commands continue to work regardless of whether the active host is reachable.
+Connectivity to the host is checked at switch time. If the target cannot be reached, the host change is rejected and the previous host remains active.
 
 New slash commands can be added in [code/input_layer/slash_commands.py](code/input_layer/slash_commands.py) by adding a handler function and registering it in `_REGISTRY` and `_DESCRIPTIONS`.
 

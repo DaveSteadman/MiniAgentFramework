@@ -413,9 +413,9 @@ def _task_at_slot(slot_dt: datetime, now_min: datetime) -> str | None:
 
 
 # ====================================================================================================
-# MARK: STOPALL
+# MARK: STOPRUN
 # ====================================================================================================
-# /stopall is the only slash command that bypasses the task queue entirely.
+# /stoprun is the only slash command that bypasses the task queue entirely.
 # It executes immediately inside post_prompt so it can act on the currently-running
 # LLM call without waiting for it to finish.  Two things happen:
 #   1. request_stop() sets a threading.Event that orchestrate_prompt() checks between
@@ -423,7 +423,7 @@ def _task_at_slot(slot_dt: datetime, now_min: datetime) -> str | None:
 #   2. clear_pending() drains every not-yet-started item from the task queue and returns
 #      their run_ids so we can push cancellation events to their SSE clients.
 
-def _handle_stopall_immediate(run_id: str, run_q: "queue.Queue") -> None:
+def _handle_stoprun_immediate(run_id: str, run_q: "queue.Queue") -> None:
     """Immediately signal the active run to stop and cancel all pending queue items."""
     # Signal the orchestration loop to exit after its current LLM round.
     request_stop()
@@ -432,7 +432,7 @@ def _handle_stopall_immediate(run_id: str, run_q: "queue.Queue") -> None:
     cancelled_ids = task_queue.clear_pending()
 
     # Push a cancellation response + sentinel to each pending run's SSE client.
-    cancel_msg = "Cancelled by /stopall."
+    cancel_msg = "Cancelled by /stoprun."
     with _run_queues_lock:
         for rid in cancelled_ids:
             q = _run_event_queues.get(rid)
@@ -485,10 +485,10 @@ def post_prompt(session_id: str, body: PromptRequest):
     run_id      = f"api_{session_id}_{uuid.uuid4().hex}"
     run_q       = _make_run_event_queue(run_id)
 
-    # /stopall is handled immediately - it must not join the queue because its
+    # /stoprun is handled immediately - it must not join the queue because its
     # entire purpose is to act on the currently-running and pending items.
-    if prompt_text.lower() == "/stopall":
-        _handle_stopall_immediate(run_id, run_q)
+    if prompt_text.lower() == "/stoprun":
+        _handle_stoprun_immediate(run_id, run_q)
         return {"run_id": run_id, "session_id": session_id, "queued": True}
 
     def _run(_prompt=prompt_text) -> None:
