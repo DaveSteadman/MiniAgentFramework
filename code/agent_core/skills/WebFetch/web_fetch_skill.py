@@ -49,8 +49,37 @@ from utils.webpage_utils import truncate_to_words as _truncate_to_words
 # ====================================================================================================
 MAX_WORDS_CAP     = 4000   # raw return (no query) - kept small to protect main context
 QUERY_WORDS_CAP   = 10000  # query-mode - inner LLM handles it, main context only gets the extract
-DEFAULT_MAX_WORDS = 1000
+DEFAULT_MAX_WORDS = 2000
 DEFAULT_TIMEOUT   = 15
+QUERY_FALLBACK_MIN_WORDS = 2500
+
+
+# ====================================================================================================
+# MARK: FALLBACKS
+# ====================================================================================================
+def _format_raw_fallback(page_title: str, body: str, max_words: int) -> str:
+    """Return raw extracted page text as a generic fallback when query-mode extraction misses.
+
+    This keeps the fetch useful for any query type without hard-coding prompt-specific
+    heuristics. The caller still gets the real page content and can reason over it.
+    """
+    raw_words = max(50, min(int(max_words), MAX_WORDS_CAP))
+    raw_body  = _truncate_to_words(body, raw_words)
+    if page_title:
+        return f"# {page_title}\n\n{raw_body}"
+    return raw_body
+
+
+# ----------------------------------------------------------------------------------------------------
+def _format_query_fallback(page_title: str, body: str, max_words: int) -> str:
+    """Return a larger raw fallback for failed query-mode extraction.
+
+    When the isolated extractor cannot prove an answer, return a longer excerpt so the
+    orchestration layer can auto-park it in the scratchpad and the model can inspect it
+    with scratch_query / scratch_peek instead of repeating shallow fetches.
+    """
+    fallback_words = max(int(max_words), QUERY_FALLBACK_MIN_WORDS)
+    return _format_raw_fallback(page_title, body, fallback_words)
 
 
 # ====================================================================================================
@@ -100,13 +129,13 @@ def fetch_page_text(
         return f"Could not extract readable text from: {url}"
 
     body = _truncate_to_words(body, fetch_words)
+    raw_fallback = _format_raw_fallback(page_title, body, max_words)
+    query_fallback = _format_query_fallback(page_title, body, max_words)
 
     if not query:
         # In raw mode, prefix the page title so the caller can confirm which page was fetched
         # without the model having to infer it from the prose.
-        if page_title:
-            return f"# {page_title}\n\n{body}"
-        return body
+        return raw_fallback
 
     # -- Isolated extraction call --
     # Run a throwaway LLM call in its own context so the full page text never enters the
@@ -114,8 +143,8 @@ def fetch_page_text(
     model   = _get_active_model()
     num_ctx = _get_active_num_ctx()
     if not model:
-        # No model registered yet - fall back to raw truncated text.
-        return _truncate_to_words(body, max(50, min(int(max_words), MAX_WORDS_CAP)))
+        # No model registered yet - fall back to raw extracted page text.
+        return raw_fallback
 
     inner_messages = [
         {
@@ -128,6 +157,8 @@ def fetch_page_text(
                 "Never include rows belonging to a different entity. "
                 "List every matching item individually - never group, compress, or summarise into ranges or counts. "
                 "Always include the column used to filter so the output is self-verifiable.\n"
+                "If the question asks for all / every / full history and you cannot prove the list is complete from the page text, "
+                "respond with exactly: Not found on this page.\n"
                 "MODE B - EXTRACT (use when the question asks about meaning, description, or explanation): "
                 "pull the directly relevant sentences or paragraphs from the page and present them concisely.\n"
                 "In both modes: if the answer is genuinely not present on this page, "
@@ -148,6 +179,8 @@ def fetch_page_text(
             num_ctx=num_ctx,
         )
         extracted = (result.response or "").strip()
-        return extracted if extracted else f"Could not extract relevant content from: {url}"
-    except Exception as exc:
-        return f"Error during extraction LLM call: {exc}"
+        if not extracted or extracted == "Not found on this page.":
+            return query_fallback
+        return extracted
+    except Exception:
+        return query_fallback

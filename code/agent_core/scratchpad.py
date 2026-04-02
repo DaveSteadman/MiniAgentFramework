@@ -49,6 +49,47 @@ _DUMP_ENABLED:  bool           = False   # toggled by /scratchdump slash command
 
 
 # ----------------------------------------------------------------------------------------------------
+def _is_exhaustive_query(query: str) -> bool:
+    lowered = query.lower()
+    markers = (
+        "list all",
+        "all ",
+        "every ",
+        "complete list",
+        "full list",
+        "exhaustive",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+# ----------------------------------------------------------------------------------------------------
+def _looks_like_search_results(content: str) -> bool:
+    preview = content[:500].lower()
+    if preview.startswith("web search results for:"):
+        return True
+    if "duckduckgo" in preview and "result" in preview:
+        return True
+    return bool(re.search(r"(?m)^\[\d+\]\s", content))
+
+
+# ----------------------------------------------------------------------------------------------------
+def _build_scratch_query_system_prompt() -> str:
+    return (
+        "You are a precise information extractor running in an isolated context. "
+        "Use only the supplied content and never use outside knowledge, memory, or inference to fill gaps. "
+        "Read the question and the content below, then respond with ONLY the answer:\n"
+        "- If filtering a list or table: include every matching row in full, one per line. "
+        "  Never group or summarise rows into ranges.\n"
+        "- For requests that imply completeness such as 'list all', 'every', or 'full list', "
+        "  return a complete answer only when the supplied content explicitly contains the full set.\n"
+        "- Search result snippets, headlines, and summaries are not authoritative sources for exhaustive factual lists.\n"
+        "- If extracting facts: pull only the directly relevant sentences, concisely.\n"
+        "- If the answer is missing, partial, or cannot be proven from the supplied content, "
+        "  respond with exactly: Not found in content."
+    )
+
+
+# ----------------------------------------------------------------------------------------------------
 def _validate_key(key: str) -> str:
     """Normalise and validate a key; raise ValueError for illegal characters."""
     normalised = key.strip().lower()
@@ -225,6 +266,9 @@ def scratch_query(key: str, query: str, save_result_key: str = "") -> str:
 
     content = _STORE[validated]
 
+    if _is_exhaustive_query(query) and _looks_like_search_results(content):
+        return "Not found in content."
+
     # Lazy imports to avoid circular deps at module load time.
     # Must use the fully-qualified package path so we share the same module
     # object (and the same _active_model global) as the rest of the app.
@@ -246,14 +290,7 @@ def scratch_query(key: str, query: str, save_result_key: str = "") -> str:
     inner_messages = [
         {
             "role":    "system",
-            "content": (
-                "You are a precise information extractor running in an isolated context. "
-                "Read the question and the content below, then respond with ONLY the answer:\n"
-                "- If filtering a list or table: include every matching row in full, one per line. "
-                "  Never group or summarise rows into ranges.\n"
-                "- If extracting facts: pull only the directly relevant sentences, concisely.\n"
-                "- If the answer is not present, respond with exactly: Not found in content."
-            ),
+            "content": _build_scratch_query_system_prompt(),
         },
         {
             "role":    "user",

@@ -556,7 +556,7 @@ Single JSON payload for orchestration planning.
         "fetch_page_text(\"https://example.com/asyncio-guide\", query=\"summarise the key asyncio concepts\")",
         "fetch_page_text(url, max_words, timeout_seconds, query)",
         "fetch_page_text(url, query=...)",
-        "fetch_page_text(url: str, max_words: int = 1000, timeout_seconds: int = 15, query: str | None = None)"
+        "fetch_page_text(url: str, max_words: int = 2000, timeout_seconds: int = 15, query: str | None = None)"
       ],
       "inputs": [],
       "outputs": [
@@ -653,10 +653,11 @@ Single JSON payload for orchestration planning.
         "`answer_confidence` - `high` when top page score >= 10, `medium` >= 5, `low` < 5. Score is driven by: title term match (+4.0), URL term match (+2.0), body term frequency (up to +3.0/term), multi-term bonus (+3.0). A focused article typically scores 10-20; shallow index/listing pages score 3-7.",
         "`visited_count` - number of fetched pages",
         "`seed_results` - initial search results used to seed the traversal",
-        "`best_pages` - compact list of the most relevant pages with URL, title, score, and evidence snippets",
+        "`best_pages` - compact list of the most relevant pages with URL, title, score, evidence snippets, and a per-page `scratch_key`",
+        "`page_manifest` - compact manifest of all useful pages, each with URL, score, depth, and per-page `scratch_key`",
         "`exploration_log` - per-page log showing what was visited and why",
         "`unvisited_candidates` - discovered but not visited URLs (up to 20 from the remaining frontier)",
-        "`full_report` - larger text block suitable for scratchpad storage"
+        "`full_report` - compact debug report listing the strongest pages and their `scratch_key` values"
       ],
       "param_descriptions": {
         "research_traverse": {

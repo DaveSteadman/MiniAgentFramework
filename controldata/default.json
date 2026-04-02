@@ -1,5 +1,5 @@
 {
-  "model": "20b",
+  "model": "nemotron-3-nano:30b",
   "ctx": 131072,
   "agentport": 8000,
   "ollamahost": "http://MONTBLANC:11434",

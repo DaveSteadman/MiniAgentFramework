@@ -35,10 +35,11 @@ This skill is designed to reduce orchestration thrash by owning the search front
 - `answer_confidence` - `high` when top page score >= 10, `medium` >= 5, `low` < 5. Score is driven by: title term match (+4.0), URL term match (+2.0), body term frequency (up to +3.0/term), multi-term bonus (+3.0). A focused article typically scores 10-20; shallow index/listing pages score 3-7.
 - `visited_count` - number of fetched pages
 - `seed_results` - initial search results used to seed the traversal
-- `best_pages` - compact list of the most relevant pages with URL, title, score, and evidence snippets
+- `best_pages` - compact list of the most relevant pages with URL, title, score, evidence snippets, and a per-page `scratch_key`
+- `page_manifest` - compact manifest of all useful pages, each with URL, score, depth, and per-page `scratch_key`
 - `exploration_log` - per-page log showing what was visited and why
 - `unvisited_candidates` - discovered but not visited URLs (up to 20 from the remaining frontier)
-- `full_report` - larger text block suitable for scratchpad storage
+- `full_report` - compact debug report listing the strongest pages and their `scratch_key` values
 
 ## Triggers
 Invoke this skill when the prompt contains any of these concepts or phrases:
@@ -94,8 +95,16 @@ If related content is already stored from an earlier step, use `scratch_query` t
 specific answer rather than launching a fresh web investigation.
 
 ## Scratchpad integration
-This skill is intended to return a compact top-level summary plus a large `full_report`.
-The orchestration layer can keep the compact summary inline and auto-park the full result in scratchpad for later `scratch_load`.
+This skill stores each useful fetched page as its own scratchpad artifact under a deterministic
+`research_page_*` key and returns those keys in `best_pages` and `page_manifest`.
+
+Preferred follow-up pattern:
+1. call `research_traverse(...)`
+2. inspect `best_pages[*].scratch_key`
+3. run `scratch_query(key, question)` on one or more specific page artifacts
+
+Avoid `scratch_load` on the entire combined `research_traverse` result unless you explicitly need
+the raw manifest for debugging.
 
 ## Examples
 - `research_traverse("Which Ferrari drivers have won the Monaco Grand Prix?")`

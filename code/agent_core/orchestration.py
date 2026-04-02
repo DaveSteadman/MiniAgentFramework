@@ -107,6 +107,49 @@ def clear_stop() -> None:
     _stop_event.clear()
 
 
+# ====================================================================================================
+# MARK: TOOL CALL NORMALIZATION
+# ====================================================================================================
+def _normalize_tool_request(func_name: str, arguments: dict) -> tuple[str, dict, str | None]:
+    """Normalize wrapper-style model tool calls into direct framework tool calls.
+
+    Some models emit OpenAI Agents-style wrappers such as:
+        assistant(name="delegate", arguments={...})
+
+    This framework exposes only direct tool names, so we rewrite those calls before
+    execution. A short note is returned for log visibility when a rewrite occurs.
+    """
+    normalized_name = str(func_name or "").strip()
+    normalized_args = dict(arguments or {})
+    note: str | None = None
+
+    if normalized_name == "assistant":
+        wrapped_name = str(normalized_args.get("name", "")).strip()
+        wrapped_args = normalized_args.get("arguments", {})
+
+        if isinstance(wrapped_args, str):
+            try:
+                wrapped_args = json.loads(wrapped_args)
+            except json.JSONDecodeError:
+                wrapped_args = {}
+        elif not isinstance(wrapped_args, dict):
+            wrapped_args = {}
+
+        if wrapped_name:
+            normalized_name = wrapped_name
+            normalized_args = dict(wrapped_args)
+            note = f"normalized wrapper call assistant(...) -> {normalized_name}(...)"
+
+    # Compatibility alias for delegate wrappers emitted as {task: ...} instead of {prompt: ...}.
+    if normalized_name == "delegate" and "prompt" not in normalized_args and "task" in normalized_args:
+        normalized_args = dict(normalized_args)
+        normalized_args["prompt"] = normalized_args.pop("task")
+        extra = "mapped task -> prompt for delegate"
+        note = f"{note}; {extra}" if note else extra
+
+    return normalized_name, normalized_args, note
+
+
 def get_last_context_map() -> list[dict]:
     with _last_run_lock:
         return list(_last_context_map)
@@ -694,8 +737,10 @@ def _build_system_message(
         "- When a prompt says 'search for', 'search the web for', 'find information about', or 'look up', you MUST call a search or web tool. Never answer these prompts from internal knowledge without first calling the appropriate tool. If the tool returns no results, report that honestly rather than substituting training-data answers.",
         "- When a prompt explicitly says 'delegate' or asks you to 'delegate a sub-task', you MUST call the delegate tool. Do not substitute research_traverse, search_web, or any other tool - the user is requesting a child orchestration run, not a direct search.",
         "- When a prompt says 'research', 'investigate', 'look into', 'find evidence', or 'deep dive into', you MUST call research_traverse. Never answer these prompts from training data. research_traverse handles its own search frontier; call it with the user's question as the query argument.",
+        "- After research_traverse, prefer the returned page scratch keys from best_pages/page_manifest. Use scratch_query or scratch_peek on specific research_page_* entries instead of scratch_load on the entire combined research bundle.",
         "- When a web search or page-fetch tool returns no results, report that in a single short sentence only (e.g. 'No results were found for [query].'). Do not write out your reasoning about which other tools to try, what the rules say, or why the tool may have failed.",
-        '- Whenever you call fetch_page_text to retrieve specific information, always set the query parameter to your specific question (e.g. fetch_page_text(url=..., query="<your specific question here>")). This applies whether the URL came from a search result or was provided directly by the user. The query parameter runs an isolated extraction so only the relevant facts are returned - this avoids overloading the context with raw page text. Only omit query if the user explicitly asks for raw page content.',
+        '- When using fetch_page_text on a specific article page for a narrow fact lookup, set the query parameter to your specific question (e.g. fetch_page_text(url=..., query="<your specific question here>")).',
+        '- When the question requires a complete list, full history, many-year table scan, or evidence from a statistics/index page, prefer raw fetch_page_text with a generous max_words value (typically 2000-4000). Large raw fetches will be auto-saved to the scratchpad by orchestration, after which you should use scratch_query or scratch_peek on the saved key instead of repeating shallow fetches.',
         "- The python execution tool is more reliable for calculations than the model's internal math capabilities.",
         "- The scratchpad tool can store intermediate results across steps.",
         "- The current runtime system info (RAM, disk, OS, etc.) is already provided below - do not call get_system_info_dict unless the user explicitly asks to refresh it.",
@@ -1042,8 +1087,12 @@ def orchestrate_prompt(
             except json.JSONDecodeError:
                 arguments = {}
 
+            func_name, arguments, normalization_note = _normalize_tool_request(func_name, arguments)
+
             arg_preview = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
             _log(f"  -> {func_name}({arg_preview})")
+            if normalization_note:
+                _log_file_only(f"[tool-normalize] {normalization_note}")
 
             try:
                 output         = execute_tool_call(func_name, arguments, config.skills_payload, user_prompt, catalog_gates)
