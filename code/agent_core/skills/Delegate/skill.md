@@ -11,14 +11,25 @@ without polluting the parent context with intermediate tool chatter.
 ## Interface
 - Module: `code/agent_core/skills/Delegate/delegate_skill.py`
 - Functions:
-  - `delegate(prompt: str, instructions: str = "", max_iterations: int = 3)`
+  - `delegate(prompt: str, instructions: str = "", max_iterations: int = 3, output_key: str = "", scratchpad_visible_keys: list[str] | None = None, tools_allowlist: list[str] | None = None)`
 
 ## Parameters
 
-### `delegate(prompt, instructions = "", max_iterations = 3)`
+### `delegate(prompt, instructions = "", max_iterations = 3, output_key = "", scratchpad_visible_keys = None, tools_allowlist = None)`
 - `prompt` *(required)* - the child task to execute. Must be a complete, self-contained question or instruction.
 - `instructions` *(optional)* - extra steering prepended to the child prompt, e.g. "research thoroughly and return a concise answer with evidence".
 - `max_iterations` *(optional, default 3)* - maximum tool-calling rounds for the child run, 1-8 recommended.
+- `output_key` *(optional)* - scratchpad key name to save the child's final answer under automatically.
+  Mirrors `scratch_query`'s `save_result_key`. The parent can then use `scratch_query(output_key, ...)` or
+  `{scratch:output_key}` downstream without capturing the answer from the return dict inline.
+- `scratchpad_visible_keys` *(optional)* - list of scratchpad key names the child can see in its system prompt.
+  When provided, the child's key listing is limited to only those keys. When omitted, the child sees no
+  parent scratchpad keys (safe default - prevents silent context leakage from auto-saved `_tc_*` keys).
+  Pass explicit keys to hand the child exactly the content it needs: e.g. `["search_hits", "page_draft"]`.
+- `tools_allowlist` *(optional)* - list of skill names the child is permitted to use.
+  When provided, the child's tool set is restricted to only those skills (Delegate is always excluded unless
+  `allow_recursive_delegate` is set internally). Use to create focused sub-loops: e.g.
+  `["fetch_page_text", "scratch_save"]` for a child whose only job is to fetch and store.
 
 ## Output
 Returns a dictionary with:

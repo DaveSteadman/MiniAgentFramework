@@ -49,31 +49,9 @@ _DUMP_ENABLED:  bool           = False   # toggled by /scratchdump slash command
 
 
 # ----------------------------------------------------------------------------------------------------
-def _is_exhaustive_query(query: str) -> bool:
-    lowered = query.lower()
-    markers = (
-        "list all",
-        "all ",
-        "every ",
-        "complete list",
-        "full list",
-        "exhaustive",
-    )
-    return any(marker in lowered for marker in markers)
-
-
-# ----------------------------------------------------------------------------------------------------
-def _looks_like_search_results(content: str) -> bool:
-    preview = content[:500].lower()
-    if preview.startswith("web search results for:"):
-        return True
-    if "duckduckgo" in preview and "result" in preview:
-        return True
-    return bool(re.search(r"(?m)^\[\d+\]\s", content))
-
-
-# ----------------------------------------------------------------------------------------------------
-def _build_scratch_query_system_prompt() -> str:
+def _build_scratch_query_system_prompt(instructions: str = "") -> str:
+    if instructions:
+        return instructions
     return (
         "You are a precise information extractor running in an isolated context. "
         "Use only the supplied content and never use outside knowledge, memory, or inference to fill gaps. "
@@ -247,7 +225,7 @@ def scratch_peek(key: str, substring: str, context_chars: int = 250) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def scratch_query(key: str, query: str, save_result_key: str = "") -> str:
+def scratch_query(key: str, query: str, save_result_key: str = "", instructions: str = "") -> str:
     """Apply a natural-language query to stored scratchpad content via an isolated LLM call.
 
     Loads the full value stored at `key`, passes it to a clean-context LLM call together
@@ -265,9 +243,6 @@ def scratch_query(key: str, query: str, save_result_key: str = "") -> str:
         return "Error: query cannot be empty."
 
     content = _STORE[validated]
-
-    if _is_exhaustive_query(query) and _looks_like_search_results(content):
-        return "Not found in content."
 
     # Lazy imports to avoid circular deps at module load time.
     # Must use the fully-qualified package path so we share the same module
@@ -290,7 +265,7 @@ def scratch_query(key: str, query: str, save_result_key: str = "") -> str:
     inner_messages = [
         {
             "role":    "system",
-            "content": _build_scratch_query_system_prompt(),
+            "content": _build_scratch_query_system_prompt(instructions),
         },
         {
             "role":    "user",

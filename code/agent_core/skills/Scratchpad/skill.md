@@ -19,7 +19,7 @@ facts that should survive across sessions - use the Memory skill for that.
   - `scratch_delete(key: str)`
   - `scratch_search(substring: str)`
   - `scratch_peek(key: str, substring: str, context_chars: int = 250)`
-  - `scratch_query(key: str, query: str, save_result_key: str = "")`
+  - `scratch_query(key: str, query: str, save_result_key: str = "", instructions: str = "")`
 
 ## Parameters
 
@@ -51,10 +51,13 @@ No parameters.  Returns the full content of every key - use this to inspect stor
 - `substring` *(required)* - case-insensitive text to locate within the stored value.
 - `context_chars` *(optional, default 250)* - characters to include before and after the match.
 
-### `scratch_query(key, query, save_result_key = "")`
+### `scratch_query(key, query, save_result_key = "", instructions = "")`
 - `key` *(required)* - the scratchpad key whose full content will be used as input.
 - `query` *(required)* - natural-language question or instruction to apply to the stored content.
 - `save_result_key` *(optional)* - if provided, the extracted answer is also saved to this scratchpad key.
+- `instructions` *(optional)* - if provided, replaces the default "precise extractor" system prompt entirely.
+  Use this to change the isolated LLM's persona for synthesis, transformation, or generation tasks
+  rather than extraction. When omitted the default extractor behaviour applies.
 
   Runs the query against the stored content in a **clean, isolated LLM context** - the raw content
   never enters the caller's context window.  Use this instead of `scratch_load` when the stored

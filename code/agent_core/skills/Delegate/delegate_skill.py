@@ -27,6 +27,9 @@ def delegate(
     prompt: str,
     instructions: str = "",
     max_iterations: int = 3,
+    output_key: str = "",
+    scratchpad_visible_keys: list[str] | None = None,
+    tools_allowlist: list[str] | None = None,
 ) -> dict:
     """Spawn an isolated child orchestration context for a focused sub-task.
 
@@ -37,7 +40,10 @@ def delegate(
     Do NOT use for trivial single-tool operations - call the tool directly instead.
     """
     return delegate_subrun(
-        prompt         = str(prompt or "").strip(),
-        instructions   = str(instructions or "").strip(),
-        max_iterations = int(max_iterations or 3),
+        prompt                  = str(prompt or "").strip(),
+        instructions            = str(instructions or "").strip(),
+        max_iterations          = int(max_iterations or 3),
+        output_key              = str(output_key or "").strip(),
+        scratchpad_visible_keys = list(scratchpad_visible_keys) if scratchpad_visible_keys else None,
+        tools_allowlist         = list(tools_allowlist) if tools_allowlist else None,
     )

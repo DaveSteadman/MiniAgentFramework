@@ -37,6 +37,8 @@ let _timelineRefreshTimer = null;
 let _queueResizeObserver  = null;
 let _currentLogPath       = "";
 let _logLive              = true;   // when false, refreshLatestLogFile() is suppressed
+let _logScrollTarget      = -1;     // target scrollTop for log smooth-scroll
+let _logScrollRafId       = null;   // rAF handle for log scroll loop
 let _chatScrollTarget     = -1;     // target scrollTop for chat smooth-scroll
 let _chatScrollRafId      = null;   // rAF handle for chat scroll loop
 let _chatLive             = true;   // when false, new messages do not auto-scroll
@@ -475,7 +477,7 @@ function appendLogLine(text) {
         old.remove();
     }
     if (_logLive) {
-        _snapLogToBottom();
+        _scrollLogSmooth();
     }
 }
 
@@ -503,12 +505,34 @@ function _snapLogToBottom() {
     el.scrollTop = el.scrollHeight - el.clientHeight;
 }
 
+// Smooth-scroll the log panel to the bottom using a rAF decay loop.
+// Only scrolls when _logLive is true or a rAF loop is already in flight.
+function _scrollLogSmooth() {
+    if (!_logLive && _logScrollRafId === null) return;
+    const el = dom.log();
+    _logScrollTarget = el.scrollHeight - el.clientHeight;
+    if (_logScrollRafId !== null) return;
+    function step() {
+        const panel  = dom.log();
+        const target = _logScrollTarget;
+        const diff   = target - panel.scrollTop;
+        if (Math.abs(diff) < 1) {
+            panel.scrollTop = target;
+            _logScrollRafId = null;
+            return;
+        }
+        panel.scrollTop += diff * 0.3;
+        _logScrollRafId = requestAnimationFrame(step);
+    }
+    _logScrollRafId = requestAnimationFrame(step);
+}
+
 function _isChatNearBottom() {
     const el = dom.chat();
     return (el.scrollHeight - el.scrollTop - el.clientHeight) <= 4;
 }
 
-// Smooth scroll for the chat panel - mirrors _scrollLogSmooth.
+// Smooth scroll for the chat panel - same rAF decay pattern as _scrollLogSmooth.
 // Only scrolls when _chatLive is true or a rAF loop is already in flight.
 function _scrollChatSmooth() {
     if (!_chatLive && _chatScrollRafId === null) return;

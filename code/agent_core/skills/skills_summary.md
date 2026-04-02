@@ -104,8 +104,8 @@ Single JSON payload for orchestration planning.
       ],
       "functions": [
         "delegate(...)",
-        "delegate(prompt, instructions = \"\", max_iterations = 3)",
-        "delegate(prompt: str, instructions: str = \"\", max_iterations: int = 3)"
+        "delegate(prompt, instructions = \"\", max_iterations = 3, output_key = \"\", scratchpad_visible_keys = None, tools_allowlist = None)",
+        "delegate(prompt: str, instructions: str = \"\", max_iterations: int = 3, output_key: str = \"\", scratchpad_visible_keys: list[str] | None = None, tools_allowlist: list[str] | None = None)"
       ],
       "inputs": [],
       "outputs": [
@@ -119,7 +119,10 @@ Single JSON payload for orchestration planning.
         "delegate": {
           "prompt": "the child task to execute. Must be a complete, self-contained question or instruction.",
           "instructions": "extra steering prepended to the child prompt, e.g. \"research thoroughly and return a concise answer with evidence\".",
-          "max_iterations": "maximum tool-calling rounds for the child run, 1-8 recommended."
+          "max_iterations": "maximum tool-calling rounds for the child run, 1-8 recommended.",
+          "output_key": "scratchpad key name to save the child's final answer under automatically.",
+          "scratchpad_visible_keys": "list of scratchpad key names the child can see in its system prompt.",
+          "tools_allowlist": "list of skill names the child is permitted to use."
         }
       }
     },
@@ -369,9 +372,9 @@ Single JSON payload for orchestration planning.
         "scratch_query(\"racedata\", \"List only Ferrari wins\", \"ferrari_wins\")",
         "scratch_query(\"racedata\", \"Which drivers won at Monaco?\")",
         "scratch_query(...)",
-        "scratch_query(key, query, save_result_key = \"\")",
+        "scratch_query(key, query, save_result_key = \"\", instructions = \"\")",
         "scratch_query(key, question)",
-        "scratch_query(key: str, query: str, save_result_key: str = \"\")",
+        "scratch_query(key: str, query: str, save_result_key: str = \"\", instructions: str = \"\")",
         "scratch_save(\"webresult\", \"page content here...\")",
         "scratch_save(...)",
         "scratch_save(key, value)",
@@ -414,7 +417,8 @@ Single JSON payload for orchestration planning.
         "scratch_query": {
           "key": "the scratchpad key whose full content will be used as input.",
           "query": "natural-language question or instruction to apply to the stored content.",
-          "save_result_key": "if provided, the extracted answer is also saved to this scratchpad key."
+          "save_result_key": "if provided, the extracted answer is also saved to this scratchpad key.",
+          "instructions": "if provided, replaces the default \"precise extractor\" system prompt entirely."
         }
       }
     },

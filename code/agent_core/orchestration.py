@@ -35,7 +35,7 @@ from agent_core.ollama_client import list_ollama_models
 from agent_core.ollama_client import log_to_session
 from agent_core.ollama_client import resolve_model_name
 from agent_core.prompt_tokens import resolve_tokens
-from agent_core.scratchpad import get_key_names as get_scratchpad_key_names
+from agent_core.scratchpad import get_store as _get_scratchpad_store
 from agent_core.scratchpad import scratch_list as _scratch_list
 from agent_core.scratchpad import scratch_save as _scratch_auto_save
 from agent_core.skill_executor import build_catalog_gates
@@ -678,6 +678,7 @@ def _build_system_message(
     ambient_system_info: str,
     session_context: "SessionContext | None",
     skills_payload: dict,
+    scratchpad_visible_keys: list[str] | None = None,
 ) -> str:
     """Assemble the full system prompt from all runtime context sources.
 
@@ -726,11 +727,21 @@ def _build_system_message(
             "\nPython execution sandbox: OFF - code snippets have unrestricted access to all modules and file I/O."
         )
 
-    scratch_keys = get_scratchpad_key_names()
-    if scratch_keys:
+    _store = _get_scratchpad_store()
+    if scratchpad_visible_keys is not None:
+        _store = {k: v for k, v in _store.items() if k in scratchpad_visible_keys}
+    if _store:
+        named_keys = {k: v for k, v in _store.items() if not k.startswith("_tc_")}
+        auto_keys  = {k: v for k, v in _store.items() if k.startswith("_tc_")}
+        key_lines  = []
+        if named_keys:
+            key_lines.append("Named:      " + ", ".join(f"{k} ({len(v):,} chars)" for k in sorted(named_keys)))
+        if auto_keys:
+            key_lines.append("Auto-saved: " + ", ".join(f"{k} ({len(v):,} chars)" for k in sorted(auto_keys)))
         system_parts.append(
-            f"\nScratchpad keys currently stored: {', '.join(scratch_keys)}\n"
-            "Reference them in skill arguments using {scratch:key} or load them with scratch_load()."
+            "\nScratchpad keys currently stored:\n  "
+            + "\n  ".join(key_lines)
+            + "\nReference them in skill arguments using {scratch:key} or load them with scratch_load()."
         )
 
     return "\n".join(system_parts)
@@ -1090,6 +1101,7 @@ def orchestrate_prompt(
     session_context: "SessionContext | None" = None,
     quiet: bool = False,
     delegate_depth: int = 0,
+    scratchpad_visible_keys: list[str] | None = None,
 ) -> tuple[str, int, int, bool, float]:
     """Run the tool-calling pipeline for one prompt.
 
@@ -1156,7 +1168,7 @@ def orchestrate_prompt(
     _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
 
     # -- Build system message --
-    system_message = _build_system_message(ambient_system_info, session_context, config.skills_payload)
+    system_message = _build_system_message(ambient_system_info, session_context, config.skills_payload, scratchpad_visible_keys)
 
     # -- Build initial messages list --
     messages: list[dict] = [{"role": "system", "content": system_message}]
@@ -1255,6 +1267,9 @@ def delegate_subrun(
     instructions: str = "",
     max_iterations: int = 3,
     allow_recursive_delegate: bool = False,
+    output_key: str = "",
+    scratchpad_visible_keys: list[str] | None = None,
+    tools_allowlist: list[str] | None = None,
 ) -> dict:
     """Run a child orchestration context for one isolated sub-task.
 
@@ -1300,12 +1315,13 @@ def delegate_subrun(
     child_iterations = max(1, min(int(max_iterations), 8))
 
     # Build child skills payload - remove Delegate by default to prevent runaway recursion.
+    # Apply tools_allowlist when provided to constrain the child to a specific toolset.
     child_payload = copy.deepcopy(_config.skills_payload)
-    if not allow_recursive_delegate:
-        child_payload["skills"] = [
-            s for s in child_payload.get("skills", [])
-            if "Delegate" not in s.get("skill_name", "")
-        ]
+    child_payload["skills"] = [
+        s for s in child_payload.get("skills", [])
+        if (allow_recursive_delegate or "Delegate" not in s.get("skill_name", ""))
+        and (tools_allowlist is None or s.get("skill_name", "") in tools_allowlist)
+    ]
 
     child_config = OrchestratorConfig(
         resolved_model      = _config.resolved_model,
@@ -1327,13 +1343,14 @@ def delegate_subrun(
 
     try:
         answer, _, _, run_success, _ = orchestrate_prompt(
-            user_prompt          = child_prompt,
-            config               = child_config,
-            logger               = _logger,
-            conversation_history = None,
-            session_context      = None,
-            quiet                = True,
-            delegate_depth       = _depth + 1,
+            user_prompt             = child_prompt,
+            config                  = child_config,
+            logger                  = _logger,
+            conversation_history    = None,
+            session_context         = None,
+            quiet                   = True,
+            delegate_depth          = _depth + 1,
+            scratchpad_visible_keys = scratchpad_visible_keys,
         )
         status = "ok" if run_success else "error"
     except Exception as exc:
@@ -1343,6 +1360,14 @@ def delegate_subrun(
         _delegate_tls.logger         = _prev_logger
         _delegate_tls.delegate_depth = _prev_depth
         _delegate_tls.config         = _prev_config
+
+    if output_key and status == "ok":
+        try:
+            out_key = str(output_key).strip()
+            _scratch_auto_save(out_key, answer)
+            answer = f"[Result saved to '{out_key.lower()}']\n{answer}"
+        except Exception:
+            pass
 
     return {
         "status":          status,
