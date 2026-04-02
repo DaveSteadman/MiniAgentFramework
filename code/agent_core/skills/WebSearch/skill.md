@@ -8,27 +8,29 @@ Search the web using DuckDuckGo and return ranked results with title, URL, and s
 ## Interface
 - Module: `code/agent_core/skills/WebSearch/web_search_skill.py`
 - Functions:
-  - `search_web(query: str, max_results: int = 5, timeout_seconds: int = 15, offset: int = 0)`
-  - `search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15, max_chars_per_result: int = 500, offset: int = 0)`
+  - `search_web(query: str, max_results: int = 5, timeout_seconds: int = 15, offset: int = 0, prefer_article_urls: bool = False)`
+  - `search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15, max_chars_per_result: int = 500, offset: int = 0, prefer_article_urls: bool = False)`
 
 ## Parameters
 
-### `search_web(query, max_results = 5, timeout_seconds = 15, offset = 0)`
+### `search_web(query, max_results = 5, timeout_seconds = 15, offset = 0, prefer_article_urls = False)`
 - `query` *(required)* - search query string.
 - `max_results` *(optional, default 5)* - number of results to return, 1-10.
 - `timeout_seconds` *(optional, default 15)* - network timeout in seconds, 5-30.
 - `offset` *(optional, default 0)* - skip this many results from the start (multiples of 30 recommended for page 2+). Best-effort GET-based paging - may not return results for all queries.
+- `prefer_article_urls` *(optional, default false)* - when true, scans up to 3 DuckDuckGo result pages, promotes concrete article/detail URLs ahead of hub pages, and annotates each result with a `page_kind` field.
 
-### `search_web_text(query, max_results = 5, timeout_seconds = 15, max_chars_per_result = 500, offset = 0)`
+### `search_web_text(query, max_results = 5, timeout_seconds = 15, max_chars_per_result = 500, offset = 0, prefer_article_urls = False)`
 - `query` *(required)* - search query string.
 - `max_results` *(optional, default 5)* - number of results to return, 1-10.
 - `timeout_seconds` *(optional, default 15)* - network timeout in seconds, 5-30.
 - `max_chars_per_result` *(optional, default 500)* - maximum characters of snippet text per result, 0-2000. Set to 0 to disable truncation.
 - `offset` *(optional, default 0)* - skip this many results; use to retrieve page 2+ when the first page was exhausted.
+- `prefer_article_urls` *(optional, default false)* - same behavior as `search_web(...)`; when enabled the formatted output also includes each result's `page_kind` tag.
 
 ## Output
-- `search_web(...)` - returns `list[dict]`, each entry with `rank` (int), `title` (str), `url` (str), `snippet` (str). On error: single-entry list with `rank=0` and `snippet` describing the failure.
-- `search_web_text(...)` - returns a plain-text formatted block with rank, title, URL, and snippet per result. Ready for direct LLM consumption.
+- `search_web(...)` - returns `list[dict]`, each entry with `rank` (int), `title` (str), `url` (str), `snippet` (str), and `page_kind` (`article`, `hub`, `homepage`, `search-results`, or `other`). On error: single-entry list with `rank=0` and `snippet` describing the failure.
+- `search_web_text(...)` - returns a plain-text formatted block with rank, title, URL, snippet, and optional `[page_kind]` tag. Ready for direct LLM consumption.
 
 ## Triggers
 Invoke this skill when the prompt contains any of these concepts or phrases:
@@ -53,6 +55,13 @@ than substituting an answer from memory.
   no extra processing needed.
 - Use `search_web` only when you need to iterate over individual result fields (URL, title,
   snippet) programmatically - for example when passing each URL to a subsequent `fetch_page_text`.
+
+**When the user asks for article URLs, enable article preference.**
+- Use `prefer_article_urls=true` for prompts such as `find 5 article URLs`, `collect news articles`,
+  `gather article links`, or `build a briefing from recent coverage`.
+- Do not treat `hub`, `homepage`, or `search-results` entries as completed article picks.
+- If the top search results are still hubs, route them through `get_page_links_text(...)` to extract
+  concrete article/detail URLs before reading content.
 
 **The three-stage web chain - when to go beyond a search:**
 
@@ -82,3 +91,4 @@ not have to be re-fetched or carried as an inline string through subsequent plan
 - `search_web_text("Python 3.14 release notes", max_results=3)` - top 3 DuckDuckGo results as formatted text
   - Returns: `"Web search results for: Python 3.14 release notes\n\n[1] ..."`
 - `search_web("Eiffel Tower height")` - structured result list for programmatic use
+- `search_web("recent AI news articles", max_results=5, prefer_article_urls=true)` - prefer concrete article URLs over topic/category pages

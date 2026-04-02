@@ -92,6 +92,13 @@ Step 4: fetch_page_text(url, query="what is this project and how would a develop
 **Using filter_text for coarse pre-filtering:**
 If the listing page is very large (100+ links) and you already know a keyword, pass `filter_text="AI"` to trim the result before it parks. This keeps the parked content more focused for `scratch_query`. Do not over-filter - `scratch_query` handles semantic matching better than substring matching.
 
+Do not use placeholder values such as `"Skip"` or `"Next"` for `filter_text` unless you literally want links containing those words. Omitting `filter_text` is the correct default when surveying a hub page for article candidates.
+
+For news harvesting tasks:
+- Use this skill on topic pages, category pages, front pages, and search-result pages.
+- Extract concrete article/detail URLs here before calling `fetch_page_text`.
+- If the parent task asks for article URLs, links returned from this skill are the candidates; the hub page URL itself is not the article.
+
 ## Examples
 - `get_page_links_text("https://news.ycombinator.com")` - get today's HN front page links
   - Returns: `'"Hacker News" (https://news.ycombinator.com)  [30 links]\n1. [Show HN: ...] https://...'`

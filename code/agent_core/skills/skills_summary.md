@@ -641,6 +641,7 @@ Single JSON payload for orchestration planning.
       "functions": [
         "research_traverse(\"What changed in Python 3.14 packaging guidance?\", max_pages=8, max_hops=1)",
         "research_traverse(\"Which Ferrari drivers have won the Monaco Grand Prix?\")",
+        "research_traverse(...)",
         "research_traverse(query, max_search_results = 5, max_pages = 6, max_hops = 1, same_domain_only_for_hops = True, timeout_seconds = 15, max_words_per_page = 450, max_evidence_quotes = 3)",
         "research_traverse(query: str, max_search_results: int = 5, max_pages: int = 6, max_hops: int = 1, same_domain_only_for_hops: bool = True, timeout_seconds: int = 15, max_words_per_page: int = 450, max_evidence_quotes: int = 3)"
       ],
@@ -688,33 +689,36 @@ Single JSON payload for orchestration planning.
       ],
       "functions": [
         "search_web(\"Eiffel Tower height\")",
+        "search_web(\"recent AI news articles\", max_results=5, prefer_article_urls=true)",
         "search_web(...)",
-        "search_web(query, max_results = 5, timeout_seconds = 15, offset = 0)",
-        "search_web(query: str, max_results: int = 5, timeout_seconds: int = 15, offset: int = 0)",
+        "search_web(query, max_results = 5, timeout_seconds = 15, offset = 0, prefer_article_urls = False)",
+        "search_web(query: str, max_results: int = 5, timeout_seconds: int = 15, offset: int = 0, prefer_article_urls: bool = False)",
         "search_web_text(\"Python 3.14 release notes\")",
         "search_web_text(\"Python 3.14 release notes\", max_results=3)",
         "search_web_text(...)",
-        "search_web_text(query, max_results = 5, timeout_seconds = 15, max_chars_per_result = 500, offset = 0)",
-        "search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15, max_chars_per_result: int = 500, offset: int = 0)"
+        "search_web_text(query, max_results = 5, timeout_seconds = 15, max_chars_per_result = 500, offset = 0, prefer_article_urls = False)",
+        "search_web_text(query: str, max_results: int = 5, timeout_seconds: int = 15, max_chars_per_result: int = 500, offset: int = 0, prefer_article_urls: bool = False)"
       ],
       "inputs": [],
       "outputs": [
-        "`search_web(...)` - returns `list[dict]`, each entry with `rank` (int), `title` (str), `url` (str), `snippet` (str). On error: single-entry list with `rank=0` and `snippet` describing the failure.",
-        "`search_web_text(...)` - returns a plain-text formatted block with rank, title, URL, and snippet per result. Ready for direct LLM consumption."
+        "`search_web(...)` - returns `list[dict]`, each entry with `rank` (int), `title` (str), `url` (str), `snippet` (str), and `page_kind` (`article`, `hub`, `homepage`, `search-results`, or `other`). On error: single-entry list with `rank=0` and `snippet` describing the failure.",
+        "`search_web_text(...)` - returns a plain-text formatted block with rank, title, URL, snippet, and optional `[page_kind]` tag. Ready for direct LLM consumption."
       ],
       "param_descriptions": {
         "search_web": {
           "query": "search query string.",
           "max_results": "number of results to return, 1-10.",
           "timeout_seconds": "network timeout in seconds, 5-30.",
-          "offset": "skip this many results from the start (multiples of 30 recommended for page 2+). Best-effort GET-based paging - may not return results for all queries."
+          "offset": "skip this many results from the start (multiples of 30 recommended for page 2+). Best-effort GET-based paging - may not return results for all queries.",
+          "prefer_article_urls": "when true, scans up to 3 DuckDuckGo result pages, promotes concrete article/detail URLs ahead of hub pages, and annotates each result with a `page_kind` field."
         },
         "search_web_text": {
           "query": "search query string.",
           "max_results": "number of results to return, 1-10.",
           "timeout_seconds": "network timeout in seconds, 5-30.",
           "max_chars_per_result": "maximum characters of snippet text per result, 0-2000. Set to 0 to disable truncation.",
-          "offset": "skip this many results; use to retrieve page 2+ when the first page was exhausted."
+          "offset": "skip this many results; use to retrieve page 2+ when the first page was exhausted.",
+          "prefer_article_urls": "same behavior as `search_web(...)`; when enabled the formatted output also includes each result's `page_kind` tag."
         }
       }
     },

@@ -55,6 +55,29 @@ MAX_CHARS_PER_RESULT_CAP = 2000
 DEFAULT_MAX_RESULTS      = 5
 DEFAULT_TIMEOUT          = 15
 DEFAULT_MAX_CHARS        = 500
+_SEARCH_PAGE_SIZE        = 30
+_ARTICLE_SCAN_PAGES      = 3
+
+_HUB_PATH_MARKERS = (
+    "/category/",
+    "/categories/",
+    "/topic/",
+    "/topics/",
+    "/section/",
+    "/sections/",
+    "/tag/",
+    "/tags/",
+    "/archive",
+    "/archives",
+    "/latest",
+    "/trending",
+)
+_SEARCH_PATH_MARKERS = (
+    "/search",
+    "/topics/",
+)
+_SEARCH_QUERY_KEYS = frozenset({"q", "query", "search", "text", "keyword", "keywords"})
+_DATE_PATH_RE = re.compile(r"/(?:19|20)\d{2}/\d{1,2}/\d{1,2}/")
 
 
 # ====================================================================================================
@@ -91,6 +114,81 @@ def _is_ddg_ad(url: str) -> bool:
         return host == "duckduckgo.com" or host.endswith(".duckduckgo.com")
     except Exception:
         return False
+
+
+# ----------------------------------------------------------------------------------------------------
+def _coerce_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+# ----------------------------------------------------------------------------------------------------
+def _classify_result_url(url: str) -> str:
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return "other"
+
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+    query_keys = {k.lower() for k in urllib.parse.parse_qs(parsed.query).keys()}
+
+    if not path or path == "/":
+        return "homepage"
+
+    if host.startswith("news.google.") and "/topics/" in path:
+        return "search-results"
+
+    if any(marker in path for marker in _SEARCH_PATH_MARKERS) and query_keys.intersection(_SEARCH_QUERY_KEYS):
+        return "search-results"
+
+    if any(marker in path for marker in _HUB_PATH_MARKERS):
+        return "hub"
+
+    parts = [part for part in path.split("/") if part]
+    last_part = parts[-1] if parts else ""
+
+    if _DATE_PATH_RE.search(path):
+        return "article"
+
+    if "/news/" in path:
+        if "-" in last_part or re.search(r"\d", last_part):
+            return "article"
+        return "hub"
+
+    if len(parts) >= 3 and "-" in last_part and len(last_part) >= 12:
+        return "article"
+
+    return "other"
+
+
+# ----------------------------------------------------------------------------------------------------
+def _result_kind_priority(page_kind: str) -> int:
+    if page_kind == "article":
+        return 0
+    if page_kind == "other":
+        return 1
+    if page_kind == "hub":
+        return 2
+    if page_kind == "homepage":
+        return 3
+    if page_kind == "search-results":
+        return 4
+    return 5
+
+
+# ----------------------------------------------------------------------------------------------------
+def _annotate_results(results: list[dict]) -> list[dict]:
+    annotated: list[dict] = []
+    for result in results:
+        enriched = dict(result)
+        enriched["page_kind"] = _classify_result_url(str(result.get("url", "")))
+        annotated.append(enriched)
+    return annotated
 
 
 # ====================================================================================================
@@ -134,6 +232,7 @@ def search_web(
     max_results: int = DEFAULT_MAX_RESULTS,
     timeout_seconds: int = DEFAULT_TIMEOUT,
     offset: int = 0,
+    prefer_article_urls: bool = False,
     # Accept common aliases that models often use instead of the canonical names:
     num_results: int | None = None,
     limit: int | None = None,
@@ -161,32 +260,64 @@ def search_web(
 
     # Resolve whichever count alias the model used, preferring the canonical name.
     effective_max   = num_results if num_results is not None else (limit if limit is not None else (n if n is not None else max_results))
-    max_results     = max(1, min(int(effective_max),   MAX_RESULTS_CAP))
-    timeout_seconds = max(5, min(int(timeout_seconds), TIMEOUT_SECONDS_CAP))
-    offset          = max(0, int(offset))
+    max_results         = max(1, min(int(effective_max),   MAX_RESULTS_CAP))
+    timeout_seconds     = max(5, min(int(timeout_seconds), TIMEOUT_SECONDS_CAP))
+    offset              = max(0, int(offset))
+    prefer_article_urls = _coerce_bool(prefer_article_urls or kwargs.get("article_only") or kwargs.get("prefer_articles"))
 
-    encoded     = urllib.parse.quote_plus(query.strip())
-    if offset > 0:
-        search_url = _DDG_PAGE_URL.format(q=encoded, s=offset, dc=offset + 1)
-    else:
-        search_url = _DDG_URL.format(q=encoded)
+    encoded = urllib.parse.quote_plus(query.strip())
+    seen_urls: set[str] = set()
+    collected_results: list[dict] = []
+    pages_to_scan = _ARTICLE_SCAN_PAGES if prefer_article_urls else 1
 
-    try:
-        html_text, _ = _fetch_html(search_url, timeout=float(timeout_seconds))
-    except Exception as exc:
-        return [{"rank": 0, "title": "Search failed", "url": "", "snippet": str(exc)}]
+    for page_index in range(pages_to_scan):
+        current_offset = offset + (page_index * _SEARCH_PAGE_SIZE)
+        if current_offset > 0:
+            search_url = _DDG_PAGE_URL.format(q=encoded, s=current_offset, dc=current_offset + 1)
+        else:
+            search_url = _DDG_URL.format(q=encoded)
 
-    results = _extract_ddg_results(html_text, max_results)
+        try:
+            html_text, _ = _fetch_html(search_url, timeout=float(timeout_seconds))
+        except Exception as exc:
+            return [{"rank": 0, "title": "Search failed", "url": "", "snippet": str(exc)}]
 
-    # Throttle between successive calls to avoid rate-limiting on rapid multi-query tasks.
-    # Always sleep - including on empty results - to prevent rapid-fire requests when DDG
-    # is returning a rate-limit/CAPTCHA page (which has no result-link elements).
-    time.sleep(2.0)
+        page_results = _annotate_results(_extract_ddg_results(html_text, max_results))
+        for result in page_results:
+            url = str(result.get("url", "")).strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            collected_results.append(result)
 
-    if not results:
+        # Throttle between successive calls to avoid rate-limiting on rapid multi-query tasks.
+        # Always sleep - including on empty results - to prevent rapid-fire requests when DDG
+        # is returning a rate-limit/CAPTCHA page (which has no result-link elements).
+        time.sleep(2.0)
+
+        if not prefer_article_urls:
+            break
+
+        article_count = sum(1 for item in collected_results if item.get("page_kind") == "article")
+        if article_count >= max_results:
+            break
+
+    if not collected_results:
         return [{"rank": 0, "title": "No results", "url": "", "snippet": f"DuckDuckGo returned no results for: {query}"}]
 
-    return results
+    if prefer_article_urls:
+        collected_results = sorted(
+            collected_results,
+            key=lambda item: (_result_kind_priority(str(item.get("page_kind", "other"))), int(item.get("rank", 999))),
+        )
+
+    final_results = []
+    for index, result in enumerate(collected_results[:max_results], start=1):
+        enriched = dict(result)
+        enriched["rank"] = index
+        final_results.append(enriched)
+
+    return final_results
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -196,6 +327,7 @@ def search_web_text(
     timeout_seconds: int = DEFAULT_TIMEOUT,
     max_chars_per_result: int = DEFAULT_MAX_CHARS,
     offset: int = 0,
+    prefer_article_urls: bool = False,
     # Accept common aliases:
     num_results: int | None = None,
     limit: int | None = None,
@@ -219,7 +351,13 @@ def search_web_text(
                 break
 
     effective_max = num_results if num_results is not None else (limit if limit is not None else (n if n is not None else max_results))
-    results = search_web(query=query, max_results=int(effective_max), timeout_seconds=int(timeout_seconds), offset=int(offset))
+    results = search_web(
+        query=query,
+        max_results=int(effective_max),
+        timeout_seconds=int(timeout_seconds),
+        offset=int(offset),
+        prefer_article_urls=prefer_article_urls or kwargs.get("article_only") or kwargs.get("prefer_articles"),
+    )
 
     char_cap = max(0, min(int(max_chars_per_result), MAX_CHARS_PER_RESULT_CAP)) if int(max_chars_per_result) > 0 else 0
 
@@ -229,11 +367,13 @@ def search_web_text(
         title   = r.get("title", "")
         url     = r.get("url",   "")
         snippet = r.get("snippet", "")
+        page_kind = str(r.get("page_kind", "")).strip()
 
         if char_cap and len(snippet) > char_cap:
             snippet = snippet[:char_cap] + "..."
 
-        lines.append(f"[{rank}] {title}")
+        kind_suffix = f" [{page_kind}]" if page_kind else ""
+        lines.append(f"[{rank}] {title}{kind_suffix}")
         if url:
             lines.append(f"    {url}")
         if snippet:

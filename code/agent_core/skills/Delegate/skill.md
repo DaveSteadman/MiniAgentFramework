@@ -38,3 +38,9 @@ Invoke this skill when:
 Do not use this skill for trivial one-step actions - prefer direct tool calls instead.
 Prefer `delegate(...)` when the subtask may require multiple tools or iterative exploration.
 Avoid recursive delegation - the framework limits delegation depth automatically.
+
+For list-processing workflows:
+- Prefer one delegate over the whole batch when the child can iterate internally.
+- If you truly need multiple delegates, launch sibling delegates from the parent orchestration only.
+- Do not ask a child delegate to spawn more delegates for each item in its list unless recursion is essential.
+- If the task is mostly `search -> navigate -> fetch -> save`, direct tool calls are usually more reliable than per-item delegation.

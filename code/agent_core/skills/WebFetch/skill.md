@@ -44,6 +44,10 @@ extract a specific answer from stored content without re-fetching.
 listing page (front page, topic index, search results), use `get_page_links_text` first to
 survey the available links, then call `fetch_page_text` on the selected items.
 
+If the user asked for article URLs or a news briefing, do not treat a successful fetch of a
+hub page title or headline list as proof that the hub itself is the article. Use navigation to
+extract specific article/detail URLs first.
+
 | Situation | Correct tool |
 |---|---|
 | URL is a specific article/repo/doc | `fetch_page_text(url, query=...)` |
@@ -68,6 +72,10 @@ Rule of thumb:
 - Fetching a page to answer a question -> always use `query=`
 - Fetching a page to store for later inspection -> use raw mode with generous `max_words`
 - Exhaustive or history-sensitive extraction from a stats page -> use raw mode first, let it auto-save to scratchpad, then use `scratch_query`
+
+Blocked-page rule of thumb:
+- If a fetch returns `Error: ... HTTP 401` or `Error: ... HTTP 403`, treat the page as blocked and move on to another candidate URL.
+- If a fetch returns only a bare title from a topic/search page, treat it as thin hub content rather than a substantive article.
 
 ## Scratchpad integration
 Page text can be large. Use `scratch_save` to store it under a key and reference it with `{scratch:key}` in follow-up steps rather than repeating the full text inline.

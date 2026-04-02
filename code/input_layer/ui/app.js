@@ -38,7 +38,6 @@ let _queueResizeObserver  = null;
 let _currentLogPath       = "";
 let _logLive              = true;   // when false, refreshLatestLogFile() is suppressed
 let _logScrollGuard       = false;  // true while a programmatic file load is settling
-let _onLatestFile         = true;   // true only when the newest log file is showing
 let _chatScrollTarget     = -1;     // target scrollTop for chat smooth-scroll
 let _chatScrollRafId      = null;   // rAF handle for chat scroll loop
 let _chatLive             = true;   // when false, new messages do not auto-scroll
@@ -627,7 +626,6 @@ function toggleLogLive() {
     _setLiveBtn(_logLive);
     if (_logLive) {
         // Snap back to latest file and resume auto-scroll.
-        _onLatestFile = true;
         refreshLatestLogFile();
         _snapLogToBottom();
     }
@@ -657,8 +655,6 @@ async function logNavStep(delta) {
 
     const next = allFiles[idx + delta];
     if (!next) return;  // already at boundary
-
-    _onLatestFile = (idx + delta === allFiles.length - 1);
 
     // Navigating away from live stream - pause live mode.
     if (_logLive) {
@@ -950,7 +946,7 @@ function init() {
     });
 
     // Wheel event: any upward wheel scroll in the log panel exits live mode.
-    // Downward wheel is ignored - re-entry is handled by the scroll listener below.
+    // Re-entry is only via the live button - no auto-reselect.
     dom.log().addEventListener("wheel", (e) => {
         if (e.deltaY < 0 && _logLive) {
             _logLive = false;
@@ -958,22 +954,14 @@ function init() {
         }
     }, { passive: true });
 
-    // Scroll listener: re-engage live mode only when the user scrolls back to the
-    // very bottom of the latest file. Guard suppresses this during file loads.
-    // Also handles thumb-drag re-entry (pointerdown does not fire on scroll track).
-    dom.log().addEventListener("scroll", () => {
-        if (_logScrollGuard) return;
-        if (_logLive) return;  // already live; nothing to do
-        if (_onLatestFile && _isLogNearBottom()) {
-            _logLive = true;
-            _setLiveBtn(true);
-        }
-    });
-
-    // Pointer (mouse/touch) down inside the log panel: exit live mode so thumb drags
-    // do not get overridden by _snapLogToBottom firing on the next content append.
-    dom.log().addEventListener("pointerdown", () => {
-        if (_logLive) {
+    // Scrollbar grab: pointerdown on the scrollbar track (right of clientWidth) exits
+    // live mode. Clicks inside the content area are ignored so normal interaction is
+    // unaffected. Re-entry is only via the live button.
+    dom.log().addEventListener("pointerdown", (e) => {
+        if (!_logLive) return;
+        const el   = dom.log();
+        const rect = el.getBoundingClientRect();
+        if (e.clientX >= rect.left + el.clientWidth) {
             _logLive = false;
             _setLiveBtn(false);
         }
