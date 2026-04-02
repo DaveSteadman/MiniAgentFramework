@@ -33,6 +33,14 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+# sys.path must be configured before any project imports.
+import sys
+from pathlib import Path
+
+_code_dir = str(Path(__file__).resolve().parent.parent)
+if _code_dir not in sys.path:
+    sys.path.insert(0, _code_dir)
+
 import json
 import queue
 import re
@@ -41,12 +49,6 @@ import time
 import uuid
 from datetime import datetime
 from datetime import timedelta
-from pathlib import Path
-
-import sys
-_code_dir = str(Path(__file__).resolve().parent.parent)
-if _code_dir not in sys.path:
-    sys.path.insert(0, _code_dir)
 
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -62,8 +64,10 @@ from agent_core.ollama_client import get_ollama_ps_rows
 from agent_core.orchestration import ConversationHistory
 from agent_core.orchestration import OrchestratorConfig
 from agent_core.orchestration import SessionContext
+from agent_core.orchestration import get_sandbox_enabled
 from agent_core.orchestration import orchestrate_prompt
 from agent_core.orchestration import request_stop
+from agent_core.orchestration import set_sandbox_enabled
 from utils.runtime_logger import SessionLogger
 from utils.runtime_logger import create_log_file_path
 from input_layer.chat_input import append_to_history
@@ -82,6 +86,12 @@ from utils.version import __version__
 # MARK: CONSTANTS
 # ====================================================================================================
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# Run-event streaming patterns - compiled once and reused across all prompt runs.
+_LOG_FILE_RE      = re.compile(r"^Log file:\s*(.+)$")
+_TURN_AGENT_RE    = re.compile(r"^\[TURN\s+(\d+)\]\s+Agent:\s*(.*)$")
+_TURN_METRICS_RE  = re.compile(r"^\[TURN\s+(\d+)\]\s+tokens=(\d+)\s+tps=([0-9.]+)$")
+_TEST_COMPLETE_RE = re.compile(r"^\[(TEST COMPLETE|ALL TESTS COMPLETE)\]\s+(.+)$")
 
 _LOG_DIR             = get_logs_dir()
 _WEB_DIR             = Path(__file__).resolve().parent / "ui"
@@ -252,6 +262,23 @@ def get_ollama_status():
         "rows":    rows,
         "ts":      datetime.now().isoformat(timespec="seconds"),
     }
+
+
+# ====================================================================================================
+# MARK: SETTINGS ENDPOINTS
+# ====================================================================================================
+
+@app.get("/settings/sandbox")
+def settings_sandbox_get():
+    """Return the current Python execution sandbox state."""
+    return {"sandbox": get_sandbox_enabled()}
+
+
+@app.post("/settings/sandbox")
+def settings_sandbox_post(enabled: bool):
+    """Set the Python execution sandbox state."""
+    set_sandbox_enabled(enabled)
+    return {"sandbox": get_sandbox_enabled()}
 
 
 # ====================================================================================================
@@ -503,17 +530,13 @@ def post_prompt(session_id: str, body: PromptRequest):
                 # Route through the slash command processor.
                 output_lines: list[str] = []
                 streamed_output = False
-                log_file_re     = re.compile(r"^Log file:\s*(.+)$")
-                turn_agent_re   = re.compile(r"^\[TURN\s+(\d+)\]\s+Agent:\s*(.*)$")
-                turn_metrics_re = re.compile(r"^\[TURN\s+(\d+)\]\s+tokens=(\d+)\s+tps=([0-9.]+)$")
-                test_complete_re = re.compile(r"^\[(TEST COMPLETE|ALL TESTS COMPLETE)\]\s+(.+)$")
 
                 def _slash_output(text: str, level: str = "info") -> None:
                     nonlocal streamed_output
                     output_lines.append(text)
                     push_log_line(f"[slash] {text}")
 
-                    log_match = log_file_re.match(text.strip())
+                    log_match = _LOG_FILE_RE.match(text.strip())
                     if log_match:
                         log_path = log_match.group(1).strip()
                         _set_latest_log_path(log_path)
@@ -525,7 +548,7 @@ def post_prompt(session_id: str, body: PromptRequest):
                         streamed_output = True
                         return
 
-                    agent_match = turn_agent_re.match(text)
+                    agent_match = _TURN_AGENT_RE.match(text)
                     if agent_match:
                         _queue_run_event(run_q, {
                             "type":     "test_agent_response",
@@ -536,7 +559,7 @@ def post_prompt(session_id: str, body: PromptRequest):
                         streamed_output = True
                         return
 
-                    metrics_match = turn_metrics_re.match(text)
+                    metrics_match = _TURN_METRICS_RE.match(text)
                     if metrics_match:
                         _queue_run_event(run_q, {
                             "type":   "test_agent_metrics",
@@ -548,7 +571,7 @@ def post_prompt(session_id: str, body: PromptRequest):
                         streamed_output = True
                         return
 
-                    test_complete_match = test_complete_re.match(text)
+                    test_complete_match = _TEST_COMPLETE_RE.match(text)
                     if test_complete_match:
                         _queue_run_event(run_q, {
                             "type":   "test_complete",

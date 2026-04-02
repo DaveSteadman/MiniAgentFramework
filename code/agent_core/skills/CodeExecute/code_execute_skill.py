@@ -8,10 +8,15 @@
 # stdout is returned as a plain string so the result can be chained into FileAccess or returned
 # directly as the final answer.
 #
+# Sandbox state is managed centrally in agent_core.orchestration (get_sandbox_enabled /
+# set_sandbox_enabled) and toggled at runtime via the /sandbox slash command. This module
+# reads that flag on every invocation so changes take effect immediately.
+#
 # Intended use-case: generating computed data (sequences, tables, calculations) that no other
 # skill can produce.  The model provides the code; this skill executes it safely.
 #
 # Related modules:
+#   - agent_core.orchestration  -- owns get_sandbox_enabled / set_sandbox_enabled
 #   - skill_executor.py         -- dynamically imports and calls functions from this module
 #   - skills_catalog_builder.py -- reads skill.md to build the catalog entry for this skill
 # ====================================================================================================
@@ -26,24 +31,13 @@ import io
 import sys
 import threading
 
+from agent_core.orchestration import get_sandbox_enabled
+
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
 _EXECUTION_TIMEOUT_S = 15
-
-# Runtime flag: when False the allowed-import whitelist and blocked-builtins list are bypassed.
-# Toggle via /sandbox on|off slash command.
-_sandbox_enabled: bool = True
-
-
-def get_sandbox_enabled() -> bool:
-    return _sandbox_enabled
-
-
-def set_sandbox_enabled(value: bool) -> None:
-    global _sandbox_enabled
-    _sandbox_enabled = value
 
 # Modules the sandboxed code is permitted to import.
 _ALLOWED_MODULES = frozenset({
@@ -56,6 +50,12 @@ _ALLOWED_MODULES = frozenset({
     "random",
 })
 
+# Modules that are always blocked regardless of sandbox state because they require the
+# main thread and will crash the process when imported from the execution daemon thread.
+_ALWAYS_BLOCKED_MODULES = frozenset({
+    "tkinter", "turtle",
+})
+
 # Builtins that are removed from the sandboxed namespace.
 _BLOCKED_BUILTINS = frozenset({
     "open", "exec", "eval", "compile", "__import__",
@@ -66,13 +66,22 @@ _BLOCKED_BUILTINS = frozenset({
 # ====================================================================================================
 # MARK: SANDBOX HELPERS
 # ====================================================================================================
-def _make_safe_import(allowed: frozenset):
-    """Return a __import__ replacement that only allows whitelisted top-level modules."""
+def _make_safe_import(allowed: frozenset | None):
+    """Return a __import__ replacement.
+
+    When allowed is a frozenset, only those top-level modules are permitted (sandbox-on).
+    When allowed is None, all modules are permitted except _ALWAYS_BLOCKED_MODULES (sandbox-off).
+    """
     real_import = builtins.__import__
 
     def _safe_import(name: str, *args, **kwargs):
         top_level = name.split(".")[0]
-        if top_level not in allowed:
+        if top_level in _ALWAYS_BLOCKED_MODULES:
+            raise ImportError(
+                f"Import '{name}' is not available: GUI toolkits require the main thread "
+                f"and cannot be used inside a code snippet."
+            )
+        if allowed is not None and top_level not in allowed:
             raise ImportError(
                 f"Import '{name}' is not available. Only Python stdlib modules are permitted "
                 f"(math, itertools, collections, datetime, json, csv, re, statistics, etc.). "
@@ -100,6 +109,11 @@ def _make_restricted_globals() -> dict:
     safe_builtins["open"] = _no_open
 
     return {"__builtins__": safe_builtins}
+
+
+def _make_unrestricted_globals() -> dict:
+    # Sandbox is off: allow everything except GUI modules that require the main thread.
+    return {"__builtins__": {**vars(builtins), "__import__": _make_safe_import(None)}}
 
 
 # ====================================================================================================
@@ -157,7 +171,7 @@ def run_python_snippet(code: str) -> str:
     result_slot: list[str] = []
     error_slot:  list[str] = []
 
-    sandbox_globals = _make_restricted_globals() if _sandbox_enabled else {}
+    sandbox_globals = _make_restricted_globals() if get_sandbox_enabled() else _make_unrestricted_globals()
 
     def _run() -> None:
         old_stdout = sys.stdout

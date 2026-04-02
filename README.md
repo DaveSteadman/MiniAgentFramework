@@ -223,8 +223,8 @@ Each task lives in its own `controldata/schedules/task_<name>.json` file and can
 ### Inspect tool definitions
 Useful for debugging which tools are visible to the model and verifying that skill signatures are parsed correctly:
 ```powershell
-python .\code\agent_core\preprocess_prompt.py
-python .\code\agent_core\preprocess_prompt.py --output tool_definitions.json
+python .\code\agent_core\inspect_tools.py
+python .\code\agent_core\inspect_tools.py --output tool_definitions.json
 ```
 
 | Option | Default | Description |

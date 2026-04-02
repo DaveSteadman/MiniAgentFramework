@@ -4,6 +4,13 @@
 - Execute a self-contained Python code snippet and return the captured stdout.
 - **Always prefer code over a direct answer for any calculation, sequence, table, string operation, or data generation task** - even when the answer seems obvious from training knowledge. Running code is more reliable and verifiable than recall.
 - Only Python stdlib is available; third-party packages (numpy, pandas, sympy) are not.
+- When sandbox is off (`/sandbox off`), all modules are accessible. To install and use a third-party package, use `subprocess` to pip-install it first, then import normally:
+  ```python
+  import subprocess, sys
+  subprocess.run([sys.executable, "-m", "pip", "install", "numpy"], check=True)
+  import numpy as np
+  print(np.array([1,2,3]).mean())
+  ```
 - When paired with FileAccess, call this skill first to generate the content, then park the output with `scratch_save`, and pass `{scratch:key}` as the content argument to `write_file` - this avoids carrying the full output string as an inline argument through the tool-calling loop.
 - Code must use `print()` for all output. Favour simple linear code - avoid complex class hierarchies or deeply nested call stacks.
 
@@ -20,6 +27,8 @@
 - `code` *(required)* - a complete, self-contained Python snippet as a string. Must use `print()` for all output.
   - Allowed stdlib imports: `math`, `itertools`, `collections`, `csv`, `io`, `json`, `re`, `random`, `statistics`, `datetime`, `decimal`, `fractions`, `functools`, `operator`, `string`, `textwrap`, `heapq`, `bisect`, `array`, `calendar`, `time`, `cmath`.
   - Blocked when sandbox is enabled (default): `os`, `sys`, `subprocess`, `open`, `eval`, `exec`, and all file I/O.
+  - When sandbox is off: all stdlib and third-party modules are accessible; use `subprocess.run([sys.executable, "-m", "pip", "install", "<pkg>"])` to install packages before importing them.
+  - Always blocked regardless of sandbox state: `tkinter`, `turtle` - GUI toolkits require the main thread and will crash when used from the execution thread.
   - To process file content inside a snippet: call `read_file` first, then use `io.StringIO(content)` in the snippet - e.g. `csv.reader(io.StringIO(_data))` where `_data` is injected by embedding the content in the code string.
   - Execution timeout: 15 seconds. Sandbox state can be toggled at runtime with `/sandbox on|off`.
 

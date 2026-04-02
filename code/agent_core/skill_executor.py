@@ -52,9 +52,8 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
     if cache_key in _callable_cache:
         return _callable_cache[cache_key]
 
-    # Generate a stable canonical module name so that if slash_commands.py (or any other
-    # importer) has already loaded this file via the normal import system, both references
-    # share the same module object and module-level state (e.g. _sandbox_enabled).
+    # Generate a stable canonical module name so that if any other importer has already
+    # loaded this file, both references share the same module object and module-level state.
     dynamic_module_name = f"skill_module_{absolute_module_path.stem}_{abs(hash(str(absolute_module_path)))}"
 
     # Re-use an already-registered module rather than exec_module-ing a second copy.
@@ -107,7 +106,6 @@ def build_catalog_gates(skills_payload: dict) -> dict[str, tuple[str, str]]:
 # the orchestration layer can prepend [SKILL_ERROR] before feeding the result back to the model.
 _SKILL_ERROR_PREFIXES: tuple[str, ...] = (
     "Error:",
-    "Error ",
     "File not found:",
     "Could not extract",
     "No file path found",

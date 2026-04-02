@@ -8,9 +8,9 @@
 # verifying that skill signatures are parsed correctly.
 #
 # Usage:
-#   python preprocess_prompt.py
-#   python preprocess_prompt.py --skills-summary /path/to/skills_summary.md
-#   python preprocess_prompt.py --output /path/to/tool_definitions.json
+#   python inspect_tools.py
+#   python inspect_tools.py --skills-summary /path/to/skills_summary.md
+#   python inspect_tools.py --output /path/to/tool_definitions.json
 #
 # Related modules:
 #   - skills_catalog_builder.py  -- catalog loading and tool definition building

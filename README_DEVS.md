@@ -54,7 +54,7 @@ For first-time setup see [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
   - `ChatCallResult` carries `message`, `finish_reason`, `prompt_tokens`, `completion_tokens`, and `tokens_per_second`.
 
 ### 3) Debug CLI tools
-- `code/agent_core/preprocess_prompt.py`
+- `code/agent_core/inspect_tools.py`
   - Standalone CLI that loads the skills catalog and prints the JSON Schema tool definitions sent to the model via `/v1/chat/completions`. Useful for debugging which functions are visible to the model and verifying that skill signatures are parsed correctly.
 
 ### 4) Skill execution layer
@@ -294,7 +294,7 @@ code/                            Main Python source; main.py is the entrypoint.
     ollama_client.py             Ollama API client (local, LAN, cloud).
     scratchpad.py                In-session key/value store.
     prompt_tokens.py             Date/time token resolution.
-    preprocess_prompt.py         Standalone CLI for debug tool definitions.
+    inspect_tools.py             Standalone CLI for debug tool definitions.
   input_layer/                   Web UI, API server, and chat input handling.
     api.py                       FastAPI app, REST and SSE endpoints.
     api_mode.py                  Uvicorn startup and background scheduler thread.

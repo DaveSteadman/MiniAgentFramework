@@ -259,6 +259,8 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
 .wrap-btn:hover,
 .wrap-btn:focus-visible { border-color: var(--border-hi); color: var(--text-hi); }
 .wrap-btn.wrap-active   { border-color: var(--border-hi); color: var(--text-hi); background: var(--bg-wrap-btn-active); }
+.wrap-btn.sandbox-on    { border-color: #2a6a3a; color: #70c080; background: rgba(40, 140, 70, 0.18); }
+.wrap-btn.sandbox-off   { border-color: #7a2a2a; color: #e08080; background: rgba(160, 40, 40, 0.18); }
 
 .panel-body {
     flex: 1;

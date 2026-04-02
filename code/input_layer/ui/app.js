@@ -37,7 +37,6 @@ let _timelineRefreshTimer = null;
 let _queueResizeObserver  = null;
 let _currentLogPath       = "";
 let _logLive              = true;   // when false, refreshLatestLogFile() is suppressed
-let _logScrollGuard       = false;  // true while a programmatic file load is settling
 let _chatScrollTarget     = -1;     // target scrollTop for chat smooth-scroll
 let _chatScrollRafId      = null;   // rAF handle for chat scroll loop
 let _chatLive             = true;   // when false, new messages do not auto-scroll
@@ -434,9 +433,7 @@ function toggleWrap(bodyId, btnId) {
     if (anchor !== null && anchorTopBefore !== null) {
         const delta = anchor.getBoundingClientRect().top - anchorTopBefore;
         if (delta !== 0) {
-            if (bodyId === "log-body") _logScrollGuard = true;
             body.scrollTop += delta;
-            if (bodyId === "log-body") setTimeout(() => { _logScrollGuard = false; }, 100);
         }
     }
 }
@@ -578,11 +575,6 @@ function _switchLogStream(path) {
     _currentLogPath = path;
     _setLogPanelTitle(path);
 
-    // Suppress the scroll listener while we load new content.
-    _logScrollGuard = true;
-    clearTimeout(_switchLogStream._guardTimer);
-    _switchLogStream._guardTimer = setTimeout(() => { _logScrollGuard = false; }, 800);
-
     clearLogLines();
     if (_logEventSource) {
         _logEventSource.close();
@@ -629,6 +621,35 @@ function toggleLogLive() {
         refreshLatestLogFile();
         _snapLogToBottom();
     }
+}
+
+// ----------------------------------------------------------------------------------------------------
+
+function _updateSandboxBtn(sandboxOn) {
+    const btn = $('sandbox-btn');
+    if (!btn) return;
+    if (sandboxOn) {
+        btn.textContent = "sandbox on";
+        btn.classList.remove("sandbox-off");
+        btn.classList.add("sandbox-on");
+    } else {
+        btn.textContent = "sandbox off";
+        btn.classList.remove("sandbox-on");
+        btn.classList.add("sandbox-off");
+    }
+}
+
+async function toggleSandbox() {
+    const current = await apiFetch("/settings/sandbox");
+    if (!current) return;
+    const next = !current.sandbox;
+    const result = await apiFetch("/settings/sandbox?enabled=" + next, { method: "POST" });
+    if (result) _updateSandboxBtn(result.sandbox);
+}
+
+async function _initSandboxBtn() {
+    const data = await apiFetch("/settings/sandbox");
+    if (data) _updateSandboxBtn(data.sandbox);
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -929,6 +950,9 @@ function init() {
 
     // Load persisted input history from the server (shared with TUI).
     _loadHistory();
+
+    // Read sandbox state from server and reflect it in the button.
+    _initSandboxBtn();
 
     // Wire up input events.
     dom.input().addEventListener("keydown", onInputKeydown);

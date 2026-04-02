@@ -36,10 +36,43 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import json
+import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
+from agent_core.ollama_client import configure_host
+from agent_core.ollama_client import get_active_host
+from agent_core.ollama_client import get_llm_timeout
+from agent_core.ollama_client import get_ollama_ps_rows
+from agent_core.ollama_client import is_explicit_model_name
+from agent_core.ollama_client import list_ollama_models
+from agent_core.ollama_client import register_session_config
+from agent_core.ollama_client import resolve_model_name
+from agent_core.ollama_client import set_llm_timeout
+from agent_core.ollama_client import stop_model
+from agent_core.orchestration import compact_context
+from agent_core.orchestration import format_context_map
+from agent_core.orchestration import get_last_context_map
+from agent_core.orchestration import get_last_messages
+from agent_core.orchestration import get_sandbox_enabled
+from agent_core.orchestration import get_skill_guidance_enabled
+from agent_core.orchestration import request_stop
+from agent_core.orchestration import set_sandbox_enabled
+from agent_core.orchestration import set_skill_guidance_enabled
+from agent_core.scratchpad import flush_now
+from agent_core.scratchpad import get_dump_enabled
+from agent_core.scratchpad import set_dump_enabled
+from agent_core.skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
+from agent_core.skills.Memory.memory_skill import MEMORY_STORE_PATH
+from utils.workspace_utils import get_chatsessions_dir
+from utils.workspace_utils import get_controldata_dir
+from utils.workspace_utils import get_logs_dir
+from utils.workspace_utils import get_schedules_dir
+from utils.workspace_utils import get_test_results_dir
 from utils.workspace_utils import trunc
+from utils.version import __version__
 
 
 # ====================================================================================================
@@ -86,9 +119,8 @@ def handle(text: str, ctx: SlashCommandContext) -> bool:
 # ====================================================================================================
 # MARK: HANDLERS
 # ====================================================================================================
-# Handler functions import their heavy dependencies inside the function body rather than at module
-# level.  This is intentional: it avoids circular-import risk at startup and keeps the import cost
-# near-zero when only a subset of commands are ever invoked in a given session.
+# Handler functions below. Heavy dependencies (skills_catalog_builder, subprocess, sys)
+# are still imported locally where they are only needed for specific infrequent commands.
 # ====================================================================================================
 
 
@@ -103,8 +135,6 @@ def _cmd_help(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_models(arg: str, ctx: SlashCommandContext) -> None:
-    from agent_core.ollama_client import list_ollama_models
-    from agent_core.ollama_client import get_active_host
     try:
         available = list_ollama_models()
         host = get_active_host()
@@ -126,12 +156,6 @@ def _cmd_model(arg: str, ctx: SlashCommandContext) -> None:
         )
         return
 
-    from agent_core.ollama_client import (
-        is_explicit_model_name,
-        list_ollama_models,
-        register_session_config,
-        resolve_model_name,
-    )
     try:
         available = list_ollama_models()
 
@@ -168,12 +192,9 @@ def _cmd_model(arg: str, ctx: SlashCommandContext) -> None:
 def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
     # Shared helpers used by multiple subcommands.
     def _get_map_and_messages():
-        from agent_core.orchestration import get_last_context_map
-        from agent_core.orchestration import get_last_messages
         return get_last_context_map(), get_last_messages()
 
     def _show_map(context_map):
-        from agent_core.orchestration import format_context_map
         ctx.output(format_context_map(context_map, ctx.config.num_ctx), "item")
 
     def _resolve_index(rest: str) -> tuple[list, list, int] | None:
@@ -221,7 +242,6 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
             return
         old = ctx.config.num_ctx
         ctx.config.num_ctx = value
-        from agent_core.ollama_client import register_session_config
         register_session_config(ctx.config.resolved_model, value)
         ctx.output(f"Context window size changed: {old:,} \u2192 {value:,}", "success")
         return
@@ -263,7 +283,6 @@ def _cmd_ctx(arg: str, ctx: SlashCommandContext) -> None:
             return
         ctx.output("Before:", "dim")
         _show_map(context_map)
-        from agent_core.orchestration import compact_context
         changed = compact_context(context_map, messages, idx)
         if not changed:
             ctx.output(f"Entry {idx} was already compacted.", "dim")
@@ -304,7 +323,6 @@ def _cmd_rounds(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
-    from agent_core.ollama_client import get_llm_timeout, set_llm_timeout
     if not arg:
         ctx.output(
             f"Usage: /timeout <seconds>  |  current: {get_llm_timeout()}s",
@@ -327,7 +345,6 @@ def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
-    from agent_core.ollama_client import get_ollama_ps_rows, list_ollama_models, resolve_model_name, stop_model
 
     # Determine which model to stop: explicit arg, or fall back to the active model.
     target_name = arg.strip() if arg.strip() else ctx.config.resolved_model
@@ -363,9 +380,6 @@ def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_scratchdump(arg: str, ctx: SlashCommandContext) -> None:
-    from agent_core.scratchpad import get_dump_enabled, set_dump_enabled, flush_now
-    from utils.workspace_utils import get_controldata_dir
-
     sub = arg.strip().lower()
     if sub == "on":
         set_dump_enabled(True)
@@ -392,8 +406,6 @@ def _cmd_newchat(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_clearmemory(arg: str, ctx: SlashCommandContext) -> None:
-    from agent_core.skills.Memory.memory_skill import MEMORY_STORE_PATH
-    from agent_core.skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
     store_path  = MEMORY_STORE_PATH
     legacy_path = MEMORY_STORE_LEGACY_PATH
 
@@ -412,14 +424,6 @@ def _cmd_clearmemory(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
-    from pathlib import Path
-    from agent_core.orchestration import get_skill_guidance_enabled, set_skill_guidance_enabled
-    from agent_core.skills_catalog_builder import (
-        find_skill_files, summarize_skill, normalize_summary,
-        render_summary_document, DEFAULT_SKILLS_ROOT, DEFAULT_OUTPUT_FILE,
-        load_skills_payload,
-    )
-
     sub = arg.strip().lower()
 
     # Handle mode-only calls (no rebuild needed).
@@ -444,12 +448,19 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
     if not sub:
         set_skill_guidance_enabled(False)
 
-    skills_root = DEFAULT_SKILLS_ROOT
-    output_path = DEFAULT_OUTPUT_FILE
-
     current_mode = "max" if get_skill_guidance_enabled() else "min"
     ctx.output(f"Rebuilding skills catalog (local extraction, no LLM) - mode: {current_mode}...", "dim")
     try:
+        from agent_core.skills_catalog_builder import DEFAULT_OUTPUT_FILE
+        from agent_core.skills_catalog_builder import DEFAULT_SKILLS_ROOT
+        from agent_core.skills_catalog_builder import find_skill_files
+        from agent_core.skills_catalog_builder import load_skills_payload
+        from agent_core.skills_catalog_builder import normalize_summary
+        from agent_core.skills_catalog_builder import render_summary_document
+        from agent_core.skills_catalog_builder import summarize_skill
+
+        skills_root = DEFAULT_SKILLS_ROOT
+        output_path = DEFAULT_OUTPUT_FILE
         skill_files = find_skill_files(skills_root=skills_root)
         if not skill_files:
             ctx.output("No skill.md files found - catalog unchanged.", "error")
@@ -508,7 +519,6 @@ def _cmd_stoprun(arg: str, ctx: SlashCommandContext) -> None:
     # In API mode this command is intercepted and handled by api.py before it reaches here,
     # so this stub only runs in non-API contexts (e.g. TUI, tests).
     # It sets the orchestration stop event so the active run exits after its current round.
-    from agent_core.orchestration import request_stop
     request_stop()
     ctx.output("Stop requested. Active run will halt after its current LLM round.", "info")
 
@@ -516,10 +526,6 @@ def _cmd_stoprun(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_kiwixhost(arg: str, ctx: SlashCommandContext) -> None:
-    import json
-    import urllib.request
-    from utils.workspace_utils import get_controldata_dir
-
     defaults_path = get_controldata_dir() / "default.json"
 
     def _load_defaults() -> dict:
@@ -565,7 +571,6 @@ def _cmd_kiwixhost(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_host(arg: str, ctx: SlashCommandContext) -> None:
-    from agent_core.ollama_client import configure_host, get_active_host, list_ollama_models
 
     if not arg:
         ctx.output(
@@ -771,9 +776,6 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
     import sys
     import time
     from datetime import datetime
-    from pathlib import Path
-    from agent_core.ollama_client import get_active_host
-    from utils.workspace_utils import get_test_results_dir
 
     test_prompts_dir = Path(__file__).resolve().parent.parent.parent / "controldata" / "test_prompts"
     wrapper          = Path(__file__).resolve().parent.parent / "testing" / "test_wrapper.py"
@@ -1020,43 +1022,10 @@ def _cmd_testtrend(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_version(arg: str, ctx: SlashCommandContext) -> None:
-    from utils.version import __version__
     ctx.output(f"MiniAgentFramework {__version__}", "info")
 
 # ----------------------------------------------------------------------------------------------------
 def _cmd_sandbox(arg: str, ctx: SlashCommandContext) -> None:
-    import sys
-    from pathlib import Path
-    from utils.workspace_utils import get_workspace_root
-
-    # Locate the canonical module name used by skill_executor so we toggle the same
-    # module instance that runs tool calls, rather than a freshly imported duplicate.
-    skill_path  = (get_workspace_root() / "code/skills/CodeExecute/code_execute_skill.py").resolve()
-    canon_name  = f"skill_module_code_execute_skill_{abs(hash(str(skill_path)))}"
-    skill_mod   = sys.modules.get(canon_name)
-
-    # Fall back to a direct import when skill_executor hasn't loaded it yet (e.g. first use
-    # before any tool call ran).  After this import the module IS the authoritative copy,
-    # but skill_executor will pick up the same object via sys.modules on its first load.
-    if skill_mod is None:
-        try:
-            import importlib.util as _ilu
-            spec = _ilu.spec_from_file_location(canon_name, skill_path)
-            if spec is None or spec.loader is None:
-                raise ImportError("Cannot load spec")
-            skill_mod = _ilu.module_from_spec(spec)
-            sys.modules[canon_name] = skill_mod
-            spec.loader.exec_module(skill_mod)
-        except Exception:
-            ctx.output("CodeExecute skill not available.", "error")
-            return
-
-    get_sandbox_enabled = getattr(skill_mod, "get_sandbox_enabled", None)
-    set_sandbox_enabled = getattr(skill_mod, "set_sandbox_enabled", None)
-    if not callable(get_sandbox_enabled) or not callable(set_sandbox_enabled):
-        ctx.output("CodeExecute skill does not expose sandbox control functions.", "error")
-        return
-
     sub = arg.strip().lower()
     if sub == "on":
         set_sandbox_enabled(True)

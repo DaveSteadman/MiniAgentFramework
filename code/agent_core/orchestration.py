@@ -4,7 +4,7 @@
 # Core orchestration layer shared by all execution modes.
 #
 # Provides:
-#   OrchestratorConfig      -- immutable session-level settings bundle
+#   OrchestratorConfig      -- session-level settings bundle (mutable by slash commands)
 #   ConversationHistory     -- rolling window of user/assistant turn pairs
 #   SessionContext          -- per-session skill-output cache for cross-turn injection
 #   resolve_execution_model -- model alias → installed Ollama model name
@@ -62,6 +62,21 @@ def get_skill_guidance_enabled() -> bool:
 def set_skill_guidance_enabled(enabled: bool) -> None:
     global _SKILL_GUIDANCE_ENABLED
     _SKILL_GUIDANCE_ENABLED = enabled
+
+
+# ====================================================================================================
+# MARK: SANDBOX FLAG
+# ====================================================================================================
+_SANDBOX_ENABLED: bool = True
+
+
+def get_sandbox_enabled() -> bool:
+    return _SANDBOX_ENABLED
+
+
+def set_sandbox_enabled(enabled: bool) -> None:
+    global _SANDBOX_ENABLED
+    _SANDBOX_ENABLED = enabled
 
 
 # ====================================================================================================
@@ -130,6 +145,7 @@ class ConversationHistory:
     # ----------------------------------------------------------------------------------------------------
 
     def add(self, user: str, assistant: str) -> None:
+        assert len(self._turns) % 2 == 0, "ConversationHistory is misaligned (odd turn count)"
         self._turns.append({"role": "user",      "content": user})
         self._turns.append({"role": "assistant", "content": assistant})
         cap = self._max_turns * 2
@@ -580,19 +596,19 @@ def _assess_compact(
     messages:    list[dict],
     round_num:   int,
     num_ctx:     int,
-) -> tuple[int, str | None]:
+) -> tuple[int, int]:
     # Fire compaction only when the thread exceeds COMPACT_THRESHOLD of the context budget.
     # Round-0 entries (system prompt, original user prompt, history) are permanently protected.
     # Candidates are sorted so lossless entries (auto_key set) go first, then by size descending,
     # stopping as soon as usage drops back to or below the threshold.
-    # Returns (thread_chars_after, log_line) - log_line is None when nothing was compacted.
+    # Returns (thread_chars_after, compacted_count).
     thread_chars   = _estimate_thread_chars(messages)
     # Approximation: 4 chars per token. Good enough for a threshold check; no tokeniser needed.
     budget_chars   = num_ctx * 4
     usage_fraction = thread_chars / budget_chars if budget_chars else 0.0
 
     if usage_fraction <= COMPACT_THRESHOLD:
-        return thread_chars, None
+        return thread_chars, 0
 
     candidates = [
         (cm_idx, entry)
@@ -621,13 +637,7 @@ def _assess_compact(
         if thread_chars / budget_chars <= COMPACT_THRESHOLD:
             break
 
-    log_line = None
-    if compacted_count:
-        log_line = (
-            f"[context] compacted {compacted_count} message(s) "
-            f"(usage was {usage_fraction:.1%} > threshold {COMPACT_THRESHOLD:.0%})"
-        )
-    return thread_chars, log_line
+    return thread_chars, compacted_count
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -710,6 +720,11 @@ def _build_system_message(
         skill_guidance = _build_skill_selection_guidance(skills_payload)
         if skill_guidance:
             system_parts.append(f"\n{skill_guidance}")
+
+    if not _SANDBOX_ENABLED:
+        system_parts.append(
+            "\nPython execution sandbox: OFF - code snippets have unrestricted access to all modules and file I/O."
+        )
 
     scratch_keys = get_scratchpad_key_names()
     if scratch_keys:
@@ -828,6 +843,245 @@ def _write_file_blocks(response: str) -> list[str]:
 # ====================================================================================================
 # MARK: ORCHESTRATION PIPELINE
 # ====================================================================================================
+
+# ----------------------------------------------------------------------------------------------------
+def _run_tool_loop(
+    config:        OrchestratorConfig,
+    messages:      list[dict],
+    tool_defs:     list[dict],
+    catalog_gates: dict,
+    context_map:   list[dict],
+    user_prompt:   str,
+    logger:        SessionLogger,
+    quiet:         bool,
+) -> tuple[str, int, int, bool, float, list[dict]]:
+    # Inner tool-calling loop for orchestrate_prompt.
+    # Handles the stop-check, per-round LLM calls, tool execution, and synthesis fallback.
+    # Mutates messages and context_map in place.
+    # Returns (final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs).
+    def _log(msg: str = "") -> None:
+        logger.log_file_only(msg) if quiet else logger.log(msg)
+
+    def _log_section(title: str) -> None:
+        logger.log_section_file_only(title) if quiet else logger.log_section(title)
+
+    def _log_file_only(msg: str = "") -> None:
+        logger.log_file_only(msg)
+
+    def _log_section_file_only(title: str) -> None:
+        logger.log_section_file_only(title)
+
+    tool_outputs:      list[dict] = []
+    prompt_tokens:     int        = 0
+    completion_tokens: int        = 0
+    final_tps:         float      = 0.0
+    run_success:       bool       = False
+    final_response:    str        = ""
+
+    _stop_event.clear()
+
+    for round_num in range(1, config.max_iterations + 1):
+        # Check for /stoprun signal before starting a new round.
+        if _stop_event.is_set():
+            _stop_event.clear()
+            _log("[/stoprun] Stop requested - halting before round {round_num}.")
+            final_response = "[Run stopped by /stoprun. The previous response may be incomplete.]"
+            break
+
+        _log_section(f"TOOL ROUND {round_num}")
+        _log_file_only(f"[progress] Round {round_num}: calling model...")
+
+        # -- Compact context if thread exceeds the budget threshold --
+        _thread_chars, _compact_count = _assess_compact(context_map, messages, round_num, config.num_ctx)
+        if _compact_count:
+            _log_file_only(
+                f"[context] compacted {_compact_count} message(s) "
+                f"(threshold {COMPACT_THRESHOLD:.0%} exceeded)"
+            )
+
+        # -- Context budget snapshot before call --
+        _log_file_only(
+            f"[context] thread: {_thread_chars:,} chars (~{_thread_chars // 4:,} tok est.) | "
+            f"window: {config.num_ctx:,} | remaining est.: ~{config.num_ctx - _thread_chars // 4:,}"
+        )
+
+        # Send the growing messages thread; the model either answers directly or requests more tool calls.
+        try:
+            result = call_llm_chat(
+                model_name=config.resolved_model,
+                messages=messages,
+                tools=tool_defs if tool_defs else None,
+                num_ctx=config.num_ctx,
+            )
+        except Exception as error:
+            error_str = str(error)
+            # Ollama returns HTTP 500 "error parsing tool call" when the model generates
+            # a truncated or malformed JSON tool-call argument (common when the model
+            # tries to embed a large string literal inline rather than building it via
+            # code_execute or scratchpad). Instead of aborting the run, inject a
+            # corrective user message so the model can retry with a different approach.
+            if "error parsing tool call" in error_str:
+                _log(f"[error] Tool call JSON parse error in round {round_num} - injecting correction message.")
+                correction = (
+                    "Your previous tool call could not be executed because the argument "
+                    "JSON was truncated or malformed. Do not embed large multi-line strings "
+                    "directly in a tool call argument. Instead: (1) build the content using "
+                    "code_execute and print() it, (2) save the output to the scratchpad with "
+                    "scratch_save, then (3) pass the scratchpad reference to write_file."
+                )
+                messages.append({"role": "user", "content": correction})
+                context_map.append({
+                    "round":    round_num,
+                    "role":     "user",
+                    "label":    "[tool-call correction injected]",
+                    "chars":    len(correction),
+                    "auto_key": None,
+                    "msg_idx":  len(messages) - 1,
+                })
+                continue
+            _log(f"[error] LLM call failed in round {round_num}: {error}")
+            final_response = f"(LLM call failed: {error})"
+            break
+
+        prompt_tokens     += result.prompt_tokens
+        completion_tokens += result.completion_tokens
+        final_tps          = result.tokens_per_second
+
+        _log(f"Round {round_num} TPS: {final_tps:.1f} tok/s  ({result.completion_tokens} completion | {result.prompt_tokens:,} prompt tokens)")
+        _log_file_only(f"[context] actual prompt tokens used: {result.prompt_tokens:,} | remaining: ~{config.num_ctx - result.prompt_tokens:,}")
+
+        _thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
+        if _thinking:
+            _log_file_only(f"[thinking]\n{_thinking}\n[/thinking]")
+
+        if not result.tool_calls:
+            # Model answered directly - this is the final response.
+            final_response = _strip_cot_preamble(result.response)
+            run_success    = bool(final_response)
+            _log(final_response)
+            _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
+            messages.append({"role": "assistant", "content": final_response})
+            context_map.append({"round": round_num, "role": "asst", "label": "final answer", "chars": len(final_response), "auto_key": None, "msg_idx": len(messages) - 1})
+            break
+
+        # -- Execute each requested tool call --
+        _log(f"Round {round_num}: model requested {len(result.tool_calls)} tool call(s).")
+        _log_file_only("[progress] Executing tool calls...")
+
+        messages.append({
+            "role":       "assistant",
+            "content":    result.response or "",
+            "tool_calls": result.tool_calls,
+        })
+        context_map.append({"round": round_num, "role": "asst", "label": f"(tool calls x{len(result.tool_calls)})", "chars": len(result.response or ""), "auto_key": None, "msg_idx": len(messages) - 1})
+
+        round_outputs: list[dict] = []
+        for tc in result.tool_calls:
+            tc_id     = tc.get("id", "")
+            tc_func   = tc.get("function", {})
+            func_name = tc_func.get("name", "")
+            raw_args  = tc_func.get("arguments", "{}")
+
+            try:
+                arguments = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+            except json.JSONDecodeError:
+                arguments = {}
+
+            func_name, arguments, normalization_note = _normalize_tool_request(func_name, arguments)
+
+            arg_preview = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
+            _log(f"  -> {func_name}({arg_preview})")
+            if normalization_note:
+                _log_file_only(f"[tool-normalize] {normalization_note}")
+
+            try:
+                output         = execute_tool_call(func_name, arguments, config.skills_payload, user_prompt, catalog_gates)
+                result_content = output["result"]
+                if not isinstance(result_content, str):
+                    result_content = json.dumps(result_content, default=str)
+                if output.get("is_error"):
+                    result_content = f"[SKILL_ERROR] {result_content}"
+            except Exception as exc:
+                result_content = f"[SKILL_ERROR] Error executing {func_name}: {exc}"
+                output = {"function": func_name, "module": "", "arguments": arguments, "result": result_content, "is_error": True}
+
+            # Auto-save large results to scratchpad; cap message to protect context budget.
+            # Scratchpad reader calls (scratch_load, scratch_peek, etc.) are exempt - the data
+            # is already in the scratchpad and re-saving it creates a chain of duplicate keys
+            # that the model will try to load indefinitely without ever reading the content.
+            _is_scratch_reader = func_name.lower().startswith("scratch_")
+            auto_scratch_key = None
+            if (not output.get("is_error")
+                    and not _is_scratch_reader
+                    and isinstance(result_content, str)
+                    and len(result_content) >= _TOOL_MSG_AUTO_SCRATCH_MIN):
+                safe_name        = func_name.lower()[:24]
+                auto_scratch_key = f"_tc_r{round_num}_{safe_name}"
+                _scratch_auto_save(auto_scratch_key, result_content)
+                if len(result_content) > _TOOL_MSG_MAX_CHARS:
+                    result_content = (
+                        result_content[:_TOOL_MSG_MAX_CHARS]
+                        + f"\n... [truncated - full content auto-saved to scratchpad key: {auto_scratch_key}]"
+                    )
+
+            _log(f"     {trunc(str(result_content), 120)}")
+            round_outputs.append(output)
+            tool_outputs.append(output)
+            messages.append({
+                "role":         "tool",
+                "tool_call_id": tc_id,
+                "name":         func_name,
+                "content":      result_content,
+            })
+            context_map.append({"round": round_num, "role": "tool", "label": func_name, "chars": len(result_content), "auto_key": auto_scratch_key, "msg_idx": len(messages) - 1})
+
+        _log_section_file_only(f"TOOL ROUND {round_num} - EXECUTION FLOW")
+        _log_file_only(_format_tool_outputs(round_outputs))
+
+    else:
+        # Exhausted all rounds without a plain-text answer - request a final synthesis.
+        _log("[warn] Max tool rounds exhausted - requesting final synthesis.")
+        try:
+            # Append an explicit user directive so the model is forced to emit visible content
+            # rather than only generating internal thinking tokens (Ollama 0.18+ thinking models).
+            synthesis_messages = messages + [{
+                "role":    "user",
+                "content": "Based on the tool results above, please answer my original question now.",
+            }]
+            # Call without tools so the model synthesises a final answer from accumulated results.
+            result             = call_llm_chat(
+                model_name=config.resolved_model,
+                messages=synthesis_messages,
+                tools=None,
+                num_ctx=config.num_ctx,
+            )
+            final_response     = _strip_cot_preamble(result.response)
+            prompt_tokens     += result.prompt_tokens
+            completion_tokens += result.completion_tokens
+            final_tps          = result.tokens_per_second
+            _log_section("FINAL RESPONSE")
+            _thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
+            if _thinking:
+                _log_file_only(f"[thinking]\n{_thinking}\n[/thinking]")
+            _log(final_response)
+
+            # Last-resort fallback: if the model produced no content (e.g. Ollama thinking
+            # models that emit only internal reasoning tokens via /v1/chat/completions),
+            # build a minimal plain-text answer directly from the collected tool outputs so
+            # the user always sees something.
+            if not final_response and tool_outputs:
+                _log_file_only("[warn] Synthesis returned empty - falling back to tool-output summary.")
+                final_response = _build_fallback_answer(user_prompt, tool_outputs)
+                _log(final_response)
+
+            run_success = bool(final_response)
+        except Exception as error:
+            final_response = f"(synthesis failed: {error})"
+
+    return final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs
+
+
+# ----------------------------------------------------------------------------------------------------
 def orchestrate_prompt(
     user_prompt: str,
     config: OrchestratorConfig,
@@ -930,212 +1184,19 @@ def orchestrate_prompt(
     _delegate_tls.logger         = logger
     _delegate_tls.delegate_depth = delegate_depth
     _delegate_tls.config         = config
-    catalog_gates      = build_catalog_gates(config.skills_payload)
-    tool_outputs:      list[dict] = []
-    prompt_tokens:     int        = 0
-    completion_tokens: int        = 0
-    final_tps:         float      = 0.0
-    run_success:       bool       = False
-    final_response:    str        = ""
+    catalog_gates = build_catalog_gates(config.skills_payload)
 
     try:
-        # Clear any leftover stop signal from a previous /stoprun before entering the loop.
-        _stop_event.clear()
-
-        for round_num in range(1, config.max_iterations + 1):
-            # Check for /stoprun signal before starting a new round.
-            if _stop_event.is_set():
-                _stop_event.clear()
-                _log("[/stoprun] Stop requested - halting before round {round_num}.")
-                final_response = "[Run stopped by /stoprun. The previous response may be incomplete.]"
-                break
-
-            _log_section(f"TOOL ROUND {round_num}")
-            _log_file_only(f"[progress] Round {round_num}: calling model...")
-
-            # -- Compact context if thread exceeds the budget threshold --
-            _thread_chars, _compact_log = _assess_compact(_context_map, messages, round_num, config.num_ctx)
-            if _compact_log:
-                _log_file_only(_compact_log)
-
-            # -- Context budget snapshot before call --
-            _log_file_only(
-                f"[context] thread: {_thread_chars:,} chars (~{_thread_chars // 4:,} tok est.) | "
-                f"window: {config.num_ctx:,} | remaining est.: ~{config.num_ctx - _thread_chars // 4:,}"
-            )
-
-            # Send the growing messages thread; the model either answers directly or requests more tool calls.
-            try:
-                result = call_llm_chat(
-                    model_name=config.resolved_model,
-                    messages=messages,
-                    tools=tool_defs if tool_defs else None,
-                    num_ctx=config.num_ctx,
-                )
-            except Exception as error:
-                error_str = str(error)
-                # Ollama returns HTTP 500 "error parsing tool call" when the model generates
-                # a truncated or malformed JSON tool-call argument (common when the model
-                # tries to embed a large string literal inline rather than building it via
-                # code_execute or scratchpad). Instead of aborting the run, inject a
-                # corrective user message so the model can retry with a different approach.
-                if "error parsing tool call" in error_str:
-                    _log(f"[error] Tool call JSON parse error in round {round_num} - injecting correction message.")
-                    correction = (
-                        "Your previous tool call could not be executed because the argument "
-                        "JSON was truncated or malformed. Do not embed large multi-line strings "
-                        "directly in a tool call argument. Instead: (1) build the content using "
-                        "code_execute and print() it, (2) save the output to the scratchpad with "
-                        "scratch_save, then (3) pass the scratchpad reference to write_file."
-                    )
-                    messages.append({"role": "user", "content": correction})
-                    _context_map.append({
-                        "round":    round_num,
-                        "role":     "user",
-                        "label":    "[tool-call correction injected]",
-                        "chars":    len(correction),
-                        "auto_key": None,
-                        "msg_idx":  len(messages) - 1,
-                    })
-                    continue
-                _log(f"[error] LLM call failed in round {round_num}: {error}")
-                final_response = f"(LLM call failed: {error})"
-                break
-
-            prompt_tokens     += result.prompt_tokens
-            completion_tokens += result.completion_tokens
-            final_tps          = result.tokens_per_second
-
-            _log(f"Round {round_num} TPS: {final_tps:.1f} tok/s  ({result.completion_tokens} completion | {result.prompt_tokens:,} prompt tokens)")
-            _log_file_only(f"[context] actual prompt tokens used: {result.prompt_tokens:,} | remaining: ~{config.num_ctx - result.prompt_tokens:,}")
-
-            _thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
-            if _thinking:
-                _log_file_only(f"[thinking]\n{_thinking}\n[/thinking]")
-
-            if not result.tool_calls:
-                # Model answered directly - this is the final response.
-                final_response = _strip_cot_preamble(result.response)
-                run_success    = bool(final_response)
-                _log(final_response)
-                _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
-                messages.append({"role": "assistant", "content": final_response})
-                _context_map.append({"round": round_num, "role": "asst", "label": "final answer", "chars": len(final_response), "auto_key": None, "msg_idx": len(messages) - 1})
-                break
-
-            # -- Execute each requested tool call --
-            _log(f"Round {round_num}: model requested {len(result.tool_calls)} tool call(s).")
-            _log_file_only("[progress] Executing tool calls...")
-
-            messages.append({
-                "role":       "assistant",
-                "content":    result.response or "",
-                "tool_calls": result.tool_calls,
-            })
-            _context_map.append({"round": round_num, "role": "asst", "label": f"(tool calls x{len(result.tool_calls)})", "chars": len(result.response or ""), "auto_key": None, "msg_idx": len(messages) - 1})
-
-            round_outputs: list[dict] = []
-            for tc in result.tool_calls:
-                tc_id     = tc.get("id", "")
-                tc_func   = tc.get("function", {})
-                func_name = tc_func.get("name", "")
-                raw_args  = tc_func.get("arguments", "{}")
-
-                try:
-                    arguments = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
-                except json.JSONDecodeError:
-                    arguments = {}
-
-                func_name, arguments, normalization_note = _normalize_tool_request(func_name, arguments)
-
-                arg_preview = ", ".join(f"{k}={v!r}" for k, v in arguments.items())
-                _log(f"  -> {func_name}({arg_preview})")
-                if normalization_note:
-                    _log_file_only(f"[tool-normalize] {normalization_note}")
-
-                try:
-                    output         = execute_tool_call(func_name, arguments, config.skills_payload, user_prompt, catalog_gates)
-                    result_content = output["result"]
-                    if not isinstance(result_content, str):
-                        result_content = json.dumps(result_content, default=str)
-                    if output.get("is_error"):
-                        result_content = f"[SKILL_ERROR] {result_content}"
-                except Exception as exc:
-                    result_content = f"[SKILL_ERROR] Error executing {func_name}: {exc}"
-                    output = {"function": func_name, "module": "", "arguments": arguments, "result": result_content, "is_error": True}
-
-                # Auto-save large results to scratchpad; cap message to protect context budget.
-                # Scratchpad reader calls (scratch_load, scratch_peek, etc.) are exempt - the data
-                # is already in the scratchpad and re-saving it creates a chain of duplicate keys
-                # that the model will try to load indefinitely without ever reading the content.
-                _is_scratch_reader = func_name.lower().startswith("scratch_")
-                auto_scratch_key = None
-                if (not output.get("is_error")
-                        and not _is_scratch_reader
-                        and isinstance(result_content, str)
-                        and len(result_content) >= _TOOL_MSG_AUTO_SCRATCH_MIN):
-                    safe_name        = func_name.lower()[:24]
-                    auto_scratch_key = f"_tc_r{round_num}_{safe_name}"
-                    _scratch_auto_save(auto_scratch_key, result_content)
-                    if len(result_content) > _TOOL_MSG_MAX_CHARS:
-                        result_content = (
-                            result_content[:_TOOL_MSG_MAX_CHARS]
-                            + f"\n... [truncated - full content auto-saved to scratchpad key: {auto_scratch_key}]"
-                        )
-
-                _log(f"     {trunc(str(result_content), 120)}")
-                round_outputs.append(output)
-                tool_outputs.append(output)
-                messages.append({
-                    "role":         "tool",
-                    "tool_call_id": tc_id,
-                    "name":         func_name,
-                    "content":      result_content,
-                })
-                _context_map.append({"round": round_num, "role": "tool", "label": func_name, "chars": len(result_content), "auto_key": auto_scratch_key, "msg_idx": len(messages) - 1})
-
-            _log_section_file_only(f"TOOL ROUND {round_num} - EXECUTION FLOW")
-            _log_file_only(_format_tool_outputs(round_outputs))
-
-        else:
-            # Exhausted all rounds without a plain-text answer - request a final synthesis.
-            _log("[warn] Max tool rounds exhausted - requesting final synthesis.")
-            try:
-                # Append an explicit user directive so the model is forced to emit visible content
-                # rather than only generating internal thinking tokens (Ollama 0.18+ thinking models).
-                synthesis_messages = messages + [{
-                    "role":    "user",
-                    "content": "Based on the tool results above, please answer my original question now.",
-                }]
-                # Call without tools so the model synthesises a final answer from accumulated results.
-                result             = call_llm_chat(
-                    model_name=config.resolved_model,
-                    messages=synthesis_messages,
-                    tools=None,
-                    num_ctx=config.num_ctx,
-                )
-                final_response     = _strip_cot_preamble(result.response)
-                prompt_tokens     += result.prompt_tokens
-                completion_tokens += result.completion_tokens
-                final_tps          = result.tokens_per_second
-                _log_section("FINAL RESPONSE")
-                _thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
-                if _thinking:
-                    _log_file_only(f"[thinking]\n{_thinking}\n[/thinking]")
-                _log(final_response)
-
-                # Last-resort fallback: if the model produced no content (e.g. Ollama thinking
-                # models that emit only internal reasoning tokens via /v1/chat/completions),
-                # build a minimal plain-text answer directly from the collected tool outputs so
-                # the user always sees something.
-                if not final_response and tool_outputs:
-                    _log_file_only("[warn] Synthesis returned empty - falling back to tool-output summary.")
-                    final_response = _build_fallback_answer(user_prompt, tool_outputs)
-                    _log(final_response)
-
-                run_success = bool(final_response)
-            except Exception as error:
-                final_response = f"(synthesis failed: {error})"
+        final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs = _run_tool_loop(
+            config        = config,
+            messages      = messages,
+            tool_defs     = tool_defs,
+            catalog_gates = catalog_gates,
+            context_map   = _context_map,
+            user_prompt   = user_prompt,
+            logger        = logger,
+            quiet         = quiet,
+        )
 
         # Extract and write any WRITE_FILE blocks embedded in the model's text response.
         _file_blocks_written = _write_file_blocks(final_response) if final_response else []
