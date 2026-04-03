@@ -132,13 +132,13 @@ class OrchestratorConfig:
 
 # ====================================================================================================
 class ConversationHistory:
-    """Rolling window of user / assistant turn pairs.
+    """Unbounded or capped store of user / assistant turn pairs.
 
-    Keeps at most *max_turns* complete rounds (one user + one assistant message per round).
-    Older turns are dropped automatically when the cap is exceeded.
+    max_turns=0 (the default) means unlimited - turns accumulate without eviction.
+    Any positive value caps the rolling window to that many complete rounds.
     """
 
-    def __init__(self, max_turns: int = 10):
+    def __init__(self, max_turns: int = 0):
         self._max_turns = max_turns
         self._turns: list[dict] = []
 
@@ -148,9 +148,10 @@ class ConversationHistory:
         assert len(self._turns) % 2 == 0, "ConversationHistory is misaligned (odd turn count)"
         self._turns.append({"role": "user",      "content": user})
         self._turns.append({"role": "assistant", "content": assistant})
-        cap = self._max_turns * 2
-        if len(self._turns) > cap:
-            self._turns = self._turns[-cap:]
+        if self._max_turns > 0:
+            cap = self._max_turns * 2
+            if len(self._turns) > cap:
+                self._turns = self._turns[-cap:]
 
     def clear(self) -> None:
         self._turns = []
@@ -679,6 +680,7 @@ def _build_system_message(
     session_context: "SessionContext | None",
     skills_payload: dict,
     scratchpad_visible_keys: list[str] | None = None,
+    conversation_summary: str | None = None,
 ) -> str:
     """Assemble the full system prompt from all runtime context sources.
 
@@ -713,6 +715,9 @@ def _build_system_message(
     if ambient_system_info:
         system_parts.append(f"\n{ambient_system_info}")
 
+    if conversation_summary:
+        system_parts.append(f"\nPrior conversation summary (oldest exchanges, compressed):\n{conversation_summary}")
+
     prior_inject = session_context.as_inject_block() if session_context else ""
     if prior_inject:
         system_parts.append(f"\nPrior session context:\n{prior_inject}")
@@ -735,9 +740,9 @@ def _build_system_message(
         auto_keys  = {k: v for k, v in _store.items() if k.startswith("_tc_")}
         key_lines  = []
         if named_keys:
-            key_lines.append("Named:      " + ", ".join(f"{k} ({len(v):,} chars)" for k in sorted(named_keys)))
+            key_lines.append("Named:      " + ", ".join(f"{k} ({len(v):,} chars)" for k, v in sorted(named_keys.items())))
         if auto_keys:
-            key_lines.append("Auto-saved: " + ", ".join(f"{k} ({len(v):,} chars)" for k in sorted(auto_keys)))
+            key_lines.append("Auto-saved: " + ", ".join(f"{k} ({len(v):,} chars)" for k, v in sorted(auto_keys.items())))
         system_parts.append(
             "\nScratchpad keys currently stored:\n  "
             + "\n  ".join(key_lines)
@@ -1102,6 +1107,7 @@ def orchestrate_prompt(
     quiet: bool = False,
     delegate_depth: int = 0,
     scratchpad_visible_keys: list[str] | None = None,
+    conversation_summary: str | None = None,
 ) -> tuple[str, int, int, bool, float]:
     """Run the tool-calling pipeline for one prompt.
 
@@ -1168,7 +1174,7 @@ def orchestrate_prompt(
     _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
 
     # -- Build system message --
-    system_message = _build_system_message(ambient_system_info, session_context, config.skills_payload, scratchpad_visible_keys)
+    system_message = _build_system_message(ambient_system_info, session_context, config.skills_payload, scratchpad_visible_keys, conversation_summary)
 
     # -- Build initial messages list --
     messages: list[dict] = [{"role": "system", "content": system_message}]

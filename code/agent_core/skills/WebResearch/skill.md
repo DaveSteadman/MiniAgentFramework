@@ -74,6 +74,18 @@ coverage, retry once with a simplified or rephrased query. If still no results, 
 `research_traverse` rather than answering from training data - the traverse skill uses an
 internal multi-step frontier that can succeed where a single-query search fails.
 
+**When `research_traverse` returns `visited_count=0`, the DuckDuckGo seed failed - not the topic.**
+This happens when DuckDuckGo rate-limits or blocks the request. Do not report "no results" to the
+user. Instead, fall back through this chain in order, stopping as soon as one succeeds:
+
+1. `kiwix_search(query)` - local offline library, no rate-limiting. If the result begins with
+   "Error" or "not configured", Kiwix is unavailable on this system - skip it and continue.
+2. `lookup_wikipedia(query)` - live Wikipedia lookup.
+3. `search_web` or `search_web_text` with a simplified or rephrased version of the query.
+4. `fetch_page_text` on any promising URLs found in steps 1-3.
+
+Only report "no results" to the user once all of the above are exhausted.
+
 **The manual three-stage chain is often better for structured tasks:**
 
 When the goal is to ingest articles from a known site (e.g. daily news harvest, GitHub trending),

@@ -1,7 +1,7 @@
 {
-  "model": "nemotron-3-nano:30b",
-  "ctx": 131072,
-  "agentport": 8000,
+  "model": "nemotron-cascade-2:latest",
+  "ctx": 256000,
   "ollamahost": "http://MONTBLANC:11434",
+  "agentport": 8000,
   "kiwix_url": "http://192.168.1.33:8080"
 }

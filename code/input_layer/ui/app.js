@@ -513,6 +513,11 @@ function _scrollLogSmooth() {
     _logScrollTarget = el.scrollHeight - el.clientHeight;
     if (_logScrollRafId !== null) return;
     function step() {
+        // If live mode was cancelled while the loop was in flight, stop immediately.
+        if (!_logLive) {
+            _logScrollRafId = null;
+            return;
+        }
         const panel  = dom.log();
         const target = _logScrollTarget;
         const diff   = target - panel.scrollTop;

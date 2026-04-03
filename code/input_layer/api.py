@@ -95,7 +95,7 @@ _TEST_COMPLETE_RE = re.compile(r"^\[(TEST COMPLETE|ALL TESTS COMPLETE)\]\s+(.+)$
 
 _LOG_DIR             = get_logs_dir()
 _WEB_DIR             = Path(__file__).resolve().parent / "ui"
-_MAX_CHAT_HISTORY    = 10
+_COMPACT_FILL_PCT    = 0.75  # compact when prompt-token fill reaches this fraction of num_ctx
 _QUEUE_PREVIEW_LIMIT = 10
 _LOG_POLL_SECS       = 1.0      # how often the log-tail SSE generator checks for new lines
 _LOG_TAIL_LINES      = 200      # how many historic lines to send on first connect
@@ -521,9 +521,9 @@ def post_prompt(session_id: str, body: PromptRequest):
     def _run(_prompt=prompt_text) -> None:
         # Load history and session context at execution time, not enqueue time.
         # This prevents rapid back-to-back requests from overwriting each other's turns.
-        persist = get_chatsessions_day_dir() / f"{session_id}.json"
-        ctx     = SessionContext(session_id=session_id, persist_path=persist)
-        history = _load_session_history(session_id)
+        persist             = get_chatsessions_day_dir() / f"{session_id}.json"
+        ctx                 = SessionContext(session_id=session_id, persist_path=persist)
+        history, summaries  = _load_session(session_id)
         _queue_run_event(run_q, {"type": "start", "run_id": run_id, "prompt": _prompt}, priority=True)
         try:
             if _prompt.startswith("/"):
@@ -593,7 +593,7 @@ def post_prompt(session_id: str, body: PromptRequest):
                 slash_ctx = SlashCommandContext(
                     config          = _config,
                     output          = _slash_output,
-                    clear_history   = lambda: (history.clear(), ctx.clear()),
+                    clear_history   = lambda: (history.clear(), ctx.clear(), _save_session(session_id, history, [], 0, 0)),
                     session_context = ctx,
                 )
                 handled = handle_slash(_prompt, slash_ctx)
@@ -615,16 +615,19 @@ def post_prompt(session_id: str, body: PromptRequest):
                 _queue_run_event(run_q, {"type": "log_file", "run_id": run_id, "path": str(log_path)}, priority=True)
                 with SessionLogger(log_path) as run_logger:
                     run_logger.log_section_file_only(f"API SESSION: {session_id}")
+                    summary_block = _build_summary_block(summaries)
                     response, p_tokens, _c, _ok, tps = orchestrate_prompt(
-                        user_prompt          = _prompt,
-                        config               = _config,
-                        logger               = run_logger,
-                        conversation_history = history.as_list() or None,
-                        session_context      = ctx,
-                        quiet                = True,
+                        user_prompt           = _prompt,
+                        config                = _config,
+                        logger                = run_logger,
+                        conversation_history  = history.as_list() or None,
+                        session_context       = ctx,
+                        quiet                 = True,
+                        conversation_summary  = summary_block or None,
                     )
                     tps_str = f"{tps:.1f}" if tps > 0 else "0"
                     history.add(_prompt, response)
+                    summaries = _save_session(session_id, history, summaries, p_tokens, get_active_num_ctx())
                     _queue_run_event(run_q, {
                         "type":     "response",
                         "run_id":   run_id,
@@ -643,38 +646,152 @@ def post_prompt(session_id: str, body: PromptRequest):
     return {"run_id": run_id, "session_id": session_id, "queued": True}
 
 
-def _load_session_history(session_id: str) -> ConversationHistory:
-    """Load existing conversation history for a session from its persist file if it exists."""
-    history  = ConversationHistory(max_turns=_MAX_CHAT_HISTORY)
-    day_dir  = get_chatsessions_day_dir()
-    sessions_root = get_chatsessions_dir()
+def _session_path(session_id: str) -> Path:
+    """Return the canonical cross-day session file path (root chatsessions dir)."""
+    return get_chatsessions_dir() / f"{session_id}.json"
 
-    # Check today's session file first, then fall back to any existing file anywhere.
-    candidates = [
-        day_dir / f"{session_id}.json",
-        sessions_root / f"{session_id}.json",
+
+def _load_session(session_id: str) -> tuple["ConversationHistory", list[dict]]:
+    """Load conversation history and summary blocks from the session file.
+
+    Returns (ConversationHistory, summaries) where summaries is a list of
+    {"text": str, "turn_range": [int, int]} dicts covering older exchanges that
+    have been compacted.  Falls back to legacy date-scoped files on first run.
+    """
+    history   = ConversationHistory()  # unlimited - compaction governs retention
+    summaries: list[dict] = []
+    path      = _session_path(session_id)
+
+    # Fall back to legacy date-dir file if no root canonical file exists yet.
+    if not path.exists():
+        legacy = get_chatsessions_day_dir() / f"{session_id}.json"
+        if legacy.exists():
+            path = legacy
+
+    if path.exists():
+        try:
+            data      = json.loads(path.read_text(encoding="utf-8"))
+            summaries = data.get("summaries", [])
+            for t in data.get("turns", []):
+                up = t.get("user_prompt", "")
+                ar = t.get("assistant_response", "")
+                if up and ar:
+                    history.add(up, ar)
+        except Exception:
+            pass
+    return history, summaries
+
+
+def _compact_old_turns(turns: list[dict], summaries: list[dict], batch_size: int) -> tuple[list[dict], list[dict]]:
+    """Compress the oldest batch_size turns into a summary block via an isolated LLM call.
+
+    Returns (remaining_turns, updated_summaries).  Returns inputs unchanged on any error
+    (no model loaded, LLM failure) so the session is never corrupted by a failed compaction.
+    """
+    from agent_core.ollama_client import call_llm_chat
+    from agent_core.ollama_client import get_active_model
+    from agent_core.ollama_client import get_active_num_ctx
+
+    model   = get_active_model()
+    num_ctx = get_active_num_ctx()
+    if not model:
+        return turns, summaries
+
+    batch     = turns[:batch_size]
+    remaining = turns[batch_size:]
+    batch_text = "\n\n".join(
+        f"User: {t['user_prompt']}\nAssistant: {t['assistant_response']}"
+        for t in batch
+    )
+
+    messages = [
+        {
+            "role":    "system",
+            "content": (
+                "You are a precise conversation summariser. "
+                "Compress the following conversation exchanges into one compact paragraph. "
+                "Preserve all specific facts, decisions, code, URLs, names, and conclusions reached. "
+                "Write in third person (e.g. 'The user asked about X; the assistant explained Y and provided Z.'). "
+                "Do not interpret, evaluate, or add information not present in the exchanges."
+            ),
+        },
+        {
+            "role":    "user",
+            "content": f"Conversation to summarise:\n\n{batch_text}",
+        },
     ]
-    for p in candidates:
-        if p.exists():
-            try:
-                data  = json.loads(p.read_text(encoding="utf-8"))
-                turns = data.get("turns", [])
-                for t in turns:
-                    up = t.get("user_prompt", "")
-                    ar = t.get("assistant_response", "")
-                    if up and ar:
-                        history.add(up, ar)
-            except Exception:
-                pass
-            break
-    return history
+
+    try:
+        result       = call_llm_chat(model_name=model, messages=messages, tools=None, num_ctx=num_ctx)
+        summary_text = (result.response or "").strip()
+    except Exception:
+        return turns, summaries
+
+    if not summary_text:
+        return turns, summaries
+
+    prior_end   = summaries[-1]["turn_range"][1] if summaries else 0
+    new_summary = {
+        "text":       summary_text,
+        "turn_range": [prior_end + 1, prior_end + len(batch)],
+    }
+    return remaining, summaries + [new_summary]
+
+
+def _build_summary_block(summaries: list[dict]) -> str:
+    """Format summary blocks into a single string for injection into the system prompt."""
+    if not summaries:
+        return ""
+    parts = [
+        f"[Turns {s['turn_range'][0]}-{s['turn_range'][1]}] {s['text']}"
+        for s in summaries
+    ]
+    return "\n\n".join(parts)
+
+
+def _save_session(
+    session_id:    str,
+    history:       "ConversationHistory",
+    summaries:     list[dict],
+    prompt_tokens: int,
+    num_ctx:       int,
+) -> list[dict]:
+    """Persist turns and summaries to the root-level session file.
+
+    Triggers compaction when the prompt-token fill exceeds _COMPACT_FILL_PCT of num_ctx,
+    compressing the oldest half of raw turns per pass.
+    Returns the (possibly updated) summaries list so the caller can inject
+    fresh summaries into the next orchestration run.
+    """
+    turns_raw = history.as_list()
+    pairs: list[dict] = []
+    for i in range(0, len(turns_raw) - 1, 2):
+        u = turns_raw[i]
+        a = turns_raw[i + 1]
+        if u.get("role") == "user" and a.get("role") == "assistant":
+            pairs.append({"user_prompt": u["content"], "assistant_response": a["content"]})
+
+    if num_ctx > 0 and pairs and prompt_tokens / num_ctx >= _COMPACT_FILL_PCT:
+        batch_size  = max(1, len(pairs) // 2)
+        pairs, summaries = _compact_old_turns(pairs, summaries, batch_size)
+
+    path = _session_path(session_id)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"turns": pairs, "summaries": summaries}, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+    return summaries
 
 
 @app.get("/sessions/{session_id}/history")
 def get_session_history(session_id: str):
     """Return the conversation history for a session."""
     _validate_session_id(session_id)
-    history = _load_session_history(session_id)
+    history, _summaries = _load_session(session_id)
     return {"session_id": session_id, "turns": history.as_list()}
 
 

@@ -1101,11 +1101,15 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
                     stray_errors.append(f"{base_dir.name}/{item.name}: {exc}")
 
     if deleted:
-        ctx.output(f"Deleted {len(deleted)} date-folder(s): {', '.join(deleted)}", "success")
+        ctx.output(f"Deleted {len(deleted)} date-folder(s):", "success")
+        for entry in deleted:
+            ctx.output(f"  {entry}", "item")
     else:
         ctx.output(f"No date-folders older than {days} day(s) found.", "dim")
     if stray_deleted:
-        ctx.output(f"Deleted {len(stray_deleted)} stray file(s): {', '.join(stray_deleted)}", "success")
+        ctx.output(f"Deleted {len(stray_deleted)} stray file(s):", "success")
+        for entry in stray_deleted:
+            ctx.output(f"  {entry}", "item")
     for err in errors + stray_errors:
         ctx.output(f"Error deleting {err}", "error")
 
@@ -1394,6 +1398,57 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output(f"Unknown sub-command '{sub}'. Use: enable, disable, add, delete, run", "error")
 
 
+# ----------------------------------------------------------------------------------------------------
+
+def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
+    defaults_path = get_controldata_dir() / "default.json"
+
+    def _load() -> dict:
+        try:
+            return json.loads(defaults_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    sub = arg.strip().lower()
+
+    if sub == "set":
+        existing = _load()
+        new_cfg: dict = {
+            "model":      ctx.config.resolved_model,
+            "ctx":        ctx.config.num_ctx,
+            "ollamahost": get_active_host(),
+        }
+        # Preserve fields we do not own in this command.
+        for key in ("agentport", "kiwix_url"):
+            if key in existing:
+                new_cfg[key] = existing[key]
+        try:
+            defaults_path.parent.mkdir(parents=True, exist_ok=True)
+            defaults_path.write_text(
+                json.dumps(new_cfg, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            ctx.output(f"Error saving default.json: {exc}", "error")
+            return
+        ctx.output(f"Defaults saved to: {defaults_path}", "success")
+        for k, v in new_cfg.items():
+            ctx.output(f"  {k:<14} {v}", "item")
+        return
+
+    if not sub:
+        ctx.output(f"Defaults file: {defaults_path}", "info")
+        cfg = _load()
+        if cfg:
+            for k, v in cfg.items():
+                ctx.output(f"  {k:<14} {v}", "item")
+        else:
+            ctx.output("  (file not found or empty)", "dim")
+        return
+
+    ctx.output("Usage: /defaults | /defaults set", "dim")
+
+
 # ====================================================================================================
 # MARK: REGISTRY
 # ====================================================================================================
@@ -1419,7 +1474,8 @@ _REGISTRY: dict[str, Callable] = {
     "/recall":        _cmd_recall,
     "/tasks":         _cmd_tasks,
     "/task":          _cmd_task,
-    "/version":        _cmd_version,
+    "/defaults":      _cmd_defaults,
+    "/version":       _cmd_version,
 }
 
 _DESCRIPTIONS: dict[str, str] = {
@@ -1444,5 +1500,6 @@ _DESCRIPTIONS: dict[str, str] = {
     "/recall":        "Show a summary of prior skill outputs stored in this session's context",
     "/tasks":         "List all scheduled tasks with status, schedule, and first prompt",
     "/task":          "enable|disable|add|delete|run <name> [schedule] [prompt]  Manage scheduled tasks; /task run <name> executes a task immediately",
+    "/defaults":      "Show current default.json settings and file path; /defaults set saves current model/ctx/host to the file",
     "/version":        "Show framework version, active model, and context size",
 }
