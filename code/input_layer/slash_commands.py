@@ -1574,6 +1574,46 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
         ctx.switch_session(session_id, rest)
         return
 
+    if sub == "resumecopy":
+        parts2 = rest.split(None, 1)
+        if len(parts2) < 2:
+            ctx.output("Usage: /session resumecopy <oldname> <newname>", "dim")
+            return
+        src_name, dst_name = parts2[0].strip(), parts2[1].strip()
+        if not ctx.switch_session:
+            ctx.output("Session switching is not available in this mode.", "error")
+            return
+        import re as _re
+        sessions = _session_file_scan()
+        match    = next(((p, d) for p, d in sessions if d.get("name", "").lower() == src_name.lower()), None)
+        if not match:
+            # Fallback: substring match.
+            match = next(((p, d) for p, d in sessions if src_name.lower() in d.get("name", "").lower()), None)
+        if not match:
+            ctx.output(f"No session named '{src_name}' found. Use /session list to see available sessions.", "error")
+            return
+        src_path, src_data = match
+        slug = _re.sub(r"[^a-z0-9]+", "_", dst_name.lower()).strip("_")
+        if not slug:
+            ctx.output(f"Name '{dst_name}' produces an empty slug - use letters or digits.", "error")
+            return
+        new_session_id = f"session_{slug}"
+        named_dir      = get_chatsessions_named_dir()
+        target_path    = named_dir / f"{new_session_id}.json"
+        if target_path.exists():
+            ctx.output(f"A session named '{dst_name}' already exists. Choose a different name.", "error")
+            return
+        copy_data = dict(src_data)
+        copy_data["name"] = dst_name
+        named_dir.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(json.dumps(copy_data, indent=2, ensure_ascii=False), encoding="utf-8")
+        turns     = len(copy_data.get("turns", []))
+        summaries = len(copy_data.get("summaries", []))
+        ctx.output(f"Copied '{src_data.get('name', src_path.stem)}' -> '{dst_name}' ({turns} turn(s), {summaries} compacted).", "success")
+        ctx.output(f"  File: named/{new_session_id}.json", "dim")
+        ctx.switch_session(new_session_id, dst_name)
+        return
+
     if sub == "park":
         if not ctx.switch_session:
             ctx.output("Session parking is not available in this mode.", "error")
@@ -1593,27 +1633,43 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
             if not sessions:
                 ctx.output("No named sessions to delete.", "dim")
                 return
+            deleted_current = False
             count = 0
             for p, d in sessions:
                 try:
+                    if p.stem == ctx.session_id:
+                        deleted_current = True
                     p.unlink()
                     count += 1
                     ctx.output(f"  Deleted '{d.get('name', p.stem)}'.", "item")
                 except Exception as exc:
                     ctx.output(f"  Error deleting '{p.name}': {exc}", "error")
             ctx.output(f"{count} session(s) deleted.", "success")
+            if deleted_current and ctx.switch_session:
+                import time
+                new_id = f"web_{int(time.time() * 1000)}"
+                ctx.output("Current session was deleted - starting fresh chat.", "info")
+                ctx.switch_session(new_id, "")
             return
-        # Match by name substring (case-insensitive).
-        matches = [(p, d) for p, d in sessions if rest.lower() in d.get("name", "").lower()]
+        # Exact name match (case-insensitive).
+        matches = [(p, d) for p, d in sessions if d.get("name", "").lower() == rest.lower()]
         if not matches:
-            ctx.output(f"No named session matching '{rest}' found.", "error")
+            ctx.output(f"No session with exact name '{rest}' found. Use /session list to check names.", "error")
             return
+        deleted_current = False
         for p, d in matches:
             try:
+                if p.stem == ctx.session_id:
+                    deleted_current = True
                 p.unlink()
                 ctx.output(f"Deleted session '{d.get('name', p.stem)}'.", "success")
             except Exception as exc:
                 ctx.output(f"Error deleting '{p.name}': {exc}", "error")
+        if deleted_current and ctx.switch_session:
+            import time
+            new_id = f"web_{int(time.time() * 1000)}"
+            ctx.output("Current session was deleted - starting fresh chat.", "info")
+            ctx.switch_session(new_id, "")
         return
 
     if sub == "info":
@@ -1642,14 +1698,15 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output(f"  File:       {path}", "item")
         return
 
-    ctx.output("Usage: /session <name|list|resume|park|delete|info>", "dim")
-    ctx.output("  /session name <alias>    - name the current session", "item")
-    ctx.output("  /session list            - list all named sessions", "item")
-    ctx.output("  /session resume <name>   - switch to a named session", "item")
-    ctx.output("  /session park            - save current session and start a fresh one", "item")
-    ctx.output("  /session delete <name>   - delete a named session (substring match)", "item")
-    ctx.output("  /session delete all      - delete all named sessions", "item")
-    ctx.output("  /session info            - show current session details", "item")
+    ctx.output("Usage: /session <name|list|resume|resumecopy|park|delete|info>", "dim")
+    ctx.output("  /session name <alias>                - name the current session", "item")
+    ctx.output("  /session list                        - list all named sessions", "item")
+    ctx.output("  /session resume <name>               - switch to a named session", "item")
+    ctx.output("  /session resumecopy <old> <new>      - copy a session to a new name and resume it", "item")
+    ctx.output("  /session park                        - save current session and start a fresh one", "item")
+    ctx.output("  /session delete <name>               - delete a named session (substring match)", "item")
+    ctx.output("  /session delete all                  - delete all named sessions", "item")
+    ctx.output("  /session info                        - show current session details", "item")
 
 
 # ====================================================================================================

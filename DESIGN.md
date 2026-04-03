@@ -250,6 +250,13 @@ The system is divided into two layers with a clean interface between them.
 | `/tasks` | list scheduled tasks and their next-fire times |
 | `/task <name>` | trigger a scheduled task immediately |
 | `/version` | display version string |
+| `/session name <alias>` | name the current session and persist it to `named/` |
+| `/session list` | list all named sessions with turn and compaction counts |
+| `/session resume <name>` | switch to a named session and replay its history in the UI |
+| `/session resumecopy <old> <new>` | copy a named session to a new name and resume the copy |
+| `/session park` | save the current session and start a fresh unnamed one |
+| `/session delete <name\|all>` | delete one or all named sessions |
+| `/session info` | show ID, name, turn count, and file path for the current session |
 
 **Claims:**
 - Any input whose first non-whitespace character is `/` is routed to the slash processor.
