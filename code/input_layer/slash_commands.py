@@ -539,7 +539,7 @@ def _cmd_kiwixhost(arg: str, ctx: SlashCommandContext) -> None:
             return {}
 
     if not arg:
-        current = _load_defaults().get("kiwix_url", "(not set)")
+        current = _load_defaults().get("kiwixurl", "(not set)")
         ctx.output(f"Usage: /kiwixhost <url>  |  current: {current}", "dim")
         return
 
@@ -557,8 +557,8 @@ def _cmd_kiwixhost(arg: str, ctx: SlashCommandContext) -> None:
         return
 
     cfg = _load_defaults()
-    old = cfg.get("kiwix_url", "(not set)")
-    cfg["kiwix_url"] = raw
+    old = cfg.get("kiwixurl", "(not set)")
+    cfg["kiwixurl"] = raw
     try:
         defaults_path.write_text(
             json.dumps(cfg, indent=2, ensure_ascii=False) + "\n",
@@ -670,14 +670,16 @@ def _run_one_test_file(
                 if m:
                     test_passed = int(m.group(1))
                     test_total  = int(m.group(2))
-                else:
-                    metrics_match = _metrics_re.match(stripped)
-                    if metrics_match:
-                        prompt_tokens_total += int(metrics_match.group(2))
-                        turn_tps = float(metrics_match.group(3))
-                        if turn_tps > 0:
-                            tps_sum     += turn_tps
-                            tps_samples += 1
+                    continue
+                metrics_match = _metrics_re.match(stripped)
+                if metrics_match:
+                    prompt_tokens_total += int(metrics_match.group(2))
+                    turn_tps = float(metrics_match.group(3))
+                    if turn_tps > 0:
+                        tps_sum     += turn_tps
+                        tps_samples += 1
+                    continue
+                if stripped:
                     ctx.output(stripped, "dim")
             proc.wait()
         finally:
@@ -914,8 +916,11 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
 # ----------------------------------------------------------------------------------------------------
 
 def _cmd_testtrend(arg: str, ctx: SlashCommandContext) -> None:
-    # Scan all *_analysis.csv files under controldata/test_results/, optionally filtered
+    # Scan raw test result CSVs under controldata/test_results/, optionally filtered
     # by prompts-file name, sort chronologically, and print a pass-rate table.
+    # Pass/fail is computed from assert_result + exit_code in the raw CSV so the
+    # numbers stay accurate even for runs predating the _analysis.csv assert fix.
+    # If a companion _analysis.csv exists it is used only for iterations_used (AvgRnds).
     import csv
     import re
     from pathlib import Path
@@ -928,15 +933,18 @@ def _cmd_testtrend(arg: str, ctx: SlashCommandContext) -> None:
 
     filter_name = arg.strip().lower().replace(" ", "_") if arg.strip() else ""
 
-    # Filename pattern: test_results_YYYYMMDD_HHMMSS_<prompts_name>_analysis.csv
-    _fname_re = re.compile(r"^test_results_(\d{8}_\d{6})_(.+)_analysis\.csv$")
+    # Filename pattern: test_results_YYYYMMDD_HHMMSS_<prompts_name>.csv
+    # Skip _analysis and _gaps files.
+    _fname_re = re.compile(r"^test_results_(\d{8}_\d{6})_(.+?)\.csv$")
 
-    entries: list[tuple[str, str, Path]] = []  # (sort_key, prompts_name, path)
-    for csv_path in results_root.rglob("*_analysis.csv"):
+    entries: list[tuple[str, str, Path]] = []  # (sort_key, prompts_name, raw_csv_path)
+    for csv_path in results_root.rglob("*.csv"):
+        if "_analysis" in csv_path.stem or "_gaps" in csv_path.stem:
+            continue
         m = _fname_re.match(csv_path.name)
         if not m:
             continue
-        ts_key      = m.group(1)           # YYYYMMDD_HHMMSS - sorts lexicographically
+        ts_key       = m.group(1)   # YYYYMMDD_HHMMSS - sorts lexicographically
         prompts_name = m.group(2)
         if filter_name and filter_name not in prompts_name:
             continue
@@ -944,7 +952,7 @@ def _cmd_testtrend(arg: str, ctx: SlashCommandContext) -> None:
 
     if not entries:
         hint = f" matching '{filter_name}'" if filter_name else ""
-        ctx.output(f"No analysis files found{hint}.", "dim")
+        ctx.output(f"No test result files found{hint}.", "dim")
         return
 
     entries.sort(key=lambda e: e[0])
@@ -956,7 +964,7 @@ def _cmd_testtrend(arg: str, ctx: SlashCommandContext) -> None:
     if show_file_col:
         ctx.output(
             f"{'Timestamp':<18}  {'Prompts file':<28}  {'Total':>5}  {'Pass%':>6}  "
-            f"{'Fail':>4}  {'Gap':>4}  {'AvgRnds':>7}  {'AvgSec':>6}",
+            f"{'Fail':>4}  {'Gap':>4}  {'AvgRnds':>7}  {'AvgSec':>6}  {'Runtime':<9}",
             "info",
         )
     else:
@@ -964,62 +972,105 @@ def _cmd_testtrend(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output(f"Trend for: {label}", "info")
         ctx.output(
             f"{'Timestamp':<18}  {'Total':>5}  {'Pass%':>6}  {'Fail':>4}  "
-            f"{'Gap':>4}  {'AvgRnds':>7}  {'AvgSec':>6}",
+            f"{'Gap':>4}  {'AvgRnds':>7}  {'AvgSec':>6}  {'Runtime':<9}",
             "info",
         )
 
-    ctx.output("-" * (80 if show_file_col else 62), "dim")
+    ctx.output("-" * (90 if show_file_col else 75), "dim")
 
-    for ts_key, prompts_name, csv_path in entries:
+    # ---------------------------------------------------------------------------
+    def _row_outcome(r: dict) -> str:
+        # Determine PASS/FAIL/GAP for a single raw CSV row.
+        # assert_result is authoritative when present; fall back to exit_code check.
+        assert_r = r.get("assert_result", "").strip().upper()
+        if assert_r == "FAIL":
+            return "FAIL"
+        if assert_r == "PASS":
+            return "PASS"
+        # No assert - use exit_code and output presence
+        try:
+            code = int(r.get("exit_code", "0"))
+        except (ValueError, TypeError):
+            code = -1
+        if code != 0:
+            return "FAIL"
+        if not r.get("final_output", "").strip():
+            return "FAIL"
+        return "PASS"
+
+    # ---------------------------------------------------------------------------
+    def _fmt_runtime(total_seconds: float) -> str:
+        total_int = int(total_seconds)
+        mins, secs = divmod(total_int, 60)
+        if mins:
+            return f"{mins}m {secs:02d}s"
+        return f"{secs}s"
+
+    # ---------------------------------------------------------------------------
+    for ts_key, prompts_name, raw_csv_path in entries:
         # Parse timestamp into a readable form: YYYYMMDD_HHMMSS -> YYYY-MM-DD HH:MM
         ts_display = f"{ts_key[:4]}-{ts_key[4:6]}-{ts_key[6:8]} {ts_key[9:11]}:{ts_key[11:13]}"
 
-        rows: list[dict] = []
+        raw_rows: list[dict] = []
         try:
-            with csv_path.open(newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
+            with raw_csv_path.open(newline="", encoding="utf-8") as f:
+                raw_rows = list(csv.DictReader(f))
         except OSError:
             ctx.output(f"  {ts_display}  (unreadable)", "error")
             continue
 
-        if not rows:
+        if not raw_rows:
             ctx.output(f"  {ts_display}  (empty)", "dim")
             continue
 
-        total   = len(rows)
-        passes  = sum(1 for r in rows if r.get("outcome", "") == "PASS")
-        fails   = sum(1 for r in rows if r.get("outcome", "") == "FAIL")
-        gaps    = sum(1 for r in rows if r.get("outcome", "") == "GAP")
+        # Pass/fail counts from raw CSV
+        outcomes = [_row_outcome(r) for r in raw_rows]
+        total    = len(outcomes)
+        passes   = outcomes.count("PASS")
+        fails    = outcomes.count("FAIL")
+        gaps     = outcomes.count("GAP")
         pass_pct = 100.0 * passes / total if total else 0.0
 
-        iter_vals = []
-        for r in rows:
-            try:
-                iter_vals.append(float(r.get("iterations_used", 0)))
-            except (ValueError, TypeError):
-                pass
-        avg_rounds = sum(iter_vals) / len(iter_vals) if iter_vals else 0.0
-
-        dur_vals = []
-        for r in rows:
+        # Runtime totals from raw CSV
+        dur_vals: list[float] = []
+        for r in raw_rows:
             try:
                 dur_vals.append(float(r.get("duration_seconds", 0)))
             except (ValueError, TypeError):
                 pass
-        avg_dur = sum(dur_vals) / len(dur_vals) if dur_vals else 0.0
+        total_secs = sum(dur_vals)
+        avg_dur    = total_secs / len(dur_vals) if dur_vals else 0.0
 
+        # iterations_used comes from the companion _analysis.csv if it exists
+        iter_vals: list[float] = []
+        analysis_path = raw_csv_path.with_name(f"{raw_csv_path.stem}_analysis.csv")
+        if analysis_path.exists():
+            try:
+                with analysis_path.open(newline="", encoding="utf-8") as f:
+                    for ar in csv.DictReader(f):
+                        try:
+                            iter_vals.append(float(ar.get("iterations_used", 0)))
+                        except (ValueError, TypeError):
+                            pass
+            except OSError:
+                pass
+        avg_rounds = sum(iter_vals) / len(iter_vals) if iter_vals else 0.0
+
+        runtime_str    = _fmt_runtime(total_secs)
         outcome_marker = "" if passes == total else " !"
+        level          = "success" if passes == total else "error" if fails > 0 else "dim"
+
         if show_file_col:
             ctx.output(
                 f"{ts_display:<18}  {prompts_name:<28}  {total:>5}  {pass_pct:>5.0f}%  "
-                f"{fails:>4}  {gaps:>4}  {avg_rounds:>7.1f}  {avg_dur:>6.1f}{outcome_marker}",
-                "success" if passes == total else "error" if fails > 0 else "dim",
+                f"{fails:>4}  {gaps:>4}  {avg_rounds:>7.1f}  {avg_dur:>6.1f}  {runtime_str:<9}{outcome_marker}",
+                level,
             )
         else:
             ctx.output(
                 f"{ts_display:<18}  {total:>5}  {pass_pct:>5.0f}%  {fails:>4}  "
-                f"{gaps:>4}  {avg_rounds:>7.1f}  {avg_dur:>6.1f}{outcome_marker}",
-                "success" if passes == total else "error" if fails > 0 else "dim",
+                f"{gaps:>4}  {avg_rounds:>7.1f}  {avg_dur:>6.1f}  {runtime_str:<9}{outcome_marker}",
+                level,
             )
 
 
@@ -1425,7 +1476,7 @@ def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
             "ollamahost": get_active_host(),
         }
         # Preserve fields we do not own in this command.
-        for key in ("agentport", "kiwix_url"):
+        for key in ("agentport", "kiwixurl"):
             if key in existing:
                 new_cfg[key] = existing[key]
         try:

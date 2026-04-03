@@ -182,7 +182,7 @@ Runtime data and configuration written at run time. Not part of the source distr
 
 | Path | Contents |
 |---|---|
-| `default.json` | Persisted CLI defaults (model, ctx, agentport, ollamahost, kiwix_url). |
+| `default.json` | Persisted CLI defaults (model, ctx, agentport, ollamahost, kiwixurl). |
 | `chathistory.json` | Input history for the chat panel (max 32 entries). |
 | `memory_store.json` | Durable memory facts extracted by the Memory skill. |
 | `chatsessions/` | Ephemeral session JSON files (one per session ID). |

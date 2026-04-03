@@ -28,7 +28,7 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 
 ## Tool selection guidance
 
-**If `kiwix_url` is set in default.json, use the Kiwix skill instead.**
+**If `kiwixurl` is set in default.json, use the Kiwix skill instead.**
 `kiwix_search` + `kiwix_get_article` retrieves the full local Wikipedia snapshot, which is
 faster, richer, and not subject to rate limits. Only fall back to `lookup_wikipedia` when
 Kiwix is not configured.

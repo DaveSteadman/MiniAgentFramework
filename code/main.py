@@ -62,6 +62,11 @@ DEFAULTS_FILE        = get_controldata_dir() / "default.json"
 # Keys accepted from default.json - must match the argparse dest names exactly.
 _DEFAULTS_KEYS = {"model", "ctx", "agentport", "ollamahost"}
 
+# All valid keys in default.json - superset of _DEFAULTS_KEYS.
+# Keys here that are not in _DEFAULTS_KEYS are read directly by skills or slash commands
+# and are not passed through argparse.
+_KNOWN_KEYS = _DEFAULTS_KEYS | {"kiwixurl"}
+
 
 # ====================================================================================================
 # MARK: DEFAULTS LOADING
@@ -76,9 +81,9 @@ def _load_defaults() -> dict:
         if not isinstance(raw, dict):
             return {}
         accepted  = {k: v for k, v in raw.items() if k in _DEFAULTS_KEYS}
-        unknown   = [k for k in raw if k not in _DEFAULTS_KEYS]
+        unknown   = [k for k in raw if k not in _KNOWN_KEYS]
         if unknown:
-            known_list = ", ".join(sorted(_DEFAULTS_KEYS))
+            known_list = ", ".join(sorted(_KNOWN_KEYS))
             print(
                 f"[default.json] Unrecognised key(s) ignored: {', '.join(sorted(unknown))}. "
                 f"Recognised keys: {known_list}.",

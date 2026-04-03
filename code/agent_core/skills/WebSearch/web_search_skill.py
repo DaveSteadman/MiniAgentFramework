@@ -20,10 +20,12 @@
 # ====================================================================================================
 import html as _html
 import re
+import threading as _threading
 import time
 import urllib.parse
 
 from utils.webpage_utils import fetch_html as _fetch_html
+from utils.webpage_utils import is_url_cached as _is_url_cached
 
 
 # ====================================================================================================
@@ -58,26 +60,50 @@ DEFAULT_MAX_CHARS        = 500
 _SEARCH_PAGE_SIZE        = 30
 _ARTICLE_SCAN_PAGES      = 3
 
-_HUB_PATH_MARKERS = (
-    "/category/",
-    "/categories/",
-    "/topic/",
-    "/topics/",
-    "/section/",
-    "/sections/",
-    "/tag/",
-    "/tags/",
-    "/archive",
-    "/archives",
-    "/latest",
-    "/trending",
-)
+# Retry policy for silent DDG rate-limiting (zero results returned on a 200 response).
+# DDG Lite silently returns an empty result page - no HTTP 429 - when it decides to block
+# a query. Retrying is only worthwhile when DDG has already returned results earlier in
+# this session (proving it is reachable); if the very first search fails it is a session-
+# level block and retrying immediately cannot help.
+_DDG_EMPTY_RETRY_COUNT   = 1      # one retry when the session has already been healthy
+_DDG_EMPTY_RETRY_DELAY_S = 4.0    # short delay before retry; session-level blocks need a restart anyway
+
 _SEARCH_PATH_MARKERS = (
     "/search",
     "/topics/",
 )
 _SEARCH_QUERY_KEYS = frozenset({"q", "query", "search", "text", "keyword", "keywords"})
 _DATE_PATH_RE = re.compile(r"/(?:19|20)\d{2}/\d{1,2}/\d{1,2}/")
+
+
+# ====================================================================================================
+# MARK: SESSION BLOCK DETECTOR
+# ====================================================================================================
+# Tracks whether any search_web call has returned results in this process lifetime.
+# Used to distinguish a session-level DDG block (no search has ever worked - fail fast,
+# no retries) from a transient per-query block (earlier searches worked - retrying after
+# a short delay may recover results).
+_session_lock          = _threading.Lock()
+_session_ddg_succeeded = False
+
+
+def _record_ddg_success() -> None:
+    global _session_ddg_succeeded
+    with _session_lock:
+        _session_ddg_succeeded = True
+
+
+def _session_ever_succeeded() -> bool:
+    with _session_lock:
+        return _session_ddg_succeeded
+
+
+def reset_search_session() -> None:
+    # Reset per-task DDG session state so that Task B in the scheduler does not inherit
+    # Task A's success flag and trigger spurious 15-second retry delays.
+    global _session_ddg_succeeded
+    with _session_lock:
+        _session_ddg_succeeded = False
 
 
 # ====================================================================================================
@@ -133,23 +159,16 @@ def _classify_result_url(url: str) -> str:
     except Exception:
         return "other"
 
-    host = parsed.netloc.lower()
-    path = parsed.path.lower()
+    path       = parsed.path.lower()
     query_keys = {k.lower() for k in urllib.parse.parse_qs(parsed.query).keys()}
 
     if not path or path == "/":
         return "homepage"
 
-    if host.startswith("news.google.") and "/topics/" in path:
-        return "search-results"
-
     if any(marker in path for marker in _SEARCH_PATH_MARKERS) and query_keys.intersection(_SEARCH_QUERY_KEYS):
         return "search-results"
 
-    if any(marker in path for marker in _HUB_PATH_MARKERS):
-        return "hub"
-
-    parts = [part for part in path.split("/") if part]
+    parts     = [part for part in path.split("/") if part]
     last_part = parts[-1] if parts else ""
 
     if _DATE_PATH_RE.search(path):
@@ -159,6 +178,14 @@ def _classify_result_url(url: str) -> str:
         if "-" in last_part or re.search(r"\d", last_part):
             return "article"
         return "hub"
+
+    # Structural hub detection: a shallow path (1-2 segments) whose terminal segment is
+    # short and contains no hyphens is characteristic of a section or category index page
+    # rather than a specific content article. Guard: a long hyphenated slug at the end
+    # is a strong signal for actual content, so exit early in that case.
+    if not ("-" in last_part and len(last_part) >= 12):
+        if len(parts) <= 2 and "-" not in last_part and len(last_part) < 20:
+            return "hub"
 
     if len(parts) >= 3 and "-" in last_part and len(last_part) >= 12:
         return "article"
@@ -277,12 +304,38 @@ def search_web(
         else:
             search_url = _DDG_URL.format(q=encoded)
 
-        try:
-            html_text, _ = _fetch_html(search_url, timeout=float(timeout_seconds))
-        except Exception as exc:
-            return [{"rank": 0, "title": "Search failed", "url": "", "snippet": str(exc)}]
+        # Fetch with empty-result retry.
+        # DDG Lite silently returns HTTP 200 with an empty-result page when it blocks a query.
+        # Retrying only makes sense when DDG has already returned results earlier in this
+        # session - that proves it is reachable and the block is transient. If the session
+        # has never produced a result, retrying immediately wastes time on a block that will
+        # not clear in a few seconds.
+        _url_was_cached = _is_url_cached(search_url)   # capture BEFORE fetch; used by throttle
+        max_attempts   = _DDG_EMPTY_RETRY_COUNT + 1 if _session_ever_succeeded() else 1
+        page_results:  list[dict]      = []
+        _fetch_exc:    Exception | None = None
+        for _attempt in range(max_attempts):
+            try:
+                # Bypass the in-process HTML cache on retry attempts - the cached response
+                # is the empty-result page we are trying to escape.
+                html_text, _ = _fetch_html(
+                    search_url,
+                    timeout=float(timeout_seconds),
+                    no_cache=(_attempt > 0),
+                )
+            except Exception as exc:
+                _fetch_exc = exc
+                break
+            page_results = _annotate_results(_extract_ddg_results(html_text, max_results))
+            if page_results:
+                _record_ddg_success()
+                break
+            if _attempt < max_attempts - 1:
+                time.sleep(_DDG_EMPTY_RETRY_DELAY_S)
 
-        page_results = _annotate_results(_extract_ddg_results(html_text, max_results))
+        if _fetch_exc is not None:
+            return [{"rank": 0, "title": "Search failed", "url": "", "snippet": str(_fetch_exc)}]
+
         for result in page_results:
             url = str(result.get("url", "")).strip()
             if not url or url in seen_urls:
@@ -290,10 +343,11 @@ def search_web(
             seen_urls.add(url)
             collected_results.append(result)
 
-        # Throttle between successive calls to avoid rate-limiting on rapid multi-query tasks.
-        # Always sleep - including on empty results - to prevent rapid-fire requests when DDG
-        # is returning a rate-limit/CAPTCHA page (which has no result-link elements).
-        time.sleep(2.0)
+        # Throttle between successive DDG fetches to avoid rate-limiting on rapid multi-query tasks.
+        # Skip the sleep when the response was already in the in-process cache - no network request
+        # was made, so there is nothing to throttle.
+        if not _url_was_cached or _fetch_exc is not None:
+            time.sleep(2.0)
 
         if not prefer_article_urls:
             break

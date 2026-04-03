@@ -48,6 +48,7 @@ _ALLOWED_MODULES = frozenset({
     "datetime", "time", "calendar",
     "collections", "heapq", "bisect", "array",
     "random",
+    "pathlib",
 })
 
 # Modules that are always blocked regardless of sandbox state because they require the

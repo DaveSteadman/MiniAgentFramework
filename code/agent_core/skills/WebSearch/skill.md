@@ -50,6 +50,14 @@ a tool call is mandatory. The purpose of search prompts is to retrieve current, 
 not to recall training knowledge. If the tool returns no results, report that explicitly rather
 than substituting an answer from memory.
 
+**"Search failed" vs "No results" - treat these differently.**
+- `title="No results"` - DuckDuckGo found nothing for this query. Worth retrying with a
+  simplified query or escalating to `research_traverse`.
+- `title="Search failed"` with a timeout or URL error in the snippet - this is a connectivity
+  failure. The endpoint is unreachable right now. Do NOT retry the same search endpoint with
+  alternative query phrasings - it will time out again. Make at most one offline fallback
+  attempt (`kiwix_search` or `lookup_wikipedia`), then immediately report no results.
+
 **Choose between `search_web` and `search_web_text`:**
 - Use `search_web_text` in almost all cases - returns formatted text ready for direct synthesis,
   no extra processing needed.

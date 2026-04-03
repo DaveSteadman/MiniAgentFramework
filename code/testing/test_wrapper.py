@@ -292,6 +292,85 @@ def _base_row(run_timestamp: str, source_file: str, prompt: str, exchange_name: 
 
 
 # ====================================================================================================
+# MARK: SUMMARY REPORT
+# ====================================================================================================
+def _fmt_duration(seconds: float) -> str:
+    m = int(seconds) // 60
+    s = seconds - m * 60
+    return f"{m}m {s:.0f}s" if m else f"{s:.0f}s"
+
+
+# ----------------------------------------------------------------------------------------------------
+def _write_summary_md(csv_path: Path, records: list[dict], wall_clock: float) -> Path:
+    # Write a Markdown summary alongside the CSV results file.
+    # Groups results by suite, lists the 5 slowest items, and catalogues failures by reason.
+    # Returns the path of the written file.
+    md_path = csv_path.with_name(csv_path.stem.replace("test_results", "summary") + ".md")
+
+    total  = len(records)
+    passed = sum(1 for r in records if r["passed"])
+    failed = total - passed
+    now    = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    suites: dict[str, dict] = {}
+    for r in records:
+        sf = r["source_file"] or "unknown"
+        if sf not in suites:
+            suites[sf] = {"pass": 0, "fail": 0}
+        if r["passed"]:
+            suites[sf]["pass"] += 1
+        else:
+            suites[sf]["fail"] += 1
+
+    lines: list[str] = [
+        "# Test Run Summary",
+        "",
+        f"Run: {now}  |  Passed: **{passed}/{total}**  |  Wall-clock: {_fmt_duration(wall_clock)}",
+        "",
+        "## Results by Suite",
+        "",
+        "| Suite | Pass | Fail | Total |",
+        "| ----- | ---: | ---: | ----: |",
+    ]
+    for sf, counts in suites.items():
+        t = counts["pass"] + counts["fail"]
+        lines.append(f"| {sf} | {counts['pass']} | {counts['fail']} | {t} |")
+    lines.append("")
+
+    sorted_by_dur = sorted(records, key=lambda r: r["duration"], reverse=True)
+    lines += [
+        "## 5 Slowest Items",
+        "",
+        "| Duration | Label |",
+        "| -------: | ----- |",
+    ]
+    for r in sorted_by_dur[:5]:
+        lines.append(f"| {r['duration']:.1f}s | {r['label']} |")
+    lines.append("")
+
+    failures = [r for r in records if not r["passed"]]
+    if failures:
+        lines += [
+            f"## Failures ({failed})",
+            "",
+            "| Label | Reason |",
+            "| ----- | ------ |",
+        ]
+        for r in failures:
+            lines.append(f"| {r['label']} | {r['failure_reason']} |")
+    else:
+        lines += [
+            "## Failures",
+            "",
+            "None - all tests passed.",
+        ]
+    lines.append("")
+
+    md_path.write_text("\n".join(lines), encoding="utf-8")
+    return md_path
+
+
+# ====================================================================================================
 # MARK: TEST RUNNER
 # ====================================================================================================
 def run_tests(
@@ -309,27 +388,34 @@ def run_tests(
     total_items  = len(prompts)
     tests_run    = 0
     tests_passed = 0
+    _wall_start  = time.monotonic()
+    _records:    list[dict] = []
 
     for index, item in enumerate(prompts, start=1):
         tests_run += 1
         if isinstance(item, dict):   # exchange
-            passed = _run_exchange_item(
+            passed, record = _run_exchange_item(
                 item, index, total_items, output_path,
                 model=model, ollamahost=ollamahost, source_file=source_file,
             )
             if passed:
                 tests_passed += 1
+            _records.append(record)
         else:                        # plain string
-            interrupted, passed = _run_single_item(
+            interrupted, passed, record = _run_single_item(
                 str(item), index, total_items, output_path,
                 model=model, ollamahost=ollamahost, source_file=source_file,
             )
             if passed:
                 tests_passed += 1
+            _records.append(record)
             if interrupted:
                 break
 
-    print(f"\nResults written to: {output_path}")
+    wall_clock   = time.monotonic() - _wall_start
+    summary_path = _write_summary_md(output_path, _records, wall_clock)
+    print(f"\nResults written to:  {output_path}")
+    print(f"Summary written to:  {summary_path}")
     print(f"[TEST_SUMMARY] passed={tests_passed} total={tests_run}")
     return output_path
 
@@ -342,7 +428,7 @@ def _run_single_item(
     output_path: Path,
     model, ollamahost,
     source_file: str = "",
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, dict]:
     """Run a single standalone prompt.  Returns True if the run was interrupted."""
     run_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{run_timestamp}] Running prompt {index}/{total_items}: {prompt!r}")
@@ -367,7 +453,7 @@ def _run_single_item(
         status_label = "FAIL"
         print(f"  [{status_label}] duration={row['duration_seconds']}s  exit_code={row['exit_code']}")
         print("Interrupted by user, ending test run.")
-        return True, False
+        return True, False, {"label": prompt[:80], "source_file": source_file, "duration": 0.0, "passed": False, "failure_reason": "Interrupted"}
     except Exception as e:
         row.update({"exit_code": 125, "stderr": f"Wrapper error: {e}"})
         turn_metrics = {}
@@ -377,7 +463,16 @@ def _run_single_item(
         print(f"[TURN {turn_idx}] tokens={prompt_tokens} tps={tps_str}")
     status_label = "OK" if row["exit_code"] == 0 else "FAIL"
     print(f"  [{status_label}] duration={row['duration_seconds']}s  exit_code={row['exit_code']}")
-    return False, row["exit_code"] == 0
+    _passed   = row["exit_code"] == 0
+    _duration = float(row["duration_seconds"])
+    _record   = {
+        "label":          prompt[:80],
+        "source_file":    source_file,
+        "duration":       _duration,
+        "passed":         _passed,
+        "failure_reason": "" if _passed else f"Exit code {row['exit_code']}",
+    }
+    return False, _passed, _record
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -388,7 +483,7 @@ def _run_exchange_item(
     output_path: Path,
     model, ollamahost,
     source_file: str = "",
-) -> bool:
+) -> tuple[bool, dict]:
     """Run a multi-turn exchange.  Writes one CSV row per turn."""
     name   = exchange.get("exchange", f"exchange_{index}")
     turns  = exchange.get("turns", [])
@@ -442,7 +537,24 @@ def _run_exchange_item(
         assert_label = f"  assert={assert_result}" if assert_expr else ""
         print(f"  [Turn {turn_idx}/{n}] [{status_label}]{assert_label}: {user_prompt!r}")
 
-    return exit_code == 0 and not any_assert_fail
+    _passed = exit_code == 0 and not any_assert_fail
+    if not _passed:
+        if any_assert_fail:
+            _reason = "Assert failed"
+        elif exit_code != 0:
+            _reason = f"Exit code {exit_code}"
+        else:
+            _reason = "Unknown"
+    else:
+        _reason = ""
+    _record = {
+        "label":          name,
+        "source_file":    source_file,
+        "duration":       duration,
+        "passed":         _passed,
+        "failure_reason": _reason,
+    }
+    return _passed, _record
 
 
 # ====================================================================================================

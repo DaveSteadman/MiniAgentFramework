@@ -16,6 +16,7 @@
 #   MIN_PARA_WORDS        -- minimum words per extracted paragraph; below this = boilerplate
 #
 #   fetch_html(url, timeout=15)         -> (html_text: str, final_url: str)
+#   is_url_cached(url)                  -> bool
 #   dedup_paragraphs(paragraphs)        -> list[str]
 #   extract_content(html_text)          -> (page_title: str, body_text: str)  -- structured Markdown
 #   truncate_to_words(text, max_words)  -> str
@@ -121,17 +122,28 @@ _html_cache_lock: threading.Lock = threading.Lock()
 # ====================================================================================================
 # MARK: HTTP FETCH
 # ====================================================================================================
-def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT) -> tuple[str, str]:
+def is_url_cached(url: str) -> bool:
+    with _html_cache_lock:
+        return url in _html_cache
+
+
+# ----------------------------------------------------------------------------------------------------
+def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT, no_cache: bool = False) -> tuple[str, str]:
     """Fetch a URL and return (html_text, final_url).
 
     Handles charset detection from the Content-Type header.
     Retries once on transient 5xx / 429 responses (linear 1-second back-off).
     Results are cached in-process (up to 32 URLs) to avoid redundant round-trips.
     Raises on persistent network error - never silently swallows exceptions.
+
+    no_cache: skip the in-process cache entirely for this call (both read and write).
+    Use this when retrying a URL whose previously cached response is known to be unusable
+    (e.g. a DDG search page that returned zero results due to rate-limiting).
     """
-    with _html_cache_lock:
-        if url in _html_cache:
-            return _html_cache[url]
+    if not no_cache:
+        with _html_cache_lock:
+            if url in _html_cache:
+                return _html_cache[url]
 
     last_exc: Exception | None = None
     for attempt in range(_MAX_FETCH_RETRIES + 1):
@@ -159,10 +171,12 @@ def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT) -> tuple[str, str]:
                 result = raw.decode("utf-8", errors="replace"), final_url
 
             # Store in cache, evicting the oldest entry if at capacity.
-            with _html_cache_lock:
-                if len(_html_cache) >= _HTML_CACHE_MAX:
-                    _html_cache.popitem(last=False)
-                _html_cache[url] = result
+            # Skip caching when no_cache is set so callers can re-fetch freely.
+            if not no_cache:
+                with _html_cache_lock:
+                    if len(_html_cache) >= _HTML_CACHE_MAX:
+                        _html_cache.popitem(last=False)
+                    _html_cache[url] = result
             return result
 
         except urllib.error.HTTPError as exc:

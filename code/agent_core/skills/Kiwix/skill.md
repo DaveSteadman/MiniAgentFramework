@@ -12,9 +12,9 @@ Search and retrieve articles from a local Kiwix server. Kiwix hosts offline snap
   - `kiwix_get_article(article_path, max_words=600, timeout=15)`
 
 ## Configuration
-Set `"kiwix_url"` in `controldata/default.json` to the Kiwix server base URL, e.g.:
+Set `"kiwixurl"` in `controldata/default.json` to the Kiwix server base URL, e.g.:
 ```json
-{ "kiwix_url": "http://192.168.1.33:8080" }
+{ "kiwixurl": "http://192.168.1.33:8080" }
 ```
 If absent, both functions return a descriptive error string.
 
@@ -52,7 +52,7 @@ or Gutenberg article covers the topic, Kiwix is the first choice.
 **Prefer Kiwix over `lookup_wikipedia` when Kiwix is configured.**
 `kiwix_search` + `kiwix_get_article` retrieves the full article text from the local snapshot
 (including the August 2025 maxi edition) rather than the short REST API extract.
-Use `lookup_wikipedia` only when `kiwix_url` is not set in default.json.
+Use `lookup_wikipedia` only when `kiwixurl` is not set in default.json.
 
 **Prefer Kiwix over `fetch_page_text` with Wikipedia URLs.**
 Never use `fetch_page_text("https://en.wikipedia.org/...")` when Kiwix is available.

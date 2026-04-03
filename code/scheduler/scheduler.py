@@ -224,6 +224,13 @@ class TaskQueue:
 
                     self._write_state()
                     try:
+                        # Reset per-task search session state so that DDG success flags from a
+                        # previous task do not carry over and trigger spurious retry delays.
+                        try:
+                            from agent_core.skills.WebSearch.web_search_skill import reset_search_session
+                            reset_search_session()
+                        except Exception:
+                            pass
                         item["fn"]()
                     except Exception as exc:
                         # Log the failure so it is visible in the log file and

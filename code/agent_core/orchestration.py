@@ -704,6 +704,7 @@ def _build_system_message(
         "- For list-processing workflows that mention delegation, keep delegation at the parent level. Prefer one delegate over a whole batch, or multiple sibling delegates from the parent only. Do not ask a delegate child to spawn more delegates unless recursion is truly required.",
         "- When a prompt says 'research', 'investigate', 'look into', 'find evidence', or 'deep dive into', you MUST call research_traverse. Never answer these prompts from training data. research_traverse handles its own search frontier; call it with the user's question as the query argument.",
         "- After research_traverse, prefer the returned page scratch keys from best_pages/page_manifest. Use scratch_query or scratch_peek on specific research_page_* entries instead of scratch_load on the entire combined research bundle.",
+        "- When search_web or search_web_text returns a result with title 'Search failed' (network timeout or connectivity error), this is a connectivity failure - NOT a query mismatch. Do not retry the same endpoint with alternative query phrasings. Make at most one attempt with an offline fallback (kiwix_search or lookup_wikipedia). If that also fails, immediately report 'No results were found for [query].' and stop. Multiple rapid retries against a timed-out endpoint waste time and will not succeed.",
         "- When a web search or page-fetch tool returns no results, report that in a single short sentence only (e.g. 'No results were found for [query].'). Do not write out your reasoning about which other tools to try, what the rules say, or why the tool may have failed.",
         "- If fetch_page_text returns HTTP 401/403, or only a bare title from a topic/search page, treat the URL as blocked or thin and move on to a better candidate instead of debating the failure.",
         '- When using fetch_page_text on a specific article page for a narrow fact lookup, set the query parameter to your specific question (e.g. fetch_page_text(url=..., query="<your specific question here>")).',
@@ -894,6 +895,11 @@ def _run_tool_loop(
     run_success:       bool       = False
     final_response:    str        = ""
 
+    # Tracks the fingerprint set of the previous round's tool calls.
+    # Used to detect back-to-back identical tool calls and inject a corrective message
+    # instead of executing the same fruitless round again.
+    prev_round_tc_fingerprints: frozenset = frozenset()
+
     _stop_event.clear()
 
     for round_num in range(1, config.max_iterations + 1):
@@ -983,6 +989,34 @@ def _run_tool_loop(
         # -- Execute each requested tool call --
         _log(f"Round {round_num}: model requested {len(result.tool_calls)} tool call(s).")
         _log_file_only("[progress] Executing tool calls...")
+
+        # Detect duplicate tool-call rounds: if the model repeats the exact same (name, args)
+        # set as the previous round, the results will not change. Inject a corrective message
+        # so the model re-evaluates with existing data rather than looping indefinitely.
+        current_tc_fingerprints = frozenset(
+            (tc.get("function", {}).get("name", ""), tc.get("function", {}).get("arguments", "{}"))
+            for tc in result.tool_calls
+        )
+        if current_tc_fingerprints and current_tc_fingerprints == prev_round_tc_fingerprints:
+            _log(f"[warn] Round {round_num}: identical tool calls repeated from previous round - injecting correction.")
+            correction = (
+                "You have requested the exact same tool call(s) as the previous round. "
+                "The results will not change. Please use the information you already have "
+                "to answer the question, or try a different approach (different query, "
+                "different tool, or synthesize an answer from existing results)."
+            )
+            messages.append({"role": "user", "content": correction})
+            context_map.append({
+                "round":    round_num,
+                "role":     "user",
+                "label":    "[duplicate tool-call correction]",
+                "chars":    len(correction),
+                "auto_key": None,
+                "msg_idx":  len(messages) - 1,
+            })
+            prev_round_tc_fingerprints = frozenset()   # reset to avoid cascading injections
+            continue
+        prev_round_tc_fingerprints = current_tc_fingerprints
 
         messages.append({
             "role":       "assistant",
@@ -1322,11 +1356,24 @@ def delegate_subrun(
 
     # Build child skills payload - remove Delegate by default to prevent runaway recursion.
     # Apply tools_allowlist when provided to constrain the child to a specific toolset.
+    # Matching is against function names (e.g. "search_web") not catalog skill_name identifiers,
+    # because the model sees and reasons about function names, not internal skill folder names.
+    _allowlist_set = set(tools_allowlist) if tools_allowlist else None
+
+    def _skill_in_allowlist(skill: dict) -> bool:
+        if _allowlist_set is None:
+            return True
+        for fn_sig in skill.get("functions", []):
+            fn_name = fn_sig.split("(")[0].strip()
+            if fn_name in _allowlist_set:
+                return True
+        return False
+
     child_payload = copy.deepcopy(_config.skills_payload)
     child_payload["skills"] = [
         s for s in child_payload.get("skills", [])
         if (allow_recursive_delegate or "Delegate" not in s.get("skill_name", ""))
-        and (tools_allowlist is None or s.get("skill_name", "") in tools_allowlist)
+        and _skill_in_allowlist(s)
     ]
 
     child_config = OrchestratorConfig(

@@ -300,7 +300,8 @@ def ensure_ollama_running(
 
 # ----------------------------------------------------------------------------------------------------
 def list_ollama_models(host: str | None = None) -> list[str]:
-    host   = host or _active_host
+    host = host or _active_host
+    ensure_ollama_running(host=host, start_if_needed=True)
     body   = _request_json(url=f"{host.rstrip('/')}/api/tags", timeout=10.0)
     models = body.get("models", [])
     return [entry.get("model", "") for entry in models if entry.get("model")]

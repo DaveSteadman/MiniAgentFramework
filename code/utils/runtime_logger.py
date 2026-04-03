@@ -83,6 +83,7 @@ class SessionLogger:
         self.log_file_only(SECTION_SEPARATOR)
         self.log_file_only(stamped)
         self.log_file_only(SECTION_SEPARATOR)
+        self.log_file_only("")
 
 
 # ====================================================================================================

@@ -13,7 +13,7 @@
 #   kiwix_get_article(article_path, max_words) -- fetches and extracts text from an article
 #
 # Configuration:
-#   Set "kiwix_url" in controldata/default.json, e.g. "http://192.168.1.33:8080".
+#   Set "kiwixurl" in controldata/default.json, e.g. "http://192.168.1.33:8080".
 #   If the key is absent or the server is unreachable all functions return a human-readable
 #   error string - they never raise.
 #
@@ -67,11 +67,11 @@ _SPACE_RE = re.compile(r"\s+")
 # ====================================================================================================
 # MARK: INTERNAL HELPERS
 # ====================================================================================================
-def _load_kiwix_url() -> str | None:
+def _load_kiwixurl() -> str | None:
     try:
         raw = _DEFAULTS_PATH.read_text(encoding="utf-8")
         cfg = json.loads(raw)
-        url = str(cfg.get("kiwix_url", "")).strip().rstrip("/")
+        url = str(cfg.get("kiwixurl", "")).strip().rstrip("/")
         return url if url else None
     except Exception:
         return None
@@ -116,9 +116,9 @@ def kiwix_search(
 
     Returns a single error-entry dict on failure - never raises.
     """
-    kiwix_url = _load_kiwix_url()
-    if not kiwix_url:
-        return [{"rank": 0, "title": "Error", "article_path": "", "snippet": "kiwix_url not set in default.json", "book": ""}]
+    kiwixurl = _load_kiwixurl()
+    if not kiwixurl:
+        return [{"rank": 0, "title": "Error", "article_path": "", "snippet": "kiwixurl not set in default.json", "book": ""}]
 
     query = str(query or "").strip()
     if not query:
@@ -128,7 +128,7 @@ def kiwix_search(
     timeout     = max(5, min(int(timeout), 60))
 
     encoded    = urllib.parse.quote_plus(query)
-    search_url = f"{kiwix_url}/search?pattern={encoded}"
+    search_url = f"{kiwixurl}/search?pattern={encoded}"
 
     try:
         html_text = _kiwix_fetch(search_url, timeout)
@@ -183,9 +183,9 @@ def kiwix_get_article(
     Returns plain text (structured Markdown headings preserved) truncated to max_words.
     Returns an error string on failure - never raises.
     """
-    kiwix_url = _load_kiwix_url()
-    if not kiwix_url:
-        return "Error: kiwix_url not set in default.json"
+    kiwixurl = _load_kiwixurl()
+    if not kiwixurl:
+        return "Error: kiwixurl not set in default.json"
 
     article_path = str(article_path or "").strip()
     if not article_path:
@@ -194,7 +194,7 @@ def kiwix_get_article(
     max_words = max(50, min(int(max_words), MAX_WORDS_CAP))
     timeout   = max(5, min(int(timeout), 60))
 
-    url = kiwix_url + article_path if article_path.startswith("/") else f"{kiwix_url}/{article_path}"
+    url = kiwixurl + article_path if article_path.startswith("/") else f"{kiwixurl}/{article_path}"
 
     try:
         html_text = _kiwix_fetch(url, timeout)

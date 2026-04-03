@@ -336,11 +336,18 @@ def analyze_results_file(csv_path: Path) -> tuple[Path, Path]:
         except (ValueError, TypeError):
             exit_code_int = -1
 
+        assert_result = row.get("assert_result", "").strip().upper()
+
         outcome, failure_reason = classify_outcome(exit_code_int, final_output)
 
         log_info = {}
         if log_file:
             log_info = parse_log_file(Path(log_file))
+
+        # If hard-signal says PASS but the assert expression failed, downgrade
+        if outcome == "PASS" and assert_result == "FAIL":
+            outcome        = "FAIL"
+            failure_reason = "Assert expression failed"
 
         # If hard-signal says PASS but validation in log says FAIL, downgrade
         if outcome == "PASS" and log_info.get("validation_result") == "FAIL":

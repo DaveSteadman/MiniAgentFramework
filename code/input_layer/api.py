@@ -249,6 +249,15 @@ def serve_style_css():
     return FileResponse(str(_WEB_DIR / "style.css"), headers={"Cache-Control": "no-store"})
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def serve_favicon():
+    ico = _WEB_DIR / "favicon.ico"
+    if not ico.exists():
+        from starlette.responses import Response
+        return Response(status_code=404)
+    return FileResponse(str(ico), media_type="image/x-icon", headers={"Cache-Control": "no-cache"})
+
+
 # ====================================================================================================
 # MARK: STATUS ENDPOINTS
 # ====================================================================================================

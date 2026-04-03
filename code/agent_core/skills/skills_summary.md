@@ -122,7 +122,7 @@ Single JSON payload for orchestration planning.
           "max_iterations": "maximum tool-calling rounds for the child run, 1-8 recommended.",
           "output_key": "scratchpad key name to save the child's final answer under automatically.",
           "scratchpad_visible_keys": "list of scratchpad key names the child can see in its system prompt.",
-          "tools_allowlist": "list of skill names the child is permitted to use."
+          "tools_allowlist": "list of function names the child is permitted to call."
         }
       }
     },
