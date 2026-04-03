@@ -22,13 +22,22 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
-import copy
 import json
 import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_core.context_manager import COMPACT_THRESHOLD
+from agent_core.context_manager import compact_context
+from agent_core.context_manager import format_context_map as _context_manager_format_context_map
+from agent_core.context_manager import get_last_context_map as _context_manager_get_last_context_map
+from agent_core.context_manager import get_last_messages as _context_manager_get_last_messages
+from agent_core.context_manager import store_last_run_state
+from agent_core.delegate_runner import get_delegate_runtime_tls
+from agent_core.delegate_runner import pop_delegate_runtime
+from agent_core.delegate_runner import push_delegate_runtime
+from agent_core.delegate_runner import run_delegate_subrun
 from agent_core.ollama_client import call_llm_chat
 from agent_core.ollama_client import is_explicit_model_name
 from agent_core.ollama_client import list_ollama_models
@@ -37,7 +46,7 @@ from agent_core.ollama_client import resolve_model_name
 from agent_core.prompt_tokens import resolve_tokens
 from agent_core.scratchpad import get_store as _get_scratchpad_store
 from agent_core.scratchpad import scratch_list as _scratch_list
-from agent_core.scratchpad import scratch_save as _scratch_auto_save
+from agent_core.prompt_builder import build_system_message as _prompt_builder_build_system_message
 from agent_core.session_runtime import bind_session
 from agent_core.skill_executor import build_catalog_gates
 from agent_core.skill_executor import execute_tool_call
@@ -46,6 +55,10 @@ from agent_core.skills.Memory.memory_skill import store_prompt_memories
 from agent_core.skills.SystemInfo.system_info_skill import get_static_system_info_string
 from agent_core.skills_catalog_builder import build_tool_definitions
 from agent_core.tool_result import ToolCallResult
+from agent_core.tool_loop import format_tool_outputs as _tool_loop_format_tool_outputs
+from agent_core.tool_loop import run_tool_loop as _tool_loop_run_tool_loop
+from agent_core.tool_loop import strip_cot_preamble as _tool_loop_strip_cot_preamble
+from agent_core.tool_loop import write_file_blocks as _tool_loop_write_file_blocks
 from utils.runtime_logger import SessionLogger
 from utils.workspace_utils import get_workspace_root
 from utils.workspace_utils import trunc
@@ -82,14 +95,9 @@ def set_sandbox_enabled(enabled: bool) -> None:
 
 
 # ====================================================================================================
-# MARK: LAST-RUN STATE
+# MARK: RUN STATE
 # ====================================================================================================
-_last_context_map: list[dict] = []
-_last_messages:    list[dict] = []
-_last_run_lock:    threading.Lock = threading.Lock()
-
-_delegate_tls: threading.local = threading.local()
-_MAX_DELEGATE_DEPTH: int = 2
+_delegate_tls = get_delegate_runtime_tls()
 
 # Stop event: set by /stoprun to request early termination of the active run.
 _stop_event: threading.Event = threading.Event()
@@ -105,21 +113,6 @@ def is_stop_requested() -> bool:
 
 def clear_stop() -> None:
     _stop_event.clear()
-
-
-def get_last_context_map() -> list[dict]:
-    with _last_run_lock:
-        return list(_last_context_map)
-
-
-def get_last_messages() -> list[dict]:
-    with _last_run_lock:
-        return list(_last_messages)
-
-
-_TOOL_MSG_MAX_CHARS:        int   = 1500
-_TOOL_MSG_AUTO_SCRATCH_MIN: int   = 600
-COMPACT_THRESHOLD:          float = 0.50
 
 
 @dataclass
@@ -1220,7 +1213,15 @@ def orchestrate_prompt(
         tool_defs = build_tool_definitions(config.skills_payload)
         _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
 
-        system_message = _build_system_message(ambient_system_info, session_context, config.skills_payload, scratchpad_visible_keys, conversation_summary)
+        system_message = _prompt_builder_build_system_message(
+            ambient_system_info,
+            session_context,
+            config.skills_payload,
+            skill_guidance_enabled=_SKILL_GUIDANCE_ENABLED,
+            sandbox_enabled=_SANDBOX_ENABLED,
+            scratchpad_visible_keys=scratchpad_visible_keys,
+            conversation_summary=conversation_summary,
+        )
 
         messages: list[dict] = [{"role": "system", "content": system_message}]
         _context_map: list[dict] = [
@@ -1234,17 +1235,11 @@ def orchestrate_prompt(
         messages.append({"role": "user", "content": user_prompt})
         _context_map.append({"round": 0, "role": "user", "label": trunc(user_prompt, 50), "chars": len(user_prompt), "auto_key": None, "msg_idx": len(messages) - 1})
 
-        _prev_delegate_logger = getattr(_delegate_tls, "logger", None)
-        _prev_delegate_depth  = getattr(_delegate_tls, "delegate_depth", 0)
-        _prev_delegate_config = getattr(_delegate_tls, "config", None)
-
-        _delegate_tls.logger         = logger
-        _delegate_tls.delegate_depth = delegate_depth
-        _delegate_tls.config         = config
+        _prev_delegate_runtime = push_delegate_runtime(logger=logger, delegate_depth=delegate_depth, config=config)
         catalog_gates = build_catalog_gates(config.skills_payload)
 
         try:
-            final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs = _run_tool_loop(
+            final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs = _tool_loop_run_tool_loop(
                 config        = config,
                 messages      = messages,
                 tool_defs     = tool_defs,
@@ -1253,24 +1248,24 @@ def orchestrate_prompt(
                 user_prompt   = user_prompt,
                 logger        = logger,
                 quiet         = quiet,
+                call_llm_chat = call_llm_chat,
+                stop_requested = is_stop_requested,
+                clear_stop    = clear_stop,
             )
 
-            _file_blocks_written = _write_file_blocks(final_response) if final_response else []
+            _file_blocks_written = _tool_loop_write_file_blocks(final_response, log_to_session=log_to_session) if final_response else []
             if _file_blocks_written:
                 _log_file_only(f"[file-blocks] Wrote {len(_file_blocks_written)} file(s): {', '.join(_file_blocks_written)}")
 
             _log_section_file_only("TOOL CALL SUMMARY")
-            _log_file_only(_format_tool_outputs(tool_outputs))
+            _log_file_only(_tool_loop_format_tool_outputs(tool_outputs))
             _log_section_file_only("CONTEXT MAP")
-            _log_file_only(format_context_map(_context_map, config.num_ctx))
+            _log_file_only(_context_manager_format_context_map(_context_map, config.num_ctx))
             _log_section_file_only("SCRATCHPAD STATE")
             _log_file_only(_scratch_list())
             _log(f"Total: {prompt_tokens:,} prompt tokens | {completion_tokens:,} completion tokens")
 
-            global _last_context_map, _last_messages
-            with _last_run_lock:
-                _last_context_map = _context_map
-                _last_messages    = messages
+            store_last_run_state(_context_map, messages)
 
             if session_context is not None and run_success and tool_outputs:
                 session_context.add_turn(
@@ -1281,9 +1276,7 @@ def orchestrate_prompt(
 
             return final_response, prompt_tokens, completion_tokens, run_success, final_tps
         finally:
-            _delegate_tls.logger         = _prev_delegate_logger
-            _delegate_tls.delegate_depth = _prev_delegate_depth
-            _delegate_tls.config         = _prev_delegate_config
+            pop_delegate_runtime(_prev_delegate_runtime)
 
 
 # ====================================================================================================
@@ -1313,122 +1306,16 @@ def delegate_subrun(
     scratchpad_visible_keys: list[str] | None = None,
     tools_allowlist: list[str] | None = None,
 ) -> dict:
-    """Run a child orchestration context for one isolated sub-task.
-
-    Reads the active logger, config, and depth from thread-local state set by
-    orchestrate_prompt() at the start of each run. Returns a compact result dict
-    suitable for direct use in the parent model's synthesis step.
-    """
-    prompt       = str(prompt or "").strip()
-    instructions = str(instructions or "").strip()
-
-    if not prompt:
-        return {
-            "status":          "error",
-            "answer":          "delegate() requires a non-empty prompt.",
-            "delegate_prompt": "",
-            "depth":           0,
-            "max_iterations":  max_iterations,
-        }
-
-    _logger = getattr(_delegate_tls, "logger", None)
-    _depth  = int(getattr(_delegate_tls, "delegate_depth", 0))
-    _config = getattr(_delegate_tls, "config", None)
-
-    if _logger is None or _config is None:
-        return {
-            "status":          "error",
-            "answer":          "Delegate runtime context is not available. Was delegate_subrun called outside an orchestration run?",
-            "delegate_prompt": prompt,
-            "depth":           _depth,
-            "max_iterations":  max_iterations,
-        }
-
-    if _depth >= _MAX_DELEGATE_DEPTH:
-        return {
-            "status":          "error",
-            "answer":          f"Maximum delegation depth ({_MAX_DELEGATE_DEPTH}) reached. Cannot delegate further.",
-            "delegate_prompt": prompt,
-            "depth":           _depth,
-            "max_iterations":  max_iterations,
-        }
-
-    child_prompt     = f"{instructions}\n\n{prompt}".strip() if instructions else prompt
-    child_iterations = max(1, min(int(max_iterations), 8))
-
-    # Build child skills payload - remove Delegate by default to prevent runaway recursion.
-    # Apply tools_allowlist when provided to constrain the child to a specific toolset.
-    # Matching is against function names (e.g. "search_web") not catalog skill_name identifiers,
-    # because the model sees and reasons about function names, not internal skill folder names.
-    _allowlist_set = set(tools_allowlist) if tools_allowlist else None
-
-    def _skill_in_allowlist(skill: dict) -> bool:
-        if _allowlist_set is None:
-            return True
-        for fn_sig in skill.get("functions", []):
-            fn_name = fn_sig.split("(")[0].strip()
-            if fn_name in _allowlist_set:
-                return True
-        return False
-
-    child_payload = copy.deepcopy(_config.skills_payload)
-    child_payload["skills"] = [
-        s for s in child_payload.get("skills", [])
-        if (allow_recursive_delegate or "Delegate" not in s.get("skill_name", ""))
-        and _skill_in_allowlist(s)
-    ]
-
-    child_config = OrchestratorConfig(
-        resolved_model      = _config.resolved_model,
-        num_ctx             = _config.num_ctx,
-        max_iterations      = child_iterations,
-        skills_payload      = child_payload,
-        skills_catalog_path = None,
-        catalog_mtime       = 0.0,
+    """Run a child orchestration context for one isolated sub-task."""
+    return run_delegate_subrun(
+        prompt=prompt,
+        instructions=instructions,
+        max_iterations=max_iterations,
+        allow_recursive_delegate=allow_recursive_delegate,
+        output_key=output_key,
+        scratchpad_visible_keys=scratchpad_visible_keys,
+        tools_allowlist=tools_allowlist,
+        orchestrate_prompt_fn=orchestrate_prompt,
+        config_cls=OrchestratorConfig,
     )
-
-    _logger.log_file_only(
-        f"[delegate] spawning child run: depth={_depth + 1} max_iter={child_iterations} "
-        f"prompt={trunc(child_prompt, 80)}"
-    )
-
-    _prev_logger = getattr(_delegate_tls, "logger", None)
-    _prev_depth  = getattr(_delegate_tls, "delegate_depth", 0)
-    _prev_config = getattr(_delegate_tls, "config", None)
-
-    try:
-        answer, _, _, run_success, _ = orchestrate_prompt(
-            user_prompt             = child_prompt,
-            config                  = child_config,
-            logger                  = _logger,
-            conversation_history    = None,
-            session_context         = None,
-            quiet                   = True,
-            delegate_depth          = _depth + 1,
-            scratchpad_visible_keys = scratchpad_visible_keys,
-        )
-        status = "ok" if run_success else "error"
-    except Exception as exc:
-        answer      = f"Delegate child run failed: {exc}"
-        status      = "error"
-    finally:
-        _delegate_tls.logger         = _prev_logger
-        _delegate_tls.delegate_depth = _prev_depth
-        _delegate_tls.config         = _prev_config
-
-    if output_key and status == "ok":
-        try:
-            out_key = str(output_key).strip()
-            _scratch_auto_save(out_key, answer)
-            answer = f"[Result saved to '{out_key.lower()}']\n{answer}"
-        except Exception:
-            pass
-
-    return {
-        "status":          status,
-        "answer":          answer,
-        "delegate_prompt": child_prompt,
-        "depth":           _depth + 1,
-        "max_iterations":  child_iterations,
-    }
 

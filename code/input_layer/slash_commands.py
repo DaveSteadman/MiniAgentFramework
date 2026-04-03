@@ -20,11 +20,10 @@ from agent_core.ollama_client import get_active_host
 from agent_core.ollama_client import get_llm_timeout
 from agent_core.ollama_client import register_session_config
 from agent_core.ollama_client import set_llm_timeout
+from agent_core.context_manager import get_last_context_map
+from agent_core.context_manager import get_last_messages
 from agent_core.orchestration import compact_context
 from agent_core.orchestration import format_context_map
-from agent_core.orchestration import get_last_context_map
-from agent_core.orchestration import get_last_messages
-from agent_core.orchestration import get_sandbox_enabled
 from agent_core.orchestration import get_skill_guidance_enabled
 from agent_core.orchestration import request_stop
 from agent_core.orchestration import set_sandbox_enabled
