@@ -23,6 +23,7 @@ import importlib.util
 import sys
 
 from agent_core.prompt_tokens import resolve_tokens
+from agent_core.tool_result import ToolCallResult
 from utils.workspace_utils import get_workspace_root
 from utils.workspace_utils import normalize_module_path
 
@@ -131,7 +132,7 @@ def execute_tool_call(
     skills_payload: dict,
     user_prompt: str = "",
     catalog_gates: dict[str, tuple[str, str]] | None = None,
-) -> dict:
+) -> ToolCallResult:
     """Execute one tool call and return the output record.
 
     The returned dict has keys: 'function', 'module', 'arguments', 'result'.
@@ -161,11 +162,12 @@ def execute_tool_call(
     fn     = _load_callable_from_module_path(module_path, function_name)
     result = fn(**resolved_args)
 
-    return {
-        "tool":      tool_name,
-        "function":  function_name,
-        "module":    module_path,
-        "arguments": resolved_args,
-        "result":    result,
-        "is_error":  is_skill_error(result),
-    }
+    return ToolCallResult(
+        tool=tool_name,
+        function=function_name,
+        module=module_path,
+        arguments=resolved_args,
+        result=result,
+        status="error" if is_skill_error(result) else "ok",
+        error=str(result) if is_skill_error(result) else "",
+    )

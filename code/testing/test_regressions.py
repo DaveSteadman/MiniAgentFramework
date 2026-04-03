@@ -32,7 +32,7 @@ from agent_core.skills.SystemInfo.system_info_skill import get_system_info_strin
 
 class RegressionTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.skills_payload = load_skills_payload(CODE_DIR / "agent_core" / "skills" / "skills_summary.md")
+        self.skills_payload = load_skills_payload(CODE_DIR / "agent_core" / "skills" / "skills_catalog.json")
         scratch_clear()
 
     def tearDown(self) -> None:

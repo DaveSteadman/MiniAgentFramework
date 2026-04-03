@@ -1,0 +1,15 @@
+from dataclasses import dataclass
+from typing import Callable
+
+
+@dataclass
+class SlashCommandContext:
+    """All mutable state and I/O wiring needed by slash command handlers."""
+
+    config: object
+    output: Callable[[str, str], None]
+    clear_history: Callable[[], None]
+    session_context: object | None = None
+    session_id: str | None = None
+    switch_session: Callable[[str, str], None] | None = None
+    rename_session: Callable[[str, str], None] | None = None

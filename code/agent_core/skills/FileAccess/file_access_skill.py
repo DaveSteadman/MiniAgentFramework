@@ -150,7 +150,7 @@ def find_files(keywords: list[str], search_root: str = "") -> str:
         try:
             sr   = search_root.strip().replace("\\", "/").lstrip("/")
             base = (WORKSPACE_ROOT / sr).resolve()
-            base.relative_to(DEFAULT_DATA_DIR)
+            base.relative_to(WORKSPACE_ROOT)
         except ValueError:
             return f"Error: search_root '{search_root}' escapes workspace."
     else:
@@ -187,7 +187,7 @@ def find_folders(keywords: list[str], search_root: str = "") -> str:
         try:
             sr   = search_root.strip().replace("\\", "/").lstrip("/")
             base = (WORKSPACE_ROOT / sr).resolve()
-            base.relative_to(DEFAULT_DATA_DIR)
+            base.relative_to(WORKSPACE_ROOT)
         except ValueError:
             return f"Error: search_root '{search_root}' escapes workspace."
     else:
@@ -252,10 +252,6 @@ def write_from_scratch(scratch_key: str, path: str) -> str:
     (e.g. a large page fetch that was auto-saved), to avoid putting large content into tool
     call arguments where JSON encoding can cause errors.
     """
-    import sys as _sys
-    _code_dir = str(Path(__file__).resolve().parents[3])
-    if _code_dir not in _sys.path:
-        _sys.path.insert(0, _code_dir)
     from agent_core.scratchpad import scratch_load as _scratch_load
 
     content = _scratch_load(scratch_key)

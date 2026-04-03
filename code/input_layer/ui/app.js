@@ -564,6 +564,11 @@ function _scrollChatSmooth() {
     _chatScrollTarget = el.scrollHeight - el.clientHeight;
     if (_chatScrollRafId !== null) return;
     function step() {
+        // If live mode was cancelled while the loop was in flight, stop immediately.
+        if (!_chatLive) {
+            _chatScrollRafId = null;
+            return;
+        }
         const panel  = dom.chat();
         const target = _chatScrollTarget;
         const diff   = target - panel.scrollTop;
@@ -1222,7 +1227,8 @@ function init() {
     dom.input().addEventListener("blur",  () => { setTimeout(_hideSuggest, 120); });
     dom.sendBtn().addEventListener("click", submitPrompt);
 
-    // Chat scroll listener: up pauses auto-scroll, reaching the bottom re-engages it.
+    // Chat scroll listener: reaching the bottom re-engages auto-scroll.
+    // The rAF guard prevents programmatic scroll events from toggling live mode.
     dom.chat().addEventListener("scroll", () => {
         if (_chatScrollRafId !== null) return;  // programmatic scroll; ignore
         if (_isChatNearBottom()) {
@@ -1230,6 +1236,23 @@ function init() {
         } else {
             _chatLive = false;
         }
+    });
+
+    // Wheel: any upward wheel input exits chat live mode immediately, even during a rAF
+    // loop (wheel events are fired independently of scroll, so the rAF guard above does
+    // not suppress them). This prevents rubber-banding when new messages arrive while
+    // the user is scrolling up.
+    dom.chat().addEventListener("wheel", (e) => {
+        if (e.deltaY < 0) _chatLive = false;
+    }, { passive: true });
+
+    // Scrollbar grab: pointerdown on the scrollbar track (right of clientWidth) also
+    // exits live mode so dragging the scrollbar upward does not rubber-band.
+    dom.chat().addEventListener("pointerdown", (e) => {
+        if (!_chatLive) return;
+        const el   = dom.chat();
+        const rect = el.getBoundingClientRect();
+        if (e.clientX >= rect.left + el.clientWidth) _chatLive = false;
     });
 
     // Wheel event: any upward wheel scroll in the log panel exits live mode.

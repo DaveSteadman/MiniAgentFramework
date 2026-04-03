@@ -35,11 +35,11 @@ from input_layer.api_mode import run_api_mode
 from agent_core.ollama_client import format_running_model_report
 from agent_core.ollama_client import get_llm_timeout
 from agent_core.ollama_client import register_llm_call_logger
-from agent_core.orchestration import ConversationHistory
 from agent_core.orchestration import OrchestratorConfig
-from agent_core.orchestration import SessionContext
 from agent_core.orchestration import orchestrate_prompt
 from agent_core.orchestration import resolve_execution_model
+from agent_core.run_helpers import make_task_session
+from agent_core.scratchpad import scratch_clear
 from agent_core.skills_catalog_builder import load_skills_payload
 from utils.runtime_logger import create_log_file_path
 from utils.runtime_logger import SessionLogger
@@ -55,7 +55,7 @@ from utils.workspace_utils import get_logs_dir
 # ====================================================================================================
 DEFAULT_NUM_CTX      = 131072
 MAX_ITERATIONS       = 25   # safety cap; model exits naturally via native tool calling
-SKILLS_SUMMARY_PATH  = Path(__file__).resolve().parent / "agent_core" / "skills" / "skills_summary.md"
+SKILLS_CATALOG_PATH  = Path(__file__).resolve().parent / "agent_core" / "skills" / "skills_catalog.json"
 LOG_DIR              = get_logs_dir()
 DEFAULTS_FILE        = get_controldata_dir() / "default.json"
 
@@ -138,17 +138,6 @@ def parse_main_args() -> argparse.Namespace:
 # ====================================================================================================
 # MARK: SESSION HELPERS
 # ====================================================================================================
-def _make_task_session(
-    session_id: str,
-    persist_path: Path,
-    max_turns: int = 10,
-) -> tuple[ConversationHistory, SessionContext]:
-    history = ConversationHistory(max_turns=max_turns)
-    ctx     = SessionContext(session_id=session_id, persist_path=persist_path)
-    return history, ctx
-
-
-# ====================================================================================================
 # MARK: CHAT SEQUENCE MODE
 # Used by test_wrapper.py via the CHAT_SEQUENCE_FILE environment variable (internal).
 # ====================================================================================================
@@ -184,7 +173,7 @@ def run_chat_sequence_mode(
         print(f"[chat-sequence] Cannot load '{sequence_file}': {exc}", file=_sys.stderr)
         _sys.exit(1)
 
-    history, session_ctx = _make_task_session(
+    history, session_ctx = make_task_session(
         session_id   = log_path.stem,
         persist_path = get_chatsessions_day_dir() / f"{log_path.stem}.json",
     )
@@ -198,7 +187,7 @@ def run_chat_sequence_mode(
         seq_ctx = SlashCommandContext(
             config          = config,
             output          = lambda text, level="info", _buf=slash_lines: _buf.append(text),
-            clear_history   = lambda: [history.clear(), session_ctx.clear()],
+            clear_history   = lambda: [history.clear(), session_ctx.clear(), scratch_clear(session_ctx.session_id)],
             session_context = session_ctx,
         )
         if handle_slash(user_prompt, seq_ctx):
@@ -259,15 +248,15 @@ def _run(args, logger, log_path) -> None:
     except Exception:
         resolved_model = args.model
 
-    skills_payload = load_skills_payload(SKILLS_SUMMARY_PATH)
-    catalog_mtime  = SKILLS_SUMMARY_PATH.stat().st_mtime if SKILLS_SUMMARY_PATH.exists() else 0.0
+    skills_payload = load_skills_payload(SKILLS_CATALOG_PATH)
+    catalog_mtime  = SKILLS_CATALOG_PATH.stat().st_mtime if SKILLS_CATALOG_PATH.exists() else 0.0
 
     config = OrchestratorConfig(
         resolved_model      = resolved_model,
         num_ctx             = args.ctx,
         max_iterations      = MAX_ITERATIONS,
         skills_payload      = skills_payload,
-        skills_summary_path = SKILLS_SUMMARY_PATH,
+        skills_catalog_path = SKILLS_CATALOG_PATH,
         catalog_mtime       = catalog_mtime,
     )
 

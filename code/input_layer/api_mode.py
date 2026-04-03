@@ -29,13 +29,11 @@ from datetime import datetime
 from pathlib import Path
 
 import agent_core.ollama_client as ollama_client
+from agent_core.run_helpers import run_prompt_batch
 from input_layer.api import app
 from input_layer.api import push_log_line
 from input_layer.api import setup as api_setup
-from agent_core.orchestration import ConversationHistory
 from agent_core.orchestration import OrchestratorConfig
-from agent_core.orchestration import SessionContext
-from agent_core.orchestration import orchestrate_prompt
 from utils.runtime_logger import SessionLogger
 from utils.runtime_logger import create_log_file_path
 from scheduler.scheduler import initial_last_run
@@ -124,35 +122,27 @@ def run_api_mode(
 
                 def _run_task(_name=name, _prompts=list(prompts), _when=now) -> None:
                     push_log_line(f"[SCHEDULER] Starting task: {_name}")
-                    task_hist = ConversationHistory(max_turns=10)
-                    task_ctx  = SessionContext(
-                        session_id   = f"task_{_name}",
-                        persist_path = get_chatsessions_day_dir() / f"task_{_name}.json",
-                    )
-                    for prompt_text in _prompts:
-                        if shutdown.is_set():
-                            break
-                        if isinstance(prompt_text, dict):
-                            prompt_text = prompt_text.get("prompt", "")
-                        if not prompt_text:
-                            continue
-                        try:
-                            run_log_path = create_log_file_path(log_dir=_LOG_DIR)
-                            with SessionLogger(run_log_path) as run_logger:
-                                push_log_line(f"[SCHEDULER] {_name}: {prompt_text[:80]}")
-                                response, p_tokens, _c, _ok, tps = orchestrate_prompt(
-                                    user_prompt          = prompt_text,
-                                    config               = config,
-                                    logger               = run_logger,
-                                    conversation_history = task_hist.as_list() or None,
-                                    session_context      = task_ctx,
-                                    quiet                = True,
-                                )
-                                task_hist.add(prompt_text, response)
-                                tps_str = f"{tps:.1f}" if tps > 0 else "0"
-                                push_log_line(f"[SCHEDULER] {_name}: done [{p_tokens:,} tok, {tps_str} tok/s]")
-                        except Exception as exc:
-                            push_log_line(f"[SCHEDULER] {_name} error: {exc}")
+                    try:
+                        run_log_path = create_log_file_path(log_dir=_LOG_DIR)
+                        with SessionLogger(run_log_path) as run_logger:
+                            for prompt_text in _prompts:
+                                current = prompt_text.get("prompt", "") if isinstance(prompt_text, dict) else str(prompt_text)
+                                if current:
+                                    push_log_line(f"[SCHEDULER] {_name}: {current[:80]}")
+                            results = run_prompt_batch(
+                                _prompts,
+                                session_id=f"task_{_name}",
+                                persist_path=get_chatsessions_day_dir() / f"task_{_name}.json",
+                                config=config,
+                                logger=run_logger,
+                                quiet=True,
+                                max_turns=10,
+                            )
+                            for item in results:
+                                tps_str = f"{item['tps']:.1f}" if item["tps"] > 0 else "0"
+                                push_log_line(f"[SCHEDULER] {_name}: done [{item['prompt_tokens']:,} tok, {tps_str} tok/s]")
+                    except Exception as exc:
+                        push_log_line(f"[SCHEDULER] {_name} error: {exc}")
                     last_run[_name] = _when
                     push_log_line(f"[SCHEDULER] Task '{_name}' completed.")
 

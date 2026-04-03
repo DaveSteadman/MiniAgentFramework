@@ -3,13 +3,13 @@
 # ====================================================================================================
 # Standalone CLI tool that shows the tool definitions derived from the current skills catalog.
 #
-# Loads the skills_summary.md catalog and prints the JSON Schema tool definitions that are sent to
+# Loads the runtime skills_catalog.json catalog and prints the JSON Schema tool definitions that are sent to
 # the model via /v1/chat/completions. Useful for debugging which tools are visible to the model and
 # verifying that skill signatures are parsed correctly.
 #
 # Usage:
 #   python inspect_tools.py
-#   python inspect_tools.py --skills-summary /path/to/skills_summary.md
+#   python inspect_tools.py --skills-catalog /path/to/skills_catalog.json
 #   python inspect_tools.py --output /path/to/tool_definitions.json
 #
 # Related modules:
@@ -32,7 +32,7 @@ from agent_core.skills_catalog_builder import load_skills_payload
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-DEFAULT_SKILLS_SUMMARY = Path(__file__).resolve().parent / "skills" / "skills_summary.md"
+DEFAULT_SKILLS_CATALOG = Path(__file__).resolve().parent / "skills" / "skills_catalog.json"
 
 
 # ====================================================================================================
@@ -40,7 +40,7 @@ DEFAULT_SKILLS_SUMMARY = Path(__file__).resolve().parent / "skills" / "skills_su
 # ====================================================================================================
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Show tool definitions derived from the skills catalog.")
-    parser.add_argument("--skills-summary", default=str(DEFAULT_SKILLS_SUMMARY), help="Path to skills_summary.md file.")
+    parser.add_argument("--skills-catalog", default=str(DEFAULT_SKILLS_CATALOG), help="Path to skills_catalog.json file.")
     parser.add_argument("--output", default=None, help="Optional path to write tool definitions JSON.")
     return parser.parse_args()
 
@@ -49,8 +49,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    skills_summary_path = Path(args.skills_summary).resolve()
-    skills_payload = load_skills_payload(skills_summary_path)
+    skills_catalog_path = Path(args.skills_catalog).resolve()
+    skills_payload = load_skills_payload(skills_catalog_path)
     tool_defs = build_tool_definitions(skills_payload)
 
     output_text = json.dumps(tool_defs, indent=2)
@@ -61,7 +61,7 @@ def main() -> None:
         output_path.write_text(output_text, encoding="utf-8")
         print(f"Wrote {len(tool_defs)} tool definitions: {output_path.as_posix()}")
     else:
-        print(f"# {len(tool_defs)} tool definitions from {skills_summary_path.name}\n")
+        print(f"# {len(tool_defs)} tool definitions from {skills_catalog_path.name}\n")
         print(output_text)
 
 

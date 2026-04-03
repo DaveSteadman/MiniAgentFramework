@@ -38,12 +38,14 @@ from agent_core.prompt_tokens import resolve_tokens
 from agent_core.scratchpad import get_store as _get_scratchpad_store
 from agent_core.scratchpad import scratch_list as _scratch_list
 from agent_core.scratchpad import scratch_save as _scratch_auto_save
+from agent_core.session_runtime import bind_session
 from agent_core.skill_executor import build_catalog_gates
 from agent_core.skill_executor import execute_tool_call
 from agent_core.skills.Memory.memory_skill import recall_relevant_memories
 from agent_core.skills.Memory.memory_skill import store_prompt_memories
 from agent_core.skills.SystemInfo.system_info_skill import get_static_system_info_string
 from agent_core.skills_catalog_builder import build_tool_definitions
+from agent_core.tool_result import ToolCallResult
 from utils.runtime_logger import SessionLogger
 from utils.workspace_utils import get_workspace_root
 from utils.workspace_utils import trunc
@@ -126,7 +128,7 @@ class OrchestratorConfig:
     num_ctx: int
     max_iterations: int
     skills_payload: dict
-    skills_summary_path: Path | None = None
+    skills_catalog_path: Path | None = None
     catalog_mtime: float = 0.0
 
 
@@ -203,6 +205,10 @@ class SessionContext:
                 self._turns = data.get("turns", [])
             except Exception:
                 pass
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
 
     # --------------------------------------------------------------------------
 
@@ -443,7 +449,7 @@ def _extract_result_fields(item: dict) -> tuple[str, str, str]:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _format_tool_outputs(tool_outputs: list[dict]) -> str:
+def _format_tool_outputs(tool_outputs: list[ToolCallResult]) -> str:
     """Return a compact structural summary of executed tool calls and their results."""
     if not tool_outputs:
         return "(no tool calls executed)"
@@ -496,7 +502,7 @@ def _format_tool_outputs(tool_outputs: list[dict]) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _build_fallback_answer(user_prompt: str, tool_outputs: list[dict]) -> str:
+def _build_fallback_answer(user_prompt: str, tool_outputs: list[ToolCallResult]) -> str:
     """Construct a minimal plain-text answer from raw tool outputs when LLM synthesis fails.
 
     Used when all synthesis attempts return empty content (e.g. Ollama thinking models that
@@ -871,7 +877,7 @@ def _run_tool_loop(
     user_prompt:   str,
     logger:        SessionLogger,
     quiet:         bool,
-) -> tuple[str, int, int, bool, float, list[dict]]:
+) -> tuple[str, int, int, bool, float, list[ToolCallResult]]:
     # Inner tool-calling loop for orchestrate_prompt.
     # Handles the stop-check, per-round LLM calls, tool execution, and synthesis fallback.
     # Mutates messages and context_map in place.
@@ -888,7 +894,7 @@ def _run_tool_loop(
     def _log_section_file_only(title: str) -> None:
         logger.log_section_file_only(title)
 
-    tool_outputs:      list[dict] = []
+    tool_outputs:      list[ToolCallResult] = []
     prompt_tokens:     int        = 0
     completion_tokens: int        = 0
     final_tps:         float      = 0.0
@@ -1025,7 +1031,7 @@ def _run_tool_loop(
         })
         context_map.append({"round": round_num, "role": "asst", "label": f"(tool calls x{len(result.tool_calls)})", "chars": len(result.response or ""), "auto_key": None, "msg_idx": len(messages) - 1})
 
-        round_outputs: list[dict] = []
+        round_outputs: list[ToolCallResult] = []
         for tc in result.tool_calls:
             tc_id     = tc.get("id", "")
             tc_func   = tc.get("function", {})
@@ -1053,7 +1059,15 @@ def _run_tool_loop(
                     result_content = f"[SKILL_ERROR] {result_content}"
             except Exception as exc:
                 result_content = f"[SKILL_ERROR] Error executing {func_name}: {exc}"
-                output = {"function": func_name, "module": "", "arguments": arguments, "result": result_content, "is_error": True}
+                output = ToolCallResult(
+                    tool=func_name,
+                    function=func_name,
+                    module="",
+                    arguments=arguments,
+                    result=result_content,
+                    status="error",
+                    error=str(exc),
+                )
 
             # Auto-save large results to scratchpad; cap message to protect context budget.
             # Scratchpad reader calls (scratch_load, scratch_peek, etc.) are exempt - the data
@@ -1167,121 +1181,109 @@ def orchestrate_prompt(
     from agent_core.skills_catalog_builder import load_skills_payload
 
     user_prompt = resolve_tokens(user_prompt)
+    active_session_id = session_context.session_id if session_context is not None else "default"
 
-    # -- Auto-reload catalog if skills_summary.md has been updated since last load --
-    if config.skills_summary_path and config.skills_summary_path.exists():
-        current_mtime = config.skills_summary_path.stat().st_mtime
-        if current_mtime != config.catalog_mtime:
-            config.skills_payload  = load_skills_payload(config.skills_summary_path)
-            config.catalog_mtime   = current_mtime
-            logger.log_file_only("[catalog] skills catalog reloaded (file changed on disk)")
+    with bind_session(active_session_id):
+        # -- Auto-reload catalog if the runtime JSON catalog has been updated since last load --
+        if config.skills_catalog_path and config.skills_catalog_path.exists():
+            current_mtime = config.skills_catalog_path.stat().st_mtime
+            if current_mtime != config.catalog_mtime:
+                config.skills_payload  = load_skills_payload(config.skills_catalog_path)
+                config.catalog_mtime   = current_mtime
+                logger.log_file_only("[catalog] skills catalog reloaded (file changed on disk)")
 
-    _log_section("ORCHESTRATION RUN")
-    _log(f"Model:          {config.resolved_model}")
-    _log(f"Context window: {config.num_ctx:,} tokens")
-    _log(f"Max rounds:     {config.max_iterations}")
-    _log(f"Prompt:         {user_prompt[:300]}{' ...' if len(user_prompt) > 300 else ''}")
+        _log_section("ORCHESTRATION RUN")
+        _log(f"Model:          {config.resolved_model}")
+        _log(f"Context window: {config.num_ctx:,} tokens")
+        _log(f"Max rounds:     {config.max_iterations}")
+        _log(f"Prompt:         {user_prompt[:300]}{' ...' if len(user_prompt) > 300 else ''}")
 
-    # -- Memory --
-    _log_file_only("[progress] Storing prompt memories...")
-    # Persist any facts in the prompt before tool calls run, so the turn is captured even on failure.
-    # Skip for slash commands and very short prompts - they cannot contain storable facts.
-    if user_prompt.startswith("/") or len(user_prompt.split()) < 4:
-        memory_store_result = "Memory storage skipped."
-    else:
-        memory_store_result = store_prompt_memories(user_prompt=user_prompt)
-    _log_file_only("[progress] Recalling relevant memories...")
-    # Pull the most relevant prior memories to inject as context in the system prompt.
-    recalled_memories   = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
+        # -- Memory --
+        _log_file_only("[progress] Storing prompt memories...")
+        # Persist any facts in the prompt before tool calls run, so the turn is captured even on failure.
+        # Skip for slash commands and very short prompts - they cannot contain storable facts.
+        if user_prompt.startswith("/") or len(user_prompt.split()) < 4:
+            memory_store_result = "Memory storage skipped."
+        else:
+            memory_store_result = store_prompt_memories(user_prompt=user_prompt)
+        _log_file_only("[progress] Recalling relevant memories...")
+        recalled_memories   = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
 
-    _log_section("MEMORY")
-    _log(memory_store_result)
-    _log(recalled_memories)
+        _log_section("MEMORY")
+        _log(memory_store_result)
+        _log(recalled_memories)
 
-    ambient_system_info = get_static_system_info_string()
-    _log_section("AMBIENT SYSTEM INFO")
-    _log(ambient_system_info)
+        ambient_system_info = get_static_system_info_string()
+        _log_section("AMBIENT SYSTEM INFO")
+        _log(ambient_system_info)
 
-    # -- Build tool definitions from the skills catalog --
-    # Convert the catalog into JSON Schema objects sent to the model on every tool-calling round.
-    tool_defs = build_tool_definitions(config.skills_payload)
-    _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
+        tool_defs = build_tool_definitions(config.skills_payload)
+        _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
 
-    # -- Build system message --
-    system_message = _build_system_message(ambient_system_info, session_context, config.skills_payload, scratchpad_visible_keys, conversation_summary)
+        system_message = _build_system_message(ambient_system_info, session_context, config.skills_payload, scratchpad_visible_keys, conversation_summary)
 
-    # -- Build initial messages list --
-    messages: list[dict] = [{"role": "system", "content": system_message}]
-    _context_map: list[dict] = [
-        {"round": 0, "role": "sys", "label": "system prompt", "chars": len(system_message), "auto_key": None, "msg_idx": 0},
-    ]
-    if conversation_history:
-        _hist_start = len(messages)
-        _hist_chars = sum(len(m.get("content") or "") for m in conversation_history)
-        # Store msg_idx (first history message) and msg_idx_end (last) so the block can
-        # be compacted as a unit when context pressure is high.
-        _context_map.append({"round": 0, "role": "hist", "label": f"history ({len(conversation_history)} msgs)", "chars": _hist_chars, "auto_key": None, "msg_idx": _hist_start, "msg_idx_end": _hist_start + len(conversation_history) - 1})
-        messages.extend(conversation_history)
-    messages.append({"role": "user", "content": user_prompt})
-    _context_map.append({"round": 0, "role": "user", "label": trunc(user_prompt, 50), "chars": len(user_prompt), "auto_key": None, "msg_idx": len(messages) - 1})
+        messages: list[dict] = [{"role": "system", "content": system_message}]
+        _context_map: list[dict] = [
+            {"round": 0, "role": "sys", "label": "system prompt", "chars": len(system_message), "auto_key": None, "msg_idx": 0},
+        ]
+        if conversation_history:
+            _hist_start = len(messages)
+            _hist_chars = sum(len(m.get("content") or "") for m in conversation_history)
+            _context_map.append({"round": 0, "role": "hist", "label": f"history ({len(conversation_history)} msgs)", "chars": _hist_chars, "auto_key": None, "msg_idx": _hist_start, "msg_idx_end": _hist_start + len(conversation_history) - 1})
+            messages.extend(conversation_history)
+        messages.append({"role": "user", "content": user_prompt})
+        _context_map.append({"round": 0, "role": "user", "label": trunc(user_prompt, 50), "chars": len(user_prompt), "auto_key": None, "msg_idx": len(messages) - 1})
 
-    # -- Tool calling loop --
-    # Build once for the entire run - avoids re-scanning the catalog on every tool invocation.
-    # Store delegate runtime context in thread-local so delegate_subrun() can access the
-    # active logger, config, and depth without passing orchestrator internals through skill args.
-    _prev_delegate_logger = getattr(_delegate_tls, "logger", None)
-    _prev_delegate_depth  = getattr(_delegate_tls, "delegate_depth", 0)
-    _prev_delegate_config = getattr(_delegate_tls, "config", None)
+        _prev_delegate_logger = getattr(_delegate_tls, "logger", None)
+        _prev_delegate_depth  = getattr(_delegate_tls, "delegate_depth", 0)
+        _prev_delegate_config = getattr(_delegate_tls, "config", None)
 
-    _delegate_tls.logger         = logger
-    _delegate_tls.delegate_depth = delegate_depth
-    _delegate_tls.config         = config
-    catalog_gates = build_catalog_gates(config.skills_payload)
+        _delegate_tls.logger         = logger
+        _delegate_tls.delegate_depth = delegate_depth
+        _delegate_tls.config         = config
+        catalog_gates = build_catalog_gates(config.skills_payload)
 
-    try:
-        final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs = _run_tool_loop(
-            config        = config,
-            messages      = messages,
-            tool_defs     = tool_defs,
-            catalog_gates = catalog_gates,
-            context_map   = _context_map,
-            user_prompt   = user_prompt,
-            logger        = logger,
-            quiet         = quiet,
-        )
-
-        # Extract and write any WRITE_FILE blocks embedded in the model's text response.
-        _file_blocks_written = _write_file_blocks(final_response) if final_response else []
-        if _file_blocks_written:
-            _log_file_only(f"[file-blocks] Wrote {len(_file_blocks_written)} file(s): {', '.join(_file_blocks_written)}")
-
-        _log_section_file_only("TOOL CALL SUMMARY")
-        _log_file_only(_format_tool_outputs(tool_outputs))
-        _log_section_file_only("CONTEXT MAP")
-        _log_file_only(format_context_map(_context_map, config.num_ctx))
-        _log_section_file_only("SCRATCHPAD STATE")
-        _log_file_only(_scratch_list())
-        _log(f"Total: {prompt_tokens:,} prompt tokens | {completion_tokens:,} completion tokens")
-
-        # Store last-run state for ad-hoc inspection via /compact and other slash commands.
-        global _last_context_map, _last_messages
-        with _last_run_lock:
-            _last_context_map = _context_map
-            _last_messages    = messages
-
-        # Archive this turn's skill outputs so later turns can reference prior results without re-running.
-        if session_context is not None and run_success and tool_outputs:
-            session_context.add_turn(
-                user_prompt=user_prompt,
-                assistant_response=final_response,
-                skill_outputs=tool_outputs,
+        try:
+            final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs = _run_tool_loop(
+                config        = config,
+                messages      = messages,
+                tool_defs     = tool_defs,
+                catalog_gates = catalog_gates,
+                context_map   = _context_map,
+                user_prompt   = user_prompt,
+                logger        = logger,
+                quiet         = quiet,
             )
 
-        return final_response, prompt_tokens, completion_tokens, run_success, final_tps
-    finally:
-        _delegate_tls.logger         = _prev_delegate_logger
-        _delegate_tls.delegate_depth = _prev_delegate_depth
-        _delegate_tls.config         = _prev_delegate_config
+            _file_blocks_written = _write_file_blocks(final_response) if final_response else []
+            if _file_blocks_written:
+                _log_file_only(f"[file-blocks] Wrote {len(_file_blocks_written)} file(s): {', '.join(_file_blocks_written)}")
+
+            _log_section_file_only("TOOL CALL SUMMARY")
+            _log_file_only(_format_tool_outputs(tool_outputs))
+            _log_section_file_only("CONTEXT MAP")
+            _log_file_only(format_context_map(_context_map, config.num_ctx))
+            _log_section_file_only("SCRATCHPAD STATE")
+            _log_file_only(_scratch_list())
+            _log(f"Total: {prompt_tokens:,} prompt tokens | {completion_tokens:,} completion tokens")
+
+            global _last_context_map, _last_messages
+            with _last_run_lock:
+                _last_context_map = _context_map
+                _last_messages    = messages
+
+            if session_context is not None and run_success and tool_outputs:
+                session_context.add_turn(
+                    user_prompt=user_prompt,
+                    assistant_response=final_response,
+                    skill_outputs=tool_outputs,
+                )
+
+            return final_response, prompt_tokens, completion_tokens, run_success, final_tps
+        finally:
+            _delegate_tls.logger         = _prev_delegate_logger
+            _delegate_tls.delegate_depth = _prev_delegate_depth
+            _delegate_tls.config         = _prev_delegate_config
 
 
 # ====================================================================================================
@@ -1381,7 +1383,7 @@ def delegate_subrun(
         num_ctx             = _config.num_ctx,
         max_iterations      = child_iterations,
         skills_payload      = child_payload,
-        skills_summary_path = None,
+        skills_catalog_path = None,
         catalog_mtime       = 0.0,
     )
 

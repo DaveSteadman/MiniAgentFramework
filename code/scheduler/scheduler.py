@@ -237,7 +237,7 @@ class TaskQueue:
                         # the /logs/stream SSE endpoint.
                         try:
                             import traceback
-                            from ollama_client import log_to_session
+                            from agent_core.ollama_client import log_to_session
                             log_to_session(
                                 f"[scheduler] Task '{item['name']}' raised an exception:\n"
                                 + traceback.format_exc()

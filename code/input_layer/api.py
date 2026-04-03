@@ -78,14 +78,19 @@ from agent_core.orchestration import get_sandbox_enabled
 from agent_core.orchestration import orchestrate_prompt
 from agent_core.orchestration import request_stop
 from agent_core.orchestration import set_sandbox_enabled
+from agent_core.scratchpad import scratch_clear
+from input_layer.api_routes_logs import register_log_routes
+from input_layer.api_routes_sessions import register_session_routes
+from input_layer.api_routes_status import register_status_routes
+from input_layer.api_routes_tasks import register_task_routes
 from utils.runtime_logger import SessionLogger
 from utils.runtime_logger import create_log_file_path
 from input_layer.chat_input import append_to_history
 from input_layer.chat_input import load_history
 from scheduler.scheduler import is_task_due
 from scheduler.scheduler import task_queue
-from input_layer.slash_commands import SlashCommandContext
 from input_layer.slash_commands import handle as handle_slash
+from input_layer.slash_command_context import SlashCommandContext
 from utils.workspace_utils import get_chatsessions_day_dir
 from utils.workspace_utils import get_chatsessions_dir
 from utils.workspace_utils import get_chatsessions_named_dir
@@ -258,30 +263,14 @@ def serve_favicon():
     return FileResponse(str(ico), media_type="image/x-icon", headers={"Cache-Control": "no-cache"})
 
 
-# ====================================================================================================
-# MARK: STATUS ENDPOINTS
-# ====================================================================================================
-
-@app.get("/version")
-def get_version():
-    """Return the framework version string."""
-    return {"version": __version__}
-
-
-@app.get("/status/ollama")
-def get_ollama_status():
-    """Return current Ollama host, context size, and running model rows from 'ollama ps'."""
-    try:
-        rows = get_ollama_ps_rows()
-    except Exception as exc:
-        rows = []
-    return {
-        "host":    get_active_host(),
-        "model":   get_active_model(),
-        "num_ctx": get_active_num_ctx(),
-        "rows":    rows,
-        "ts":      datetime.now().isoformat(timespec="seconds"),
-    }
+register_status_routes(
+    app,
+    get_active_host=get_active_host,
+    get_active_model=get_active_model,
+    get_active_num_ctx=get_active_num_ctx,
+    get_ollama_ps_rows=get_ollama_ps_rows,
+    version=__version__,
+)
 
 
 # ====================================================================================================
@@ -340,61 +329,14 @@ def settings_sandbox_post(enabled: bool):
     return {"sandbox": get_sandbox_enabled()}
 
 
-# ====================================================================================================
-# MARK: TASK ENDPOINTS
-# ====================================================================================================
-
-def _next_fire(task: dict, last: datetime | None, now: datetime) -> str | None:
-    """Return a rough ISO next-fire time string, or None if unknown."""
-    schedule = task.get("schedule", {})
-    kind     = schedule.get("type", "")
-    if kind == "interval":
-        minutes = int(schedule.get("minutes", 60))
-        base    = last if last else now
-        nf      = base.replace(second=0, microsecond=0)
-        while nf <= now:
-            nf = nf + timedelta(minutes=minutes)
-        return nf.isoformat(timespec="seconds")
-    if kind == "daily":
-        t_str = schedule.get("time", "00:00")
-        h, m  = (int(x) for x in t_str.split(":"))
-        nf    = now.replace(hour=h, minute=m, second=0, microsecond=0)
-        if nf <= now:
-            nf = nf + timedelta(days=1)
-        return nf.isoformat(timespec="seconds")
-    return None
-
-
-@app.get("/tasks")
-def get_tasks():
-    """Return enabled scheduled tasks with last-run and estimated next-fire times."""
-    now    = datetime.now()
-    result = []
-    for task in _enabled_tasks:
-        name  = task.get("name", "")
-        last  = _last_run.get(name)
-        entry = {
-            "name":        name,
-            "description": task.get("description", ""),
-            "schedule":    task.get("schedule", {}),
-            "last_run":    last.isoformat(timespec="seconds") if last else None,
-            "next_fire":   _next_fire(task, last, now),
-            "due_now":     is_task_due(task, last, now),
-        }
-        result.append(entry)
-    return {"tasks": result, "ts": now.isoformat(timespec="seconds")}
-
-
-@app.get("/queue")
-def get_queue():
-    """Return the total queued prompt count and the next prompts to be serviced."""
-    queue_state = task_queue.get_state(pending_limit=_QUEUE_PREVIEW_LIMIT)
-    return {
-        "queued_prompt_count": queue_state.get("queued_prompt_count", 0),
-        "next_prompts":        queue_state.get("next_prompts", []),
-        "next_prompts_limit":  queue_state.get("next_prompts_limit", _QUEUE_PREVIEW_LIMIT),
-        "updated_at":          queue_state.get("updated_at"),
-    }
+register_task_routes(
+    app,
+    get_enabled_tasks=lambda: _enabled_tasks,
+    get_last_run=lambda: _last_run,
+    is_task_due=is_task_due,
+    task_queue=task_queue,
+    queue_preview_limit=_QUEUE_PREVIEW_LIMIT,
+)
 
 
 # ====================================================================================================
@@ -426,76 +368,7 @@ def post_history(body: HistoryAppendRequest):
     return {"entries": entries[-_HISTORY_LIMIT:]}
 
 
-# ====================================================================================================
-# MARK: TIMELINE ENDPOINT
-# ====================================================================================================
-
-@app.get("/timeline")
-def get_timeline(minutes_before: int = 40, minutes_after: int = 40):
-    """Return a minute-resolution timeline centred on now.
-
-    Each slot has: offset (int minutes from now), hhmm (str), is_now (bool),
-    task_name (str | None), last_run (str | None).
-    """
-    now     = datetime.now()
-    now_min = now.replace(second=0, microsecond=0)
-    slots   = []
-
-    for offset in range(-minutes_before, minutes_after + 1):
-        slot_dt   = now_min + timedelta(minutes=offset)
-        task_name = _task_at_slot(slot_dt, now_min)
-        last      = None
-        if task_name:
-            lr = _last_run.get(task_name)
-            last = lr.isoformat(timespec="seconds") if lr else None
-        slots.append({
-            "offset":    offset,
-            "hhmm":      slot_dt.strftime("%H:%M"),
-            "is_now":    offset == 0,
-            "task_name": task_name,
-            "last_run":  last,
-        })
-
-    # Also report active task from queue so the UI can mark it.
-    q_state    = task_queue.get_state()
-    active_now = q_state.get("active", {}) or {}
-    return {
-        "slots":       slots,
-        "active_task": active_now.get("name"),
-        "ts":          now.isoformat(timespec="seconds"),
-    }
-
-
-def _task_at_slot(slot_dt: datetime, now_min: datetime) -> str | None:
-    """Return the name of the first task that fires at slot_dt, or None."""
-    for task in _enabled_tasks:
-        name  = task.get("name", "")
-        sched = task.get("schedule", {})
-        stype = sched.get("type", "")
-
-        if stype == "daily":
-            raw = sched.get("time", "00:00")
-            try:
-                hh, mm = map(int, raw.split(":"))
-            except ValueError:
-                continue
-            fire_dt = slot_dt.replace(hour=hh, minute=mm, second=0, microsecond=0)
-            if fire_dt == slot_dt:
-                return name
-
-        elif stype == "interval":
-            interval_m = int(sched.get("minutes", 60))
-            last       = _last_run.get(name)
-            if last is None:
-                # Would have fired at startup minute.
-                if slot_dt == now_min:
-                    return name
-            else:
-                next_fire = last.replace(second=0, microsecond=0) + timedelta(minutes=interval_m)
-                if next_fire == slot_dt:
-                    return name
-
-    return None
+# timeline route is registered by register_task_routes()
 
 
 # ====================================================================================================
@@ -545,185 +418,8 @@ def _handle_stoprun_immediate(run_id: str, run_q: "queue.Queue") -> None:
 
 
 # ====================================================================================================
-# MARK: SESSION ENDPOINTS
+# MARK: SESSION HELPERS
 # ====================================================================================================
-
-class PromptRequest(BaseModel):
-    prompt: str
-
-
-@app.post("/sessions/{session_id}/prompt")
-def post_prompt(session_id: str, body: PromptRequest):
-    """Enqueue a prompt for a session. Returns the run_id immediately.
-
-    Slash commands (inputs starting with '/') are routed through the slash command
-    processor rather than orchestrate_prompt.
-    """
-    _validate_session_id(session_id)
-
-    if not body.prompt or not body.prompt.strip():
-        raise HTTPException(status_code=400, detail="prompt cannot be empty")
-
-    if _config is None:
-        raise HTTPException(status_code=503, detail="API not yet initialised")
-
-    prompt_text = body.prompt.strip()
-    run_id      = f"api_{session_id}_{uuid.uuid4().hex}"
-    run_q       = _make_run_event_queue(run_id)
-
-    # /stoprun is handled immediately - it must not join the queue because its
-    # entire purpose is to act on the currently-running and pending items.
-    if prompt_text.lower() == "/stoprun":
-        _handle_stoprun_immediate(run_id, run_q)
-        return {"run_id": run_id, "session_id": session_id, "queued": True}
-
-    def _run(_prompt=prompt_text) -> None:
-        # Load history and session context at execution time, not enqueue time.
-        # This prevents rapid back-to-back requests from overwriting each other's turns.
-        persist             = get_chatsessions_day_dir() / f"{session_id}.json"
-        ctx                 = SessionContext(session_id=session_id, persist_path=persist)
-        history, summaries  = _load_session(session_id)
-        _queue_run_event(run_q, {"type": "start", "run_id": run_id, "prompt": _prompt}, priority=True)
-        try:
-            if _prompt.startswith("/"):
-                # Route through the slash command processor.
-                output_lines: list[str] = []
-                streamed_output = False
-
-                def _slash_output(text: str, level: str = "info") -> None:
-                    nonlocal streamed_output
-                    output_lines.append(text)
-                    push_log_line(f"[slash] {text}")
-
-                    log_match = _LOG_FILE_RE.match(text.strip())
-                    if log_match:
-                        log_path = log_match.group(1).strip()
-                        _set_latest_log_path(log_path)
-                        _queue_run_event(run_q, {
-                            "type":   "log_file",
-                            "run_id": run_id,
-                            "path":   log_path,
-                        }, priority=True)
-                        streamed_output = True
-                        return
-
-                    agent_match = _TURN_AGENT_RE.match(text)
-                    if agent_match:
-                        _queue_run_event(run_q, {
-                            "type":     "test_agent_response",
-                            "run_id":   run_id,
-                            "turn":     int(agent_match.group(1)),
-                            "response": agent_match.group(2),
-                        }, priority=True)
-                        streamed_output = True
-                        return
-
-                    metrics_match = _TURN_METRICS_RE.match(text)
-                    if metrics_match:
-                        _queue_run_event(run_q, {
-                            "type":   "test_agent_metrics",
-                            "run_id": run_id,
-                            "turn":   int(metrics_match.group(1)),
-                            "tokens": int(metrics_match.group(2)),
-                            "tps":    metrics_match.group(3),
-                        }, priority=True)
-                        streamed_output = True
-                        return
-
-                    test_complete_match = _TEST_COMPLETE_RE.match(text)
-                    if test_complete_match:
-                        _queue_run_event(run_q, {
-                            "type":   "test_complete",
-                            "run_id": run_id,
-                            "text":   text,
-                            "level":  level,
-                        }, priority=True)
-                        streamed_output = True
-                        return
-
-                    _queue_run_event(run_q, {
-                        "type":   "progress",
-                        "run_id": run_id,
-                        "text":   text,
-                        "level":  level,
-                    })
-                    streamed_output = True
-
-                def _do_switch_session(new_session_id: str, name: str) -> None:
-                    _queue_run_event(run_q, {
-                        "type":       "switch_session",
-                        "run_id":     run_id,
-                        "session_id": new_session_id,
-                        "name":       name,
-                    }, priority=True)
-
-                def _do_rename_session(new_session_id: str, name: str) -> None:
-                    _queue_run_event(run_q, {
-                        "type":       "rename_session",
-                        "run_id":     run_id,
-                        "session_id": new_session_id,
-                        "name":       name,
-                    }, priority=True)
-
-                slash_ctx = SlashCommandContext(
-                    config          = _config,
-                    output          = _slash_output,
-                    clear_history   = lambda: (history.clear(), ctx.clear(), _save_session(session_id, history, [], 0, 0)),
-                    session_context = ctx,
-                    session_id      = session_id,
-                    switch_session  = _do_switch_session,
-                    rename_session  = _do_rename_session,
-                )
-                handled = handle_slash(_prompt, slash_ctx)
-                if not streamed_output:
-                    response = "\n".join(output_lines) if output_lines else (
-                        "(done)" if handled else f"Unknown command: {_prompt.split()[0]}"
-                    )
-                    _queue_run_event(run_q, {
-                        "type":     "response",
-                        "run_id":   run_id,
-                        "response": response,
-                        "tokens":   0,
-                        "tps":      "0",
-                    }, priority=True)
-            else:
-                log_path = create_log_file_path(log_dir=_LOG_DIR)
-                _set_latest_log_path(log_path)
-                # Notify the run stream client which log file to tail.
-                _queue_run_event(run_q, {"type": "log_file", "run_id": run_id, "path": str(log_path)}, priority=True)
-                with SessionLogger(log_path) as run_logger:
-                    run_logger.log_section_file_only(f"API SESSION: {session_id}")
-                    summary_block = _build_summary_block(summaries)
-                    response, p_tokens, _c, _ok, tps = orchestrate_prompt(
-                        user_prompt           = _prompt,
-                        config                = _config,
-                        logger                = run_logger,
-                        conversation_history  = history.as_list() or None,
-                        session_context       = ctx,
-                        quiet                 = True,
-                        conversation_summary  = summary_block or None,
-                    )
-                    tps_str = f"{tps:.1f}" if tps > 0 else "0"
-                    history.add(_prompt, response)
-                    summaries = _save_session(session_id, history, summaries, p_tokens, get_active_num_ctx())
-                    _queue_run_event(run_q, {
-                        "type":     "response",
-                        "run_id":   run_id,
-                        "response": response,
-                        "tokens":   p_tokens,
-                        "tps":      tps_str,
-                    }, priority=True)
-        except Exception as exc:
-            _queue_run_event(run_q, {"type": "error", "run_id": run_id, "message": str(exc)}, priority=True)
-        finally:
-            finish_run_event_queue(run_id)
-
-    # Use run_id as the queue name so identical prompts submitted in quick succession
-    # are never deduplicated - dedup only makes sense for scheduled tasks, not user input.
-    task_queue.enqueue(run_id, "api_chat", _run, label=prompt_text[:48])
-    return {"run_id": run_id, "session_id": session_id, "queued": True}
-
-
 def _session_path(session_id: str) -> Path:
     """Return the canonical session file path - named/ subfolder first, then root."""
     named = get_chatsessions_named_dir() / f"{session_id}.json"
@@ -868,57 +564,6 @@ def _save_session(
     return summaries
 
 
-@app.get("/sessions/{session_id}/history")
-def get_session_history(session_id: str):
-    """Return the conversation history for a session."""
-    _validate_session_id(session_id)
-    history, _summaries = _load_session(session_id)
-    return {"session_id": session_id, "turns": history.as_list()}
-
-
-# ====================================================================================================
-# MARK: LOG ENDPOINTS
-# ====================================================================================================
-
-@app.get("/logs")
-def list_logs():
-    """Return a listing of available log date directories and files."""
-    result = []
-    if _LOG_DIR.exists():
-        for day_dir in sorted(_LOG_DIR.iterdir(), reverse=True):
-            if day_dir.is_dir():
-                files = sorted([f.name for f in day_dir.glob("*.txt")], reverse=True)
-                result.append({"date": day_dir.name, "files": files})
-    return {"log_dirs": result}
-
-
-@app.get("/logs/latest")
-def get_latest_log():
-    """Return the absolute path of the most recent logfile, if one exists."""
-    latest = _get_latest_log_file()
-    if latest is None:
-        return {"path": None}
-    _set_latest_log_path(latest)
-    return {"path": str(latest)}
-
-
-@app.get("/logs/{date}/{filename}")
-def get_log_file(date: str, filename: str):
-    """Return the content of a specific log file."""
-    # Sanitise inputs - allow only safe characters to prevent path traversal.
-    if not all(c.isalnum() or c in "-_." for c in date + filename):
-        raise HTTPException(status_code=400, detail="Invalid path characters")
-    log_path = _LOG_DIR / date / filename
-    if not log_path.exists() or not log_path.is_file():
-        raise HTTPException(status_code=404, detail="Log file not found")
-    # Ensure the resolved path is still inside _LOG_DIR.
-    try:
-        log_path.resolve().relative_to(_LOG_DIR.resolve())
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Path outside log directory")
-    return {"lines": log_path.read_text(encoding="utf-8", errors="replace").splitlines()}
-
-
 # ====================================================================================================
 # MARK: SSE HELPER
 # ====================================================================================================
@@ -926,45 +571,6 @@ def get_log_file(date: str, filename: str):
 def _sse(data: dict) -> str:
     """Format a dict as an SSE data line."""
     return f"data: {json.dumps(data)}\n\n"
-
-
-# ====================================================================================================
-# MARK: LOG STREAM SSE
-# ====================================================================================================
-
-@app.get("/logs/stream")
-def stream_logs():
-    """SSE endpoint: streams new log lines as they are broadcast via push_log_line()."""
-    # Send the last N lines from the most recent log file as backfill.
-    backfill: list[dict] = _get_log_backfill()
-
-    def _generate():
-        for item in backfill:
-            yield _sse(item)
-
-        # Stream live events until client disconnects (GeneratorExit) or shutdown.
-        subscriber: queue.Queue = queue.Queue(maxsize=1000)
-        with _log_subscribers_lock:
-            _log_subscribers.append(subscriber)
-
-        try:
-            while not _shutdown_event.is_set():
-                try:
-                    item = subscriber.get(timeout=_LOG_POLL_SECS)
-                    yield _sse(item)
-                except queue.Empty:
-                    # Send a keepalive comment so the browser doesn't time out.
-                    yield ": keepalive\n\n"
-        except GeneratorExit:
-            pass
-        finally:
-            with _log_subscribers_lock:
-                try:
-                    _log_subscribers.remove(subscriber)
-                except ValueError:
-                    pass
-
-    return StreamingResponse(_generate(), media_type="text/event-stream")
 
 
 # ====================================================================================================
@@ -1018,95 +624,48 @@ def _get_latest_log_file() -> Path | None:
     return None
 
 
-# ----------------------------------------------------------------------------------------------------
+register_session_routes(
+    app,
+    config_getter=lambda: _config,
+    validate_session_id=_validate_session_id,
+    make_run_event_queue=_make_run_event_queue,
+    queue_run_event=_queue_run_event,
+    finish_run_event_queue=finish_run_event_queue,
+    handle_stoprun_immediate=_handle_stoprun_immediate,
+    load_session=_load_session,
+    save_session=_save_session,
+    build_summary_block=_build_summary_block,
+    create_session_context=SessionContext,
+    clear_session_scratch=scratch_clear,
+    make_slash_context=SlashCommandContext,
+    handle_slash=handle_slash,
+    push_log_line=push_log_line,
+    log_file_re=_LOG_FILE_RE,
+    turn_agent_re=_TURN_AGENT_RE,
+    turn_metrics_re=_TURN_METRICS_RE,
+    test_complete_re=_TEST_COMPLETE_RE,
+    set_latest_log_path=_set_latest_log_path,
+    log_dir=_LOG_DIR,
+    create_log_file_path=create_log_file_path,
+    session_logger_cls=SessionLogger,
+    orchestrate_prompt=orchestrate_prompt,
+    get_active_num_ctx=get_active_num_ctx,
+    task_queue=task_queue,
+    run_queues=_run_event_queues,
+    run_queues_lock=_run_queues_lock,
+    sse=lambda data: _sse(data),
+    get_chatsessions_day_dir=get_chatsessions_day_dir,
+)
 
-@app.get("/logs/file")
-def stream_log_file(path: str):
-    """SSE endpoint: tail a specific log file by absolute path.
-
-    The path must resolve inside _LOG_DIR (validated server-side to prevent traversal).
-    Sends the entire existing file as backfill, then polls for new content by byte offset.
-    """
-    # Security: reject paths that do not resolve inside the log directory.
-    try:
-        requested = Path(path).resolve()
-        requested.relative_to(_LOG_DIR.resolve())
-    except (ValueError, OSError):
-        raise HTTPException(status_code=400, detail="Path outside log directory")
-
-    if not requested.is_file():
-        raise HTTPException(status_code=404, detail="Log file not found")
-
-    def _generate():
-        # Backfill: send entire existing file content first.
-        try:
-            content = requested.read_text(encoding="utf-8", errors="replace")
-            for ln in content.splitlines():
-                yield _sse({"type": "log", "text": ln, "ts": ""})
-        except Exception:
-            pass
-
-        # Set byte offset AFTER backfill so the tail loop only sends genuinely new bytes.
-        try:
-            offset = requested.stat().st_size
-        except OSError:
-            offset = 0
-
-        # Tail: poll for new bytes until shutdown or client disconnect.
-        try:
-            while not _shutdown_event.is_set():
-                try:
-                    size = requested.stat().st_size
-                    if size > offset:
-                        with requested.open("rb") as f:
-                            f.seek(offset)
-                            new_bytes = f.read()
-                        offset = size
-                        new_text = new_bytes.decode("utf-8", errors="replace")
-                        for ln in new_text.splitlines():
-                            if ln:
-                                yield _sse({
-                                    "type": "log",
-                                    "text": ln,
-                                    "ts":   datetime.now().isoformat(timespec="seconds"),
-                                })
-                    else:
-                        yield ": keepalive\n\n"
-                except OSError:
-                    yield ": keepalive\n\n"
-                time.sleep(_LOG_POLL_SECS)
-        except GeneratorExit:
-            pass
-
-    return StreamingResponse(_generate(), media_type="text/event-stream")
-
-
-# ====================================================================================================
-# MARK: RUN STREAM SSE
-# ====================================================================================================
-
-@app.get("/runs/{run_id}/stream")
-def stream_run(run_id: str):
-    """SSE endpoint: stream events for a specific run until it completes."""
-    with _run_queues_lock:
-        run_q = _run_event_queues.get(run_id)
-
-    if run_q is None:
-        raise HTTPException(status_code=404, detail="Run ID not found or already completed")
-
-    def _generate():
-        while True:
-            try:
-                item = run_q.get(timeout=2.0)
-                if item is None:
-                    # Sentinel: run finished. Clean up the queue entry now that we have
-                    # consumed all events (including this sentinel).
-                    with _run_queues_lock:
-                        _run_event_queues.pop(run_id, None)
-                    yield _sse({"type": "done", "run_id": run_id})
-                    break
-                yield _sse(item)
-            except queue.Empty:
-                yield ": keepalive\n\n"
-
-    return StreamingResponse(_generate(), media_type="text/event-stream")
+register_log_routes(
+    app,
+    log_dir=_LOG_DIR,
+    shutdown_event_getter=lambda: _shutdown_event,
+    log_poll_secs=_LOG_POLL_SECS,
+    sse=lambda data: _sse(data),
+    set_latest_log_path=_set_latest_log_path,
+    get_latest_log_file=_get_latest_log_file,
+    get_log_backfill=_get_log_backfill,
+    log_subscribers=_log_subscribers,
+    log_subscribers_lock=_log_subscribers_lock,
+)

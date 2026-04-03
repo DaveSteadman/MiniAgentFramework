@@ -5,8 +5,9 @@
 #
 # Scans the skills directory recursively for skill.md files, summarises each one into a structured
 # JSON record (skill name, module path, functions, inputs, outputs), then writes the full catalog
-# as a single skills_summary.md file. The orchestration layer uses this catalog to build
-# JSON Schema tool definitions sent to the model via /v1/chat/completions.
+# as a machine-readable JSON file for runtime use. A companion skills_summary.md file is produced
+# for human inspection only. The orchestration layer uses the JSON catalog to build JSON Schema
+# tool definitions sent to the model via /v1/chat/completions.
 #
 # Supports two summarisation modes:
 #   - LLM-assisted: sends the skill.md text to an Ollama model and parses the JSON response.
@@ -15,7 +16,8 @@
 # Usage:
 #   python skills_catalog_builder.py
 #   python skills_catalog_builder.py --no-llm
-#   python skills_catalog_builder.py --skills-root /path/to/skills --output /path/to/output.md
+#   python skills_catalog_builder.py --skills-root /path/to/skills --output-json /path/to/output.json
+#   python skills_catalog_builder.py --output-summary /path/to/output.md
 #
 # Related modules:
 #   - ollama_client.py    -- used for optional LLM-assisted summarisation
@@ -44,8 +46,11 @@ from utils.workspace_utils import normalize_module_path
 # ====================================================================================================
 SKILLS_SCHEMA_VERSION = "1.0"
 DEFAULT_SKILLS_ROOT   = Path(__file__).resolve().parent / "skills"
-DEFAULT_OUTPUT_FILE   = DEFAULT_SKILLS_ROOT / "skills_summary.md"
+DEFAULT_OUTPUT_FILE   = DEFAULT_SKILLS_ROOT / "skills_catalog.json"
+DEFAULT_SUMMARY_FILE  = DEFAULT_SKILLS_ROOT / "skills_summary.md"
 DEFAULT_SUMMARY_MODEL = "gpt-oss:20b"
+_LOADED_PAYLOAD_CACHE: dict[tuple[str, float, int], dict] = {}
+_TOOL_DEFS_CACHE: dict[str, list[dict]] = {}
 
 
 def _workspace_abspath(module_path: str) -> Path:
@@ -102,7 +107,8 @@ def _existing_callable_signatures(functions: list[str], module_path: str) -> lis
 def parse_catalog_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build JSON summary catalog for all skills.")
     parser.add_argument("--skills-root", default=str(DEFAULT_SKILLS_ROOT), help="Root folder containing skills.")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT_FILE), help="Output markdown summary file.")
+    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_FILE), help="Output JSON catalog file.")
+    parser.add_argument("--output-summary", default=str(DEFAULT_SUMMARY_FILE), help="Output markdown summary file.")
     parser.add_argument("--model", default=DEFAULT_SUMMARY_MODEL, help="Ollama model used for LLM summarization.")
     parser.add_argument(
         "--no-llm",
@@ -209,6 +215,32 @@ def _parse_triggers(skill_text: str) -> list[str]:
     return triggers
 
 
+def _section_body(skill_text: str, heading: str) -> str:
+    match = re.search(rf"##\s+{re.escape(heading)}\s*\n(.*?)(?=\n##\s|\Z)", skill_text, re.DOTALL | re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def _extract_function_signatures(skill_text: str, module: str) -> list[str]:
+    interface_body = _section_body(skill_text, "Interface")
+    if not interface_body:
+        interface_body = skill_text
+    candidates = re.findall(r"`([A-Za-z_][A-Za-z0-9_]*\([^`]*\))`", interface_body)
+    filtered: list[str] = []
+    for sig in candidates:
+        parsed = _parse_tool_signature(sig)
+        if parsed is None:
+            continue
+        name, params = parsed
+        if sig.endswith("(...)"):
+            continue
+        if params:
+            filtered.append(sig)
+        else:
+            filtered.append(f"{name}()")
+    deduped = list(dict.fromkeys(filtered))
+    return _existing_callable_signatures(deduped, module)
+
+
 # ----------------------------------------------------------------------------------------------------
 def summarize_locally(skill_md_path: Path) -> dict:
     # utf-8-sig strips the BOM if present, otherwise behaves like utf-8.
@@ -217,11 +249,7 @@ def summarize_locally(skill_md_path: Path) -> dict:
 
     # Use the first Markdown heading as the skill title, falling back to the parent directory name.
     title = next((line.lstrip("# ").strip() for line in lines if line.startswith("#")), skill_md_path.parent.name)
-    purpose = ""
-    for index, line in enumerate(lines):
-        if re.match(r"^##\s+(purpose|overview)$", line, re.IGNORECASE) and index + 1 < len(lines):
-            purpose = lines[index + 1]
-            break
+    purpose = _section_body(skill_text, "Purpose") or _section_body(skill_text, "Overview")
 
     # Extract the module path. Handles two formats:
     #   - Bullet:  "- Module: `path`"
@@ -241,9 +269,7 @@ def summarize_locally(skill_md_path: Path) -> dict:
     if trigger_match:
         trigger_keyword = trigger_match.group(1).strip()
 
-    # Collect all backtick-quoted function signatures (e.g. `func_name(args)`).
-    functions = re.findall(r"`([A-Za-z_][A-Za-z0-9_]*\([^`]*\))`", skill_text)
-    functions = sorted(set(_existing_callable_signatures(functions, module)))
+    functions = _extract_function_signatures(skill_text, module)
 
     # Extract bullet-point items from the Input and Output sections.
     input_section = re.findall(r"## Input(.*?)(##|$)", skill_text, re.DOTALL | re.IGNORECASE)
@@ -314,13 +340,34 @@ def normalize_summary(summary: dict, skill_md_path: Path) -> dict:
     for field_name in ["functions", "inputs", "outputs"]:
         field_value = normalized.get(field_name, [])
         if isinstance(field_value, list):
-            normalized[field_name] = [str(item).strip() for item in field_value if str(item).strip()]
+            normalized[field_name] = list(dict.fromkeys(str(item).strip() for item in field_value if str(item).strip()))
         elif isinstance(field_value, str) and field_value.strip():
             normalized[field_name] = [field_value.strip()]
         else:
             normalized[field_name] = []
 
     return normalized
+
+
+def build_skills_payload(
+    skills_root: Path,
+    use_llm: bool = False,
+    model_name: str = "",
+    num_ctx: int = 0,
+) -> dict:
+    skill_files = find_skill_files(skills_root)
+    summaries = [
+        normalize_summary(
+            summarize_skill(skill_file, use_llm=use_llm, model_name=model_name, num_ctx=num_ctx),
+            skill_file,
+        )
+        for skill_file in skill_files
+    ]
+    return {
+        "schema_version": SKILLS_SCHEMA_VERSION,
+        "skills_root": to_workspace_relative_path(skills_root),
+        "skills": summaries,
+    }
 
 
 # ====================================================================================================
@@ -359,13 +406,13 @@ def extract_first_json_object(text: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def _rebuild_skills_catalog_if_stale(skills_summary_path: Path) -> None:
-    """Rebuild skills_summary.md when any skill.md is newer than the summary (no-LLM fast path)."""
-    skills_root = skills_summary_path.parent
-    if not skills_summary_path.exists():
+def _rebuild_skills_catalog_if_stale(catalog_path: Path) -> None:
+    """Rebuild the runtime JSON catalog when any skill.md is newer than the catalog."""
+    skills_root = catalog_path.parent
+    if not catalog_path.exists():
         needs_rebuild = True
     else:
-        summary_mtime = skills_summary_path.stat().st_mtime
+        summary_mtime = catalog_path.stat().st_mtime
         skill_files   = list(skills_root.rglob("skill.md"))
         needs_rebuild = False
         for sf in skill_files:
@@ -392,26 +439,31 @@ def _rebuild_skills_catalog_if_stale(skills_summary_path: Path) -> None:
     if not needs_rebuild:
         return
 
-    skill_files  = find_skill_files(skills_root)
-    summaries    = [
-        normalize_summary(
-            summarize_skill(sf, use_llm=False, model_name="", num_ctx=0),
-            sf,
-        )
-        for sf in skill_files
-    ]
-    summary_text = render_summary_document(summaries, skills_summary_path)
-    skills_summary_path.parent.mkdir(parents=True, exist_ok=True)
-    skills_summary_path.write_text(summary_text, encoding="utf-8")
+    payload = build_skills_payload(skills_root, use_llm=False, model_name="", num_ctx=0)
+    write_skills_catalog(payload, catalog_path)
 
 
 # ----------------------------------------------------------------------------------------------------
-def load_skills_payload(skills_summary_path: Path) -> dict:
-    """Load the skills catalog JSON from *skills_summary_path*, rebuilding it if stale."""
-    _rebuild_skills_catalog_if_stale(skills_summary_path)
-    raw_text     = skills_summary_path.read_text(encoding="utf-8")
-    json_segment = extract_first_json_object(raw_text)
-    return json.loads(json_segment)
+def load_skills_payload(catalog_path: Path) -> dict:
+    """Load the skills catalog payload from a JSON catalog path or legacy summary path."""
+    catalog_path = Path(catalog_path)
+    if catalog_path.is_dir():
+        catalog_path = catalog_path / DEFAULT_OUTPUT_FILE.name
+    if catalog_path.suffix.lower() == ".md":
+        raw_text = catalog_path.read_text(encoding="utf-8")
+        json_segment = extract_first_json_object(raw_text)
+        return json.loads(json_segment)
+
+    _rebuild_skills_catalog_if_stale(catalog_path)
+    stat = catalog_path.stat()
+    cache_key = (str(catalog_path.resolve()), stat.st_mtime, stat.st_size)
+    cached = _LOADED_PAYLOAD_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+    _LOADED_PAYLOAD_CACHE.clear()
+    _LOADED_PAYLOAD_CACHE[cache_key] = payload
+    return payload
 
 
 # ====================================================================================================
@@ -485,6 +537,11 @@ def build_tool_definitions(skills_payload: dict) -> list[dict]:
     becomes one tool entry. Example-call entries in the functions list are silently skipped.
     Compatible with Ollama /v1/chat/completions, LM Studio, and OpenAI.
     """
+    payload_key = json.dumps(skills_payload, sort_keys=True, ensure_ascii=False)
+    cached = _TOOL_DEFS_CACHE.get(payload_key)
+    if cached is not None:
+        return cached
+
     tools:      list[dict] = []
     seen_names: set[str]   = set()
 
@@ -544,17 +601,13 @@ def build_tool_definitions(skills_payload: dict) -> list[dict]:
 
             tools.append({"type": "function", "function": tool_func})
 
+    _TOOL_DEFS_CACHE.clear()
+    _TOOL_DEFS_CACHE[payload_key] = tools
     return tools
 
 
 # ----------------------------------------------------------------------------------------------------
-def render_summary_document(summaries: list[dict], output_path: Path) -> str:
-    payload = {
-        "schema_version": SKILLS_SCHEMA_VERSION,
-        "skills_root": to_workspace_relative_path(output_path.parent),
-        "skills": summaries,
-    }
-
+def render_summary_document(payload: dict, output_path: Path) -> str:
     return "\n".join(
         [
             "# Skills Summary",
@@ -567,11 +620,22 @@ def render_summary_document(summaries: list[dict], output_path: Path) -> str:
     )
 
 
+def write_skills_catalog(payload: dict, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def write_skills_summary(payload: dict, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_summary_document(payload, output_path), encoding="utf-8")
+
+
 # ----------------------------------------------------------------------------------------------------
 def main() -> None:
     args        = parse_catalog_args()
     skills_root = Path(args.skills_root).resolve()
-    output_path = Path(args.output).resolve()
+    output_json_path = Path(args.output_json).resolve()
+    output_summary_path = Path(args.output_summary).resolve()
 
     skill_files = find_skill_files(skills_root=skills_root)
     if not skill_files:
@@ -580,25 +644,17 @@ def main() -> None:
     if not args.no_llm:
         ensure_ollama_running()
 
-    summaries = []
-    for skill_file in skill_files:
-        relative_skill_file = to_workspace_relative_path(skill_file)
-        print(f"Summarizing {relative_skill_file}...")
+    payload = build_skills_payload(
+        skills_root=skills_root,
+        use_llm=not args.no_llm,
+        model_name=args.model,
+        num_ctx=args.num_ctx,
+    )
+    write_skills_catalog(payload, output_json_path)
+    write_skills_summary(payload, output_summary_path)
 
-        # Use LLM summary when available, with deterministic local fallback for robustness.
-        summary = summarize_skill(
-            skill_md_path=skill_file,
-            use_llm=not args.no_llm,
-            model_name=args.model,
-            num_ctx=args.num_ctx,
-        )
-        summaries.append(normalize_summary(summary=summary, skill_md_path=skill_file))
-
-    summary_text = render_summary_document(summaries=summaries, output_path=output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(summary_text, encoding="utf-8")
-
-    print(f"Wrote {to_workspace_relative_path(output_path)} with {len(summaries)} skill summaries.")
+    print(f"Wrote {to_workspace_relative_path(output_json_path)} with {len(payload['skills'])} skill summaries.")
+    print(f"Wrote {to_workspace_relative_path(output_summary_path)} for human inspection.")
 
 
 # ----------------------------------------------------------------------------------------------------

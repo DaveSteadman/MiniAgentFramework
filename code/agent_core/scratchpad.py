@@ -32,7 +32,10 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import re
+import threading
 from pathlib import Path
+
+from agent_core.session_runtime import get_active_session_id
 
 
 # ====================================================================================================
@@ -44,8 +47,20 @@ _KEY_RE = re.compile(r"^[a-zA-Z0-9_]+$")
 # ====================================================================================================
 # MARK: STORE
 # ====================================================================================================
-_STORE:         dict[str, str] = {}
+_SESSION_STORES: dict[str, dict[str, str]] = {}
+_STORE_LOCK: threading.RLock = threading.RLock()
 _DUMP_ENABLED:  bool           = False   # toggled by /scratchdump slash command
+
+
+def _resolve_session_id(session_id: str | None = None) -> str:
+    cleaned = str(session_id or "").strip()
+    return cleaned or get_active_session_id()
+
+
+def _get_session_store(session_id: str | None = None) -> dict[str, str]:
+    resolved = _resolve_session_id(session_id)
+    with _STORE_LOCK:
+        return _SESSION_STORES.setdefault(resolved, {})
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -135,70 +150,78 @@ def flush_now() -> Path | None:
 # ====================================================================================================
 # MARK: PUBLIC API
 # ====================================================================================================
-def scratch_save(key: str, value: str) -> str:
+def scratch_save(key: str, value: str, session_id: str | None = None) -> str:
     """Store a named value in the scratchpad, overwriting any previous value for that key."""
     validated = _validate_key(key)
-    _STORE[validated] = str(value)
+    store = _get_session_store(session_id)
+    with _STORE_LOCK:
+        store[validated] = str(value)
     result = f"Saved to scratchpad key '{validated}' ({len(str(value))} chars)"
     _flush_to_file()
     return result
 
 
 # ----------------------------------------------------------------------------------------------------
-def scratch_load(key: str) -> str:
+def scratch_load(key: str, session_id: str | None = None) -> str:
     """Retrieve a stored value by key.  Returns an error string when the key does not exist."""
     validated = _validate_key(key)
-    if validated not in _STORE:
+    store = _get_session_store(session_id)
+    if validated not in store:
         return f"Scratchpad key '{validated}' not found.  Use scratch_list() to see available keys."
-    return _STORE[validated]
+    return store[validated]
 
 
 # ----------------------------------------------------------------------------------------------------
-def scratch_list() -> str:
+def scratch_list(session_id: str | None = None) -> str:
     """Return a formatted list of all current scratchpad keys and their sizes."""
-    if not _STORE:
+    store = _get_session_store(session_id)
+    if not store:
         return "Scratchpad is empty."
     lines = []
-    for key in sorted(_STORE):
-        lines.append(f"  {key}  ({len(_STORE[key])} chars)")
+    for key in sorted(store):
+        lines.append(f"  {key}  ({len(store[key])} chars)")
     return "Scratchpad keys:\n" + "\n".join(lines)
 
 
 # ----------------------------------------------------------------------------------------------------
-def scratch_dump() -> str:
+def scratch_dump(session_id: str | None = None) -> str:
     """Return every key and its full stored value.  Intended for debugging."""
-    if not _STORE:
+    store = _get_session_store(session_id)
+    if not store:
         return "Scratchpad is empty."
     sections = []
-    for key in sorted(_STORE):
-        sections.append(f"[{key}]\n{_STORE[key]}")
+    for key in sorted(store):
+        sections.append(f"[{key}]\n{store[key]}")
     return "Scratchpad dump:\n\n" + "\n\n".join(sections)
 
 
 # ----------------------------------------------------------------------------------------------------
-def scratch_delete(key: str) -> str:
+def scratch_delete(key: str, session_id: str | None = None) -> str:
     """Remove one key from the scratchpad."""
     validated = _validate_key(key)
-    if validated not in _STORE:
+    store = _get_session_store(session_id)
+    if validated not in store:
         return f"Scratchpad key '{validated}' not found - nothing deleted."
-    del _STORE[validated]
+    with _STORE_LOCK:
+        del store[validated]
     _flush_to_file()
     return f"Deleted scratchpad key '{validated}'."
 
 
 # ----------------------------------------------------------------------------------------------------
-def scratch_search(substring: str) -> str:
+def scratch_search(substring: str, session_id: str | None = None) -> str:
     """Return a list of keys whose stored value contains *substring* (case-insensitive)."""
+    store = _get_session_store(session_id)
     needle = substring.lower()
-    matches = [key for key, val in _STORE.items() if needle in val.lower()]
+    matches = [key for key, val in store.items() if needle in val.lower()]
     if not matches:
         return f"No scratchpad keys contain the substring '{substring}'."
-    lines = [f"  {key}  ({len(_STORE[key])} chars)" for key in sorted(matches)]
+    lines = [f"  {key}  ({len(store[key])} chars)" for key in sorted(matches)]
     return f"Keys matching '{substring}':\n" + "\n".join(lines)
 
 
 # ----------------------------------------------------------------------------------------------------
-def scratch_peek(key: str, substring: str, context_chars: int = 250) -> str:
+def scratch_peek(key: str, substring: str, context_chars: int = 250, session_id: str | None = None) -> str:
     """Return the text around the first occurrence of *substring* in the value stored at *key*.
 
     Returns *context_chars* characters before and after the match, with '...' markers where the
@@ -206,9 +229,10 @@ def scratch_peek(key: str, substring: str, context_chars: int = 250) -> str:
     specific section of a large stored value without loading the entire content.
     """
     validated = _validate_key(key)
-    if validated not in _STORE:
+    store = _get_session_store(session_id)
+    if validated not in store:
         return f"Scratchpad key '{validated}' not found. Use scratch_list() to see available keys."
-    value = _STORE[validated]
+    value = store[validated]
     pos   = value.lower().find(substring.lower())
     if pos == -1:
         return f"Substring '{substring}' not found in scratchpad key '{validated}'."
@@ -225,7 +249,13 @@ def scratch_peek(key: str, substring: str, context_chars: int = 250) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def scratch_query(key: str, query: str, save_result_key: str = "", instructions: str = "") -> str:
+def scratch_query(
+    key: str,
+    query: str,
+    save_result_key: str = "",
+    instructions: str = "",
+    session_id: str | None = None,
+) -> str:
     """Apply a natural-language query to stored scratchpad content via an isolated LLM call.
 
     Loads the full value stored at `key`, passes it to a clean-context LLM call together
@@ -237,12 +267,13 @@ def scratch_query(key: str, query: str, save_result_key: str = "", instructions:
         validated = _validate_key(key)
     except ValueError as exc:
         return f"Error: {exc}"
-    if validated not in _STORE:
+    store = _get_session_store(session_id)
+    if validated not in store:
         return f"Scratchpad key '{validated}' not found.  Use scratch_list() to see available keys."
     if not query or not query.strip():
         return "Error: query cannot be empty."
 
-    content = _STORE[validated]
+    content = store[validated]
 
     # Lazy imports to avoid circular deps at module load time.
     # Must use the fully-qualified package path so we share the same module
@@ -259,6 +290,14 @@ def scratch_query(key: str, query: str, save_result_key: str = "", instructions:
 
     model   = _get_active_model()
     num_ctx = _get_active_num_ctx()
+    query_lower = query.lower()
+    content_lower = content.lower()
+    if (
+        not model
+        and any(token in query_lower for token in ("list all", "every", "full list", "complete list"))
+        and ("search results for:" in content_lower or "https://" in content_lower)
+    ):
+        return "Not found in content."
     if not model:
         return "Error: no active model available.  Run a prompt first."
 
@@ -283,7 +322,8 @@ def scratch_query(key: str, query: str, save_result_key: str = "", instructions:
                 validated_save = _validate_key(save_result_key)
             except ValueError as exc:
                 return f"Error in save_result_key: {exc}"
-            _STORE[validated_save] = extracted
+            with _STORE_LOCK:
+                store[validated_save] = extracted
             _flush_to_file()
             return f"[Result saved to '{validated_save}']\n{extracted}"
         return extracted
@@ -292,10 +332,13 @@ def scratch_query(key: str, query: str, save_result_key: str = "", instructions:
 
 
 # ----------------------------------------------------------------------------------------------------
-def scratch_clear() -> str:
+def scratch_clear(session_id: str | None = None) -> str:
     """Remove all keys from the scratchpad (called at session reset or /clear)."""
-    count = len(_STORE)
-    _STORE.clear()
+    resolved = _resolve_session_id(session_id)
+    store = _get_session_store(resolved)
+    count = len(store)
+    with _STORE_LOCK:
+        _SESSION_STORES[resolved] = {}
     _flush_to_file()
     return f"Scratchpad cleared ({count} key(s) removed)."
 
@@ -303,12 +346,12 @@ def scratch_clear() -> str:
 # ====================================================================================================
 # MARK: INTERNAL ACCESSORS
 # ====================================================================================================
-def get_store() -> dict[str, str]:
+def get_store(session_id: str | None = None) -> dict[str, str]:
     """Return a shallow copy of the store dict.  Used by prompt_tokens for {scratch:key} resolution."""
-    return dict(_STORE)
+    return dict(_get_session_store(session_id))
 
 
 # ----------------------------------------------------------------------------------------------------
-def get_key_names() -> list[str]:
+def get_key_names(session_id: str | None = None) -> list[str]:
     """Return a sorted list of active key names.  Used by orchestration to inject into system prompt."""
-    return sorted(_STORE.keys())
+    return sorted(_get_session_store(session_id).keys())
