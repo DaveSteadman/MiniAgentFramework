@@ -78,6 +78,7 @@ from input_layer.slash_commands import SlashCommandContext
 from input_layer.slash_commands import handle as handle_slash
 from utils.workspace_utils import get_chatsessions_day_dir
 from utils.workspace_utils import get_chatsessions_dir
+from utils.workspace_utils import get_chatsessions_named_dir
 from utils.workspace_utils import get_logs_dir
 from utils.version import __version__
 
@@ -590,11 +591,30 @@ def post_prompt(session_id: str, body: PromptRequest):
                     })
                     streamed_output = True
 
+                def _do_switch_session(new_session_id: str, name: str) -> None:
+                    _queue_run_event(run_q, {
+                        "type":       "switch_session",
+                        "run_id":     run_id,
+                        "session_id": new_session_id,
+                        "name":       name,
+                    }, priority=True)
+
+                def _do_rename_session(new_session_id: str, name: str) -> None:
+                    _queue_run_event(run_q, {
+                        "type":       "rename_session",
+                        "run_id":     run_id,
+                        "session_id": new_session_id,
+                        "name":       name,
+                    }, priority=True)
+
                 slash_ctx = SlashCommandContext(
                     config          = _config,
                     output          = _slash_output,
                     clear_history   = lambda: (history.clear(), ctx.clear(), _save_session(session_id, history, [], 0, 0)),
                     session_context = ctx,
+                    session_id      = session_id,
+                    switch_session  = _do_switch_session,
+                    rename_session  = _do_rename_session,
                 )
                 handled = handle_slash(_prompt, slash_ctx)
                 if not streamed_output:
@@ -647,7 +667,10 @@ def post_prompt(session_id: str, body: PromptRequest):
 
 
 def _session_path(session_id: str) -> Path:
-    """Return the canonical cross-day session file path (root chatsessions dir)."""
+    """Return the canonical session file path - named/ subfolder first, then root."""
+    named = get_chatsessions_named_dir() / f"{session_id}.json"
+    if named.exists():
+        return named
     return get_chatsessions_dir() / f"{session_id}.json"
 
 

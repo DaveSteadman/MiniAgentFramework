@@ -7,7 +7,7 @@
 // MARK: CONFIG
 // ====================================================================================================
 const API_BASE          = "";           // same origin
-const SESSION_ID        = "web_" + Date.now();
+let   _sessionId        = "web_" + Date.now();  // mutable: /session resume changes this
 const POLL_OLLAMA_MS    = 10_000;
 const POLL_QUEUE_MS     = 3_000;
 const POLL_TIMELINE_MS  = 30_000;
@@ -58,6 +58,7 @@ const dom = {
     timelineQueue: () => $("timeline-queue"),
     log:          () => $("log-body"),
     chat:         () => $("chat-body"),
+    chatTitle:    () => $("chat-panel-title"),
     input:        () => $("chat-input"),
     sendBtn:      () => $("send-btn"),
 };
@@ -822,6 +823,16 @@ function listenRun(runId) {
             } else if (ev.type === "error") {
                 removeThinking(runId);
                 appendChatMessage("agent", "[Error: " + ev.message + "]");
+            } else if (ev.type === "rename_session") {
+                // Same chat, file renamed - update routing ID and title in-place; no history replay.
+                _sessionId = ev.session_id;
+                dom.chatTitle().textContent = ev.name || "";
+            } else if (ev.type === "switch_session") {
+                _sessionId = ev.session_id;
+                const label = ev.name || "";
+                dom.chatTitle().textContent = label;
+                appendChatMessage("agent", "\u2500\u2500\u2500 Session: " + (label || ev.session_id) + " \u2500\u2500\u2500");
+                _loadSessionHistory(ev.session_id);
             } else if (ev.type === "done") {
                 removeThinking(runId);
                 es.close();
@@ -836,6 +847,21 @@ function listenRun(runId) {
         removeThinking(runId);
         es.close();
     };
+}
+
+// ----------------------------------------------------------------------------------------------------
+
+async function _loadSessionHistory(sessionId) {
+    // Fetch saved turns for sessionId and replay them into the chat panel.
+    const data = await apiFetch("/sessions/" + encodeURIComponent(sessionId) + "/history");
+    if (!data || !Array.isArray(data.turns)) return;
+    const turns = data.turns;
+    for (let i = 0; i + 1 < turns.length; i += 2) {
+        const u = turns[i];
+        const a = turns[i + 1];
+        if (u && u.role === "user")      appendChatMessage("user",  u.content);
+        if (a && a.role === "assistant") appendChatMessage("agent", a.content);
+    }
 }
 
 // ====================================================================================================
@@ -888,7 +914,7 @@ function submitPrompt() {
 }
 
 async function _dispatchPrompt(text) {
-    const data = await apiFetch("/sessions/" + encodeURIComponent(SESSION_ID) + "/prompt", {
+    const data = await apiFetch("/sessions/" + encodeURIComponent(_sessionId) + "/prompt", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ prompt: text }),

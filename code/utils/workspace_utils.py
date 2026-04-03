@@ -17,8 +17,9 @@
 #   get_schedules_dir()        ->  <repo_root>/controldata/schedules/
 #   get_test_prompts_dir()     ->  <repo_root>/controldata/test_prompts/
 #   get_test_results_dir()     ->  <repo_root>/controldata/test_results/
-#   get_chatsessions_dir()     ->  <repo_root>/controldata/chatsessions/
-#   get_chatsessions_day_dir() ->  <repo_root>/controldata/chatsessions/<YYYY-MM-DD>/
+#   get_chatsessions_dir()       ->  <repo_root>/controldata/chatsessions/
+#   get_chatsessions_named_dir()  ->  <repo_root>/controldata/chatsessions/named/
+#   get_chatsessions_day_dir()    ->  <repo_root>/controldata/chatsessions/<YYYY-MM-DD>/
 #
 # Related modules:
 #   - file_access_skill.py  -- uses get_workspace_root() for path-safety checks
@@ -87,6 +88,12 @@ def get_test_results_dir() -> Path:
 def get_chatsessions_dir() -> Path:
     """Return the absolute path to the controldata/chatsessions/ directory."""
     return get_controldata_dir() / "chatsessions"
+
+
+@lru_cache(maxsize=1)
+def get_chatsessions_named_dir() -> Path:
+    """Return the absolute path to the named sessions subdirectory (controldata/chatsessions/named/)."""
+    return get_chatsessions_dir() / "named"
 
 
 def get_chatsessions_day_dir() -> Path:

@@ -67,6 +67,7 @@ from agent_core.scratchpad import set_dump_enabled
 from agent_core.skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
 from agent_core.skills.Memory.memory_skill import MEMORY_STORE_PATH
 from utils.workspace_utils import get_chatsessions_dir
+from utils.workspace_utils import get_chatsessions_named_dir
 from utils.workspace_utils import get_controldata_dir
 from utils.workspace_utils import get_logs_dir
 from utils.workspace_utils import get_schedules_dir
@@ -84,7 +85,10 @@ class SlashCommandContext:
     config:          object                        # OrchestratorConfig; .resolved_model is writable
     output:          Callable[[str, str], None]    # (text, level) -> None
     clear_history:   Callable[[], None]            # resets conversation history + session context
-    session_context: object | None = None               # SessionContext; None in non-interactive modes
+    session_context: object | None = None          # SessionContext; None in non-interactive modes
+    session_id:      str | None = None             # current session ID; set in API mode only
+    switch_session:  Callable[[str, str], None] | None = None  # (new_session_id, name) -> None
+    rename_session:  Callable[[str, str], None] | None = None  # (new_session_id, display_name) -> None; updates browser ID + title in-place
 
 
 # ====================================================================================================
@@ -1051,7 +1055,7 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
     from utils.workspace_utils import get_test_results_dir
 
     if not arg.strip():
-        ctx.output("Usage: /deletelogs <days>  |  delete log, chatsession, and test_results date-folders older than N days", "dim")
+        ctx.output("Usage: /deletelogs <days>  |  delete log, chatsession, and test_results date-folders older than N days (named sessions are never culled)", "dim")
         return
 
     try:
@@ -1079,7 +1083,7 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
                 folder_date = date.fromisoformat(folder.name)
             except ValueError:
                 continue
-            if folder_date < cutoff:
+            if folder_date <= cutoff:
                 try:
                     shutil.rmtree(folder)
                     deleted.append(f"{base_dir.name}/{folder.name}")
@@ -1089,7 +1093,9 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
     stray_deleted = []
     stray_errors  = []
 
-    for base_dir in (get_logs_dir(), get_chatsessions_dir(), get_test_results_dir()):
+    # Delete stray files from logs/, test_results/, and chatsessions/ root unconditionally.
+    # Named sessions live in chatsessions/named/ (a subdirectory) and are never touched.
+    for base_dir in (get_logs_dir(), get_test_results_dir(), get_chatsessions_dir()):
         if not base_dir.exists():
             continue
         for item in sorted(base_dir.iterdir()):
@@ -1449,6 +1455,203 @@ def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output("Usage: /defaults | /defaults set", "dim")
 
 
+# ----------------------------------------------------------------------------------------------------
+
+def _session_file_scan() -> "list[tuple]":
+    """Return (path, data) for every named session JSON file that can be parsed."""
+    named_dir = get_chatsessions_named_dir()
+    results = []
+    if not named_dir.exists():
+        return results
+    for p in sorted(named_dir.glob("*.json")):
+        if p.is_file():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                results.append((p, data))
+            except Exception:
+                pass
+    return results
+
+
+def _session_set_name(session_id: str, name: str) -> str:
+    """Name a session: move its file to named/session_{slug}.json. Returns the new session_id."""
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    if not slug:
+        raise ValueError(f"Name '{name}' produces an empty slug - use letters or digits.")
+
+    new_session_id = f"session_{slug}"
+    named_dir   = get_chatsessions_named_dir()
+    target_path = named_dir / f"{new_session_id}.json"
+    current_named = named_dir / f"{session_id}.json"
+    root_path     = get_chatsessions_dir() / f"{session_id}.json"
+
+    src_path = current_named if current_named.exists() else (root_path if root_path.exists() else None)
+
+    # Refuse if target already belongs to a different session.
+    if target_path.exists() and src_path != target_path:
+        raise ValueError(f"A session named '{name}' already exists. Choose a different name.")
+
+    data = {}
+    if src_path:
+        try:
+            data = json.loads(src_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    data["name"] = name
+    named_dir.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # If the source was a raw (unnamed/root) file, remove it - it has no identity worth keeping.
+    # If the source was already a named session in named/, leave it as a frozen checkpoint.
+    if src_path and src_path != target_path and src_path.parent != named_dir:
+        try:
+            src_path.unlink()
+        except Exception:
+            pass
+
+    return new_session_id
+
+
+def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
+    sub_parts = arg.strip().split(None, 1)
+    sub  = sub_parts[0].lower() if sub_parts else ""
+    rest = sub_parts[1].strip() if len(sub_parts) > 1 else ""
+
+    if sub == "name":
+        if not rest:
+            ctx.output("Usage: /session name <alias>", "dim")
+            return
+        if not ctx.session_id:
+            ctx.output("Session naming is not available in this mode.", "error")
+            return
+        try:
+            new_session_id = _session_set_name(ctx.session_id, rest)
+        except ValueError as exc:
+            ctx.output(str(exc), "error")
+            return
+        ctx.output(f"Session named '{rest}'.", "success")
+        ctx.output(f"  File: named/session_{new_session_id.removeprefix('session_')}.json", "dim")
+        if ctx.rename_session:
+            ctx.rename_session(new_session_id, rest)
+        return
+
+    if sub == "list":
+        sessions = _session_file_scan()
+        named    = [(p, d) for p, d in sessions if d.get("name")]
+        if not named:
+            ctx.output("No named sessions found. Use /session name <alias> to name the current session.", "dim")
+            return
+        ctx.output(f"{len(named)} named session(s):", "info")
+        for p, d in named:
+            name      = d["name"]
+            turns     = len(d.get("turns", []))
+            summaries = len(d.get("summaries", []))
+            detail    = f"{turns} turn(s)"
+            if summaries:
+                detail += f" + {summaries} compacted"
+            ctx.output(f"  {name:<30}  {detail:<28}  [{p.stem}]", "item")
+        return
+
+    if sub == "resume":
+        if not rest:
+            ctx.output("Usage: /session resume <name>", "dim")
+            return
+        if not ctx.switch_session:
+            ctx.output("Session switching is not available in this mode.", "error")
+            return
+        sessions = _session_file_scan()
+        match    = next(((p, d) for p, d in sessions if d.get("name", "").lower() == rest.lower()), None)
+        if not match:
+            ctx.output(f"No session named '{rest}' found. Use /session list to see available sessions.", "error")
+            return
+        path, data  = match
+        session_id  = path.stem
+        turns       = len(data.get("turns", []))
+        summaries   = len(data.get("summaries", []))
+        ctx.output(f"Switching to '{rest}' - {turns} turn(s), {summaries} compacted.", "success")
+        ctx.switch_session(session_id, rest)
+        return
+
+    if sub == "park":
+        if not ctx.switch_session:
+            ctx.output("Session parking is not available in this mode.", "error")
+            return
+        import time
+        new_id = f"web_{int(time.time() * 1000)}"
+        ctx.output("Current session parked - starting fresh chat.", "success")
+        ctx.switch_session(new_id, "")
+        return
+
+    if sub == "delete":
+        if not rest:
+            ctx.output("Usage: /session delete <name>  |  /session delete all", "dim")
+            return
+        sessions = _session_file_scan()
+        if rest.lower() == "all":
+            if not sessions:
+                ctx.output("No named sessions to delete.", "dim")
+                return
+            count = 0
+            for p, d in sessions:
+                try:
+                    p.unlink()
+                    count += 1
+                    ctx.output(f"  Deleted '{d.get('name', p.stem)}'.", "item")
+                except Exception as exc:
+                    ctx.output(f"  Error deleting '{p.name}': {exc}", "error")
+            ctx.output(f"{count} session(s) deleted.", "success")
+            return
+        # Match by name substring (case-insensitive).
+        matches = [(p, d) for p, d in sessions if rest.lower() in d.get("name", "").lower()]
+        if not matches:
+            ctx.output(f"No named session matching '{rest}' found.", "error")
+            return
+        for p, d in matches:
+            try:
+                p.unlink()
+                ctx.output(f"Deleted session '{d.get('name', p.stem)}'.", "success")
+            except Exception as exc:
+                ctx.output(f"Error deleting '{p.name}': {exc}", "error")
+        return
+
+    if sub == "info":
+        if not ctx.session_id:
+            ctx.output("No active session.", "dim")
+            return
+        named_path = get_chatsessions_named_dir() / f"{ctx.session_id}.json"
+        root_path  = get_chatsessions_dir() / f"{ctx.session_id}.json"
+        path = named_path if named_path.exists() else root_path
+        if not path.exists():
+            ctx.output(f"Session '{ctx.session_id}' has no saved file yet.", "dim")
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            ctx.output("Could not read session file.", "error")
+            return
+        name      = data.get("name", "(unnamed)")
+        turns     = len(data.get("turns", []))
+        summaries = len(data.get("summaries", []))
+        ctx.output(f"Current session:", "info")
+        ctx.output(f"  Name:       {name}", "item")
+        ctx.output(f"  ID:         {ctx.session_id}", "item")
+        ctx.output(f"  Turns:      {turns}", "item")
+        ctx.output(f"  Summaries:  {summaries}", "item")
+        ctx.output(f"  File:       {path}", "item")
+        return
+
+    ctx.output("Usage: /session <name|list|resume|park|delete|info>", "dim")
+    ctx.output("  /session name <alias>    - name the current session", "item")
+    ctx.output("  /session list            - list all named sessions", "item")
+    ctx.output("  /session resume <name>   - switch to a named session", "item")
+    ctx.output("  /session park            - save current session and start a fresh one", "item")
+    ctx.output("  /session delete <name>   - delete a named session (substring match)", "item")
+    ctx.output("  /session delete all      - delete all named sessions", "item")
+    ctx.output("  /session info            - show current session details", "item")
+
+
 # ====================================================================================================
 # MARK: REGISTRY
 # ====================================================================================================
@@ -1475,6 +1678,7 @@ _REGISTRY: dict[str, Callable] = {
     "/tasks":         _cmd_tasks,
     "/task":          _cmd_task,
     "/defaults":      _cmd_defaults,
+    "/session":       _cmd_session,
     "/version":       _cmd_version,
 }
 
@@ -1501,5 +1705,6 @@ _DESCRIPTIONS: dict[str, str] = {
     "/tasks":         "List all scheduled tasks with status, schedule, and first prompt",
     "/task":          "enable|disable|add|delete|run <name> [schedule] [prompt]  Manage scheduled tasks; /task run <name> executes a task immediately",
     "/defaults":      "Show current default.json settings and file path; /defaults set saves current model/ctx/host to the file",
+    "/session":       "name <alias> | list | resume <name> | park | delete <name|all> | info  - manage named session contexts",
     "/version":        "Show framework version, active model, and context size",
 }

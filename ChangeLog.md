@@ -1,4 +1,9 @@
 
+# Version 0.3+dev #
+- Added DESIGN.md to serve as a requirements document align to.
+- New Sandbox button.
+- Endless Chat: Chat session control and compaction of older context map elements.
+
 # Version 0.3 #
 - Web Navigate skill and adjustments to consolidate with other web skills.
 - Adding Web UI, removing other modes for simplicity.

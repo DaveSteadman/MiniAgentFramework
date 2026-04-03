@@ -1,5 +1,6 @@
 # MiniAgentFramework - Design and Requirements
 
+## Purpose
 The is a requirements document, of defining statements around the functionality of MiniAgentFramework.
 
 Each section names a component, states its intent, and lists verifiable behavioral claims.
@@ -25,6 +26,17 @@ Use this file to check whether the system matches its stated design, or to ident
 - [UI - Chat panel](#ui---chat-panel)
 - [UI - Schedule timeline](#ui---schedule-timeline)
 - [UI - Prompt input](#ui---prompt-input)
+
+---
+
+## Feature List
+
+A list of the headline functional areas that define the project:
+- Offline Agent Framework - a tool-calling agent pipeline with skill plugins, scratchpad memory, and delegate sub-tasks, all running locally without cloud dependencies.
+- Ollama integration - thin HTTP wrapper over the Ollama REST API supporting local, LAN-hosted, and Ollama Cloud endpoints, with model resolution, health caching, and runtime host switching.
+- Slash Commands - runtime control surface for model selection, context tuning, log management, session naming, and task control, dispatched from a registry and available in all input modes.
+- Endless Chat - conversation persistence with rolling-window compaction that summarises older turns via an isolated LLM call, giving the model continuity across sessions of unlimited length.
+- Built in test - automated regression runner that replays JSON prompt sequences, writes dated result files, and reports pass/fail trends across runs via `/testtrend`.
 
 ---
 
