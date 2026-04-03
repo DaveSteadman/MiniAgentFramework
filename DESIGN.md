@@ -261,8 +261,12 @@ The system is divided into two layers with a clean interface between them.
 **Claims:**
 - Any input whose first non-whitespace character is `/` is routed to the slash processor.
 - `handle()` returns `True` if the input was consumed as a slash command, `False` otherwise.
-- `SlashCommandContext` carries `config`, `output` callback, and `clear_history` callback; commands do not access global state directly.
+- `SlashCommandContext` carries `config`, `output`, `clear_history`, `session_id`, `switch_session`, and `rename_session`; commands do not access global state directly.
+- `switch_session(new_id, name)` fires an SSE `switch_session` event causing the browser to update its session ID and replay history.
+- `rename_session(new_id, name)` fires an SSE `rename_session` event updating the browser ID and panel title in-place without a history replay.
 - `/newchat` calls both `history.clear()` and `ctx.clear()` (session context), and writes the empty state back to the persist file.
+- `/session delete` uses exact name matching (case-insensitive) to prevent accidental multi-session deletion.
+- Deleting the currently active session automatically parks to a new unnamed session via `switch_session`.
 
 ---
 
@@ -273,8 +277,9 @@ The system is divided into two layers with a clean interface between them.
 **Intent:** Persist conversation turns and compressed summaries of older exchanges across prompts, giving the model continuity across unlimited session length without exhausting the context window.
 
 **Claims:**
-- Session files are stored at `controldata/chatsessions/<session_id>.json` (root-level, not date-scoped - sessions survive across day boundaries).
-- On first use, falls back to the legacy day-dir path for backward compatibility.
+- Unnamed session files are stored at `controldata/chatsessions/<session_id>.json` (root-level, not date-scoped; sessions survive across day boundaries).
+- Named session files are stored at `controldata/chatsessions/named/session_<slug>.json`; `_session_path()` checks `named/` first, then falls back to root.
+- On first use of a legacy session, falls back to the day-dir path for backward compatibility.
 - History is loaded from disk at execution time for every prompt (not cached in memory between requests).
 - After each completed turn, `_save_session` is called with the actual prompt-token count and `num_ctx`.
 - When `prompt_tokens / num_ctx >= _COMPACT_FILL_PCT` (default 0.75), the oldest half of raw turns is compressed into a summary block via an isolated LLM call, then removed from the turn list.
@@ -283,6 +288,15 @@ The system is divided into two layers with a clean interface between them.
 - Compaction is skipped gracefully if no model is active or the LLM call fails; the session file is never left in a corrupt state.
 - `/newchat` resets history and writes an empty `{"turns": [], "summaries": []}` file.
 - Test-prompt runs (`/test`) create local throwaway `ConversationHistory` objects and never touch session files.
+
+### Named sessions
+
+**Claims:**
+- `/session name <alias>` slugifies the alias (lowercase, alphanumeric and underscore only) and moves the session file to `named/session_<slug>.json`, updating the session ID to `session_<slug>`.
+- Renaming a session that is already in `named/` preserves the old file as a frozen checkpoint; only raw root files are removed on rename.
+- `/session resumecopy <old> <new>` deep-copies all turns and summaries to a new named file without modifying the source, making it a reusable jumping-off point.
+- `/session delete all` removes all files in `named/`; `/deletelogs` never touches `named/` (the `is_file()` check skips subdirectories).
+- `GET /completions` returns `{ sessions, test_files, task_names, models }` so the browser tab-complete feature has live named-session names without a separate polling loop.
 
 ---
 
@@ -345,8 +359,10 @@ The system is divided into two layers with a clean interface between them.
 
 **Claims:**
 - Each submitted prompt opens a `RunStream` SSE connection to `/runs/{id}/stream`.
-- The `RunStream` receives typed events: `start`, `response`, `log_file`, `test_agent_response`, `metrics`, `test_complete`, `error`.
+- The `RunStream` receives typed events: `start`, `response`, `log_file`, `progress`, `test_agent_response`, `test_agent_metrics`, `test_complete`, `error`, `rename_session`, `switch_session`, `done`.
 - A `response` event populates the agent message bubble; prior bubbles are not modified.
+- A `rename_session` event updates `_sessionId` and the panel title in-place; no history is replayed.
+- A `switch_session` event updates `_sessionId`, sets the panel title, draws a divider line, and calls `_loadSessionHistory()` to replay the new session's turns.
 - **Chat live mode** (`_chatLive`): new messages call `_scrollChatSmooth()`, the same rAF decay-loop used by the log panel.
 - Upward scroll in the chat panel disengages auto-scroll; reaching the bottom re-engages it automatically (unlike the log panel, which requires the [live] button).
 - Token count and tokens-per-second are displayed as metadata below each agent response.
@@ -385,4 +401,5 @@ The system is divided into two layers with a clean interface between them.
 - On submit, the prompt text is appended to the server-side input history via `POST /history`.
 - The input history (up-arrow recall) loads from `GET /history` on startup.
 - `/stoprun` submitted via the input box is handled immediately server-side without joining the task queue.
-- The session ID is generated client-side on first load and stored in `sessionStorage`; it persists for the browser tab's lifetime.
+- The session ID is a module-level `let` variable initialised to `web_{Date.now()}` on page load; it is updated in-place by `rename_session` and `switch_session` SSE events.
+- Tab-completing a `/` prefix opens a dropdown driven by `GET /completions`; Tab cycles candidates, ArrowUp/Down navigates, Escape closes, Enter selects. Completing a command or sub-command chains immediately to the next argument slot.

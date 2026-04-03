@@ -1,4 +1,8 @@
 
+# Version [0009 / 0.3+dev] #
+
+[ALL TESTS COMPLETE]  host=http://MONTBLANC:11434  model=nemotron-cascade-2:latest  elapsed=34m 42s  pass rate=95% (138/146)  prompt tokens=4,376,752  avg tok/s=148.9
+- Key takeaway: 75% of the failures (6/8) are infrastructure reliability (DuckDuckGo rate-limiting), not model quality issues. The one genuine model failure is the Gutenberg hallucination. The kiwix_relativity assert likely needs recalibrating.
 
 # Version 0.3-rc1 #
 

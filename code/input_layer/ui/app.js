@@ -20,6 +20,18 @@ const MAX_CHAT_MESSAGES = 200;
 const CSS_NOWRAP      = "nowrap";
 const CSS_WRAP_ACTIVE = "wrap-active";
 
+// All registered slash commands - used for command-name tab completion.
+const _ALL_COMMANDS = [
+    "/help", "/models", "/model", "/ctx", "/rounds", "/timeout",
+    "/stopmodel", "/stoprun", "/ollamahost", "/kiwixhost",
+    "/newchat", "/clearmemory", "/reskill", "/sandbox", "/scratchdump",
+    "/recall", "/deletelogs", "/test", "/testtrend", "/tasks", "/task",
+    "/version", "/defaults", "/session",
+];
+
+// Sub-commands for /session.
+const _SESSION_SUBS = ["name", "list", "resume", "resumecopy", "park", "delete", "info"];
+
 // Pre-compiled log line classification patterns.
 const RE_LOG_TOOL_ROUND = /^TOOL ROUND\s+\d+/i;
 const RE_LOG_ERROR      = /error|exception|failed/i;
@@ -42,6 +54,12 @@ let _logScrollRafId       = null;   // rAF handle for log scroll loop
 let _chatScrollTarget     = -1;     // target scrollTop for chat smooth-scroll
 let _chatScrollRafId      = null;   // rAF handle for chat scroll loop
 let _chatLive             = true;   // when false, new messages do not auto-scroll
+
+// Tab-completion state.
+let _completions  = { sessions: [], test_files: [], task_names: [], models: [] };
+let _suggestItems = [];   // current filtered candidate list
+let _suggestIdx   = -1;   // highlighted row index (-1 = none)
+let _suggestBase  = "";   // portion of input before the completion token
 
 // ====================================================================================================
 // MARK: DOM REFS
@@ -827,12 +845,14 @@ function listenRun(runId) {
                 // Same chat, file renamed - update routing ID and title in-place; no history replay.
                 _sessionId = ev.session_id;
                 dom.chatTitle().textContent = ev.name || "";
+                _loadCompletions();
             } else if (ev.type === "switch_session") {
                 _sessionId = ev.session_id;
                 const label = ev.name || "";
                 dom.chatTitle().textContent = label;
                 appendChatMessage("agent", "\u2500\u2500\u2500 Session: " + (label || ev.session_id) + " \u2500\u2500\u2500");
                 _loadSessionHistory(ev.session_id);
+                _loadCompletions();
             } else if (ev.type === "done") {
                 removeThinking(runId);
                 es.close();
@@ -936,46 +956,231 @@ async function _dispatchPrompt(text) {
 }
 
 // ====================================================================================================
+// MARK: TAB COMPLETE
+// ====================================================================================================
+
+async function _loadCompletions() {
+    const data = await apiFetch("/completions");
+    if (data) _completions = data;
+}
+
+// Parse the current input value and return the completion context, or null.
+// Returns { pool, prefix, base } where:
+//   pool   - string[] of all candidates for this slot
+//   prefix - the partial text the user has typed (used for filtering)
+//   base   - everything in the input before the partial text
+function _parseSuggestContext(value) {
+    if (!value.startsWith("/")) return null;
+
+    const firstSpace = value.indexOf(" ");
+
+    // Slot 0: still typing the command name (no space yet).
+    if (firstSpace === -1) {
+        return { pool: _ALL_COMMANDS, prefix: value, base: "" };
+    }
+
+    const cmd  = value.slice(0, firstSpace);   // e.g. "/session"
+    const rest = value.slice(firstSpace + 1);  // everything after first space
+
+    if (cmd === "/session") {
+        const subSpace = rest.indexOf(" ");
+        if (subSpace === -1) {
+            // Slot 1: completing the sub-command.
+            return { pool: _SESSION_SUBS, prefix: rest, base: "/session " };
+        }
+        const sub      = rest.slice(0, subSpace);
+        const arg1Base = value.slice(0, firstSpace + 1 + subSpace + 1);  // "/session sub "
+        const arg1Text = value.slice(arg1Base.length);
+
+        if (sub === "resume" || sub === "delete") {
+            return { pool: _completions.sessions, prefix: arg1Text.trimEnd(), base: arg1Base };
+        }
+        if (sub === "resumecopy") {
+            // Only complete the first argument (the source session name).
+            if (arg1Text.indexOf(" ") === -1) {
+                return { pool: _completions.sessions, prefix: arg1Text.trimEnd(), base: arg1Base };
+            }
+            // Second arg is a new name - no completion.
+            return null;
+        }
+        return null;
+    }
+
+    if (cmd === "/model") {
+        if (!rest.includes(" ")) {
+            return { pool: _completions.models, prefix: rest.trimEnd(), base: "/model " };
+        }
+        return null;
+    }
+
+    if (cmd === "/test") {
+        if (!rest.includes(" ")) {
+            return { pool: ["all", ..._completions.test_files], prefix: rest.trimEnd(), base: "/test " };
+        }
+        return null;
+    }
+
+    if (cmd === "/task") {
+        if (!rest.includes(" ")) {
+            return { pool: _completions.task_names, prefix: rest.trimEnd(), base: "/task " };
+        }
+        return null;
+    }
+
+    return null;
+}
+
+function _updateSuggest() {
+    const ctx = _parseSuggestContext(dom.input().value);
+    if (!ctx) { _hideSuggest(); return; }
+
+    const pfx  = ctx.prefix.toLowerCase();
+    const items = ctx.pool.filter(s => s.toLowerCase().startsWith(pfx));
+
+    if (items.length === 0) { _hideSuggest(); return; }
+
+    _suggestItems = items;
+    _suggestBase  = ctx.base;
+    _suggestIdx   = -1;
+    _renderSuggest();
+}
+
+function _renderSuggest() {
+    const el = $("slash-suggest");
+    if (!el) return;
+
+    el.innerHTML = "";
+    _suggestItems.forEach((item, i) => {
+        const row = document.createElement("div");
+        row.className  = "suggest-item" + (i === _suggestIdx ? " active" : "");
+        row.textContent = item;
+        row.addEventListener("mousedown", e => {
+            e.preventDefault();   // prevent textarea from losing focus
+            _selectSuggest(i);
+        });
+        el.appendChild(row);
+    });
+
+    // Position fixed, sitting immediately above the textarea.
+    // Width: longest item in ch units (monospace) + padding allowance, capped at textarea width.
+    const rect      = dom.input().getBoundingClientRect();
+    const longest   = _suggestItems.reduce((m, s) => Math.max(m, s.length), 0);
+    const fitWidth  = longest * 7.5 + 56;   // ~7.5px per char at 12px mono + 56px padding/scrollbar
+    el.style.left   = rect.left + "px";
+    el.style.width  = Math.min(fitWidth, rect.width) + "px";
+    el.style.bottom = (window.innerHeight - rect.top) + "px";
+    el.removeAttribute("hidden");
+}
+
+function _hideSuggest() {
+    const el = $("slash-suggest");
+    if (el) el.setAttribute("hidden", "");
+    _suggestItems = [];
+    _suggestIdx   = -1;
+}
+
+function _selectSuggest(idx) {
+    const item = _suggestItems[idx];
+    if (item === undefined) return;
+    dom.input().value = _suggestBase + item + " ";
+    _hideSuggest();
+    dom.input().focus();
+    // Chain: re-evaluate so the next dropdown level appears immediately.
+    _updateSuggest();
+}
+
+// ====================================================================================================
 // MARK: KEYBOARD HANDLER
 // ====================================================================================================
 
 function onInputKeydown(e) {
+    // --- Tab: open or cycle the suggestion dropdown. ---
+    if (e.key === "Tab") {
+        e.preventDefault();
+        if (_suggestItems.length > 0) {
+            if (_suggestIdx >= 0) {
+                _selectSuggest(_suggestIdx);
+            } else {
+                _suggestIdx = 0;
+                _renderSuggest();
+            }
+        } else {
+            _updateSuggest();
+            if (_suggestItems.length === 1) _selectSuggest(0);
+        }
+        return;
+    }
+
+    // --- Escape: close the dropdown. ---
+    if (e.key === "Escape") {
+        if (_suggestItems.length > 0) {
+            e.preventDefault();
+            _hideSuggest();
+            return;
+        }
+    }
+
+    // --- Enter: select highlighted suggestion, or submit prompt. ---
     if (e.key === "Enter" && !e.shiftKey) {
+        if (_suggestItems.length > 0 && _suggestIdx >= 0) {
+            e.preventDefault();
+            _selectSuggest(_suggestIdx);
+            return;
+        }
         e.preventDefault();
         submitPrompt();
         return;
     }
-    // CLI-style history navigation.
-    if (e.key === "ArrowUp") {
-        if (_inputHistory.length === 0) return;
-        e.preventDefault();
-        if (_historyIdx === -1) {
-            // Starting to browse - save any current draft and go to most recent.
-            _historyIdx = _inputHistory.length - 1;
-        } else if (_historyIdx > 0) {
-            _historyIdx--;
-        }
-        dom.input().value = _inputHistory[_historyIdx];
-        // Move cursor to end of restored text.
-        const el = dom.input();
-        el.setSelectionRange(el.value.length, el.value.length);
-        return;
-    }
+
+    // --- ArrowDown: navigate suggestion dropdown, else history. ---
     if (e.key === "ArrowDown") {
+        if (_suggestItems.length > 0) {
+            e.preventDefault();
+            _suggestIdx = Math.min(_suggestIdx + 1, _suggestItems.length - 1);
+            _renderSuggest();
+            return;
+        }
+        // History navigation (existing behaviour).
         if (_historyIdx === -1) return;
         e.preventDefault();
         if (_historyIdx < _inputHistory.length - 1) {
             _historyIdx++;
             dom.input().value = _inputHistory[_historyIdx];
         } else {
-            // Past the end of history - clear and stop browsing.
             _historyIdx = -1;
             dom.input().value = "";
         }
-        const el = dom.input();
-        el.setSelectionRange(el.value.length, el.value.length);
+        const elD = dom.input();
+        elD.setSelectionRange(elD.value.length, elD.value.length);
         return;
     }
+
+    // --- ArrowUp: navigate suggestion dropdown, else history. ---
+    if (e.key === "ArrowUp") {
+        if (_suggestItems.length > 0) {
+            e.preventDefault();
+            _suggestIdx = _suggestIdx > 0 ? _suggestIdx - 1 : -1;
+            _renderSuggest();
+            return;
+        }
+        // History navigation (existing behaviour).
+        if (_inputHistory.length === 0) return;
+        e.preventDefault();
+        if (_historyIdx === -1) {
+            _historyIdx = _inputHistory.length - 1;
+        } else if (_historyIdx > 0) {
+            _historyIdx--;
+        }
+        dom.input().value = _inputHistory[_historyIdx];
+        const elU = dom.input();
+        elU.setSelectionRange(elU.value.length, elU.value.length);
+        return;
+    }
+}
+
+function onInputChange() {
+    // Update the suggestion dropdown on every keystroke.
+    _updateSuggest();
 }
 
 // ====================================================================================================
@@ -988,11 +1193,13 @@ function startPolling() {
     refreshQueue();
     refreshTimeline();
     refreshLatestLogFile();
+    _loadCompletions();
 
-    setInterval(refreshOllamaStatus, POLL_OLLAMA_MS);
-    setInterval(refreshQueue,        POLL_QUEUE_MS);
-    setInterval(refreshTimeline,     POLL_TIMELINE_MS);
+    setInterval(refreshOllamaStatus,  POLL_OLLAMA_MS);
+    setInterval(refreshQueue,         POLL_QUEUE_MS);
+    setInterval(refreshTimeline,      POLL_TIMELINE_MS);
     setInterval(refreshLatestLogFile, POLL_LATEST_LOG_MS);
+    setInterval(_loadCompletions,     30_000);
 }
 
 // ====================================================================================================
@@ -1011,7 +1218,8 @@ function init() {
 
     // Wire up input events.
     dom.input().addEventListener("keydown", onInputKeydown);
-    dom.input().addEventListener("input", () => { _historyIdx = -1; });
+    dom.input().addEventListener("input", () => { _historyIdx = -1; onInputChange(); });
+    dom.input().addEventListener("blur",  () => { setTimeout(_hideSuggest, 120); });
     dom.sendBtn().addEventListener("click", submitPrompt);
 
     // Chat scroll listener: up pauses auto-scroll, reaching the bottom re-engages it.

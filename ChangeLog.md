@@ -1,4 +1,16 @@
 
+# Version 0.4 #
+- Named chat sessions: `/session name|list|resume|resumecopy|park|delete|info` commands.
+- Session files promoted to `controldata/chatsessions/named/session_<slug>.json`; rename preserves old file as a frozen checkpoint.
+- `/session resumecopy <old> <new>`: copy a session as a clean jumping-off point without touching the source.
+- Deleting the active session automatically parks to a new unnamed chat.
+- Tab completion in the UI: Tab key opens a dropdown for command names, sub-commands, and dynamic arguments (session names, test files, task names, models).
+- `GET /completions` endpoint supplies live named-session and task lists to the tab-complete dropdown.
+- Chat panel title displays the active session name; updated live via SSE events.
+- Anaglyph title colour fix: MINI in blue (left lens), AGENT in red (right lens).
+- `/deletelogs` cutoff fixes: off-by-one on date folders; stray chatsession root files now culled alongside logs and test results.
+- DESIGN.md expanded: feature descriptions, named-session section, full SSE event list, correct session-ID claims.
+
 # Version 0.3+dev #
 - Added DESIGN.md to serve as a requirements document align to.
 - New Sandbox button.

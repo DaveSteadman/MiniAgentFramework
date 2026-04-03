@@ -4,17 +4,25 @@
 # FastAPI application exposing the MiniAgentFramework engine as a REST + SSE service.
 #
 # Endpoints:
-#   GET  /                          serve static web UI (index.html)
-#   GET  /status/ollama             current 'ollama ps' model status
-#   GET  /tasks                     enabled scheduled tasks with last-run and next-fire times
-#   GET  /queue                     current task queue state
-#   GET  /history                   last 20 input history entries (shared with TUI)
-#   POST /history                   append an entry to input history
-#   GET  /sessions/{id}/history     full conversation history for a session
-#   POST /sessions/{id}/prompt      submit a new prompt (enqueues on task_queue)
-#   GET  /logs/stream               SSE: tail all new log lines across all log files
-#   GET  /logs/file?path=<path>      SSE: tail a specific log file (used for per-run view)
-#   GET  /runs/{id}/stream          SSE: stream events for a specific enqueued run
+#   GET  /                             serve static web UI (index.html)
+#   GET  /version                      return framework version string
+#   GET  /status/ollama                current 'ollama ps' model status
+#   GET  /settings/sandbox             return current sandbox enabled state
+#   POST /settings/sandbox?enabled=    set sandbox enabled state
+#   GET  /completions                  tab-completion candidates (sessions, test files, tasks, models)
+#   GET  /tasks                        enabled scheduled tasks with last-run and next-fire times
+#   GET  /timeline                     minute-resolution task timeline centred on now
+#   GET  /queue                        current task queue state
+#   GET  /history                      last 20 input history entries (shared with TUI)
+#   POST /history                      append an entry to input history
+#   GET  /sessions/{id}/history        full conversation history for a session
+#   POST /sessions/{id}/prompt         submit a new prompt (enqueues on task_queue)
+#   GET  /logs                         list all log directories and files
+#   GET  /logs/latest                  path of the most recently written log file
+#   GET  /logs/stream                  SSE: tail all new log lines across all log files
+#   GET  /logs/file?path=<path>        SSE: tail a specific log file (used for per-run view)
+#   GET  /logs/{date}/{filename}       serve a specific log file
+#   GET  /runs/{id}/stream             SSE: stream events for a specific enqueued run
 #
 # SSE events are plain text/event-stream with a "data: <json>\n\n" envelope.
 # CORS is restricted to localhost origins only - requests from external sites are blocked.
@@ -27,6 +35,7 @@
 #   - orchestration.py        -- orchestrate_prompt, OrchestratorConfig, ConversationHistory
 #   - runtime_logger.py       -- SessionLogger, create_log_file_path
 #   - ollama_client.py        -- get_ollama_ps_rows, get_active_host
+#   - slash_commands.py       -- SlashCommandContext, handle; /session commands manage named sessions
 # ====================================================================================================
 
 
@@ -61,6 +70,7 @@ from agent_core.ollama_client import get_active_host
 from agent_core.ollama_client import get_active_model
 from agent_core.ollama_client import get_active_num_ctx
 from agent_core.ollama_client import get_ollama_ps_rows
+from agent_core.ollama_client import list_ollama_models
 from agent_core.orchestration import ConversationHistory
 from agent_core.orchestration import OrchestratorConfig
 from agent_core.orchestration import SessionContext
@@ -262,6 +272,45 @@ def get_ollama_status():
         "num_ctx": get_active_num_ctx(),
         "rows":    rows,
         "ts":      datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+# ====================================================================================================
+# MARK: COMPLETIONS ENDPOINT
+# ====================================================================================================
+
+@app.get("/completions")
+def get_completions():
+    """Return tab-completion candidates grouped by type for the UI tab-complete feature."""
+    named_dir = get_chatsessions_named_dir()
+    sessions  = []
+    if named_dir.exists():
+        for p in sorted(named_dir.glob("*.json")):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                name = data.get("name", "")
+                if name:
+                    sessions.append(name)
+            except Exception:
+                pass
+
+    test_dir   = Path(__file__).resolve().parent.parent.parent / "controldata" / "test_prompts"
+    test_files = []
+    if test_dir.exists():
+        test_files = sorted(p.stem for p in test_dir.glob("*.json"))
+
+    task_names = [t.get("name", "") for t in _enabled_tasks if t.get("name")]
+
+    try:
+        models = list_ollama_models()
+    except Exception:
+        models = []
+
+    return {
+        "sessions":   sessions,
+        "test_files": test_files,
+        "task_names": task_names,
+        "models":     models,
     }
 
 

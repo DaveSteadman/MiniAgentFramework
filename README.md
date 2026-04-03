@@ -1,12 +1,19 @@
 # MiniAgentFramework
 
-> Calling an LLM from Python is easy - this project researches calling Python *from* an LLM prompt.
+A local AI agent framework that automates tasks, autoruns python code, and long chat sessions that can persist across restarts.
 
-MiniAgentFramework is an orchestration experiment that blends LLM reasoning with Python tool execution. A local LLM decides which Python skills to call, executes them safely in ordered steps, and incorporates the results into its final response.
+MiniAgentFramework runs entirely on local hardware using [Ollama](https://ollama.com) as the LLM backend. You send a prompt; the LLM picks which Python skills to call, executes them in ordered steps, and returns the result. A background scheduler fires tasks on a timetable without manual intervention. 
 
-The project uses a local [Ollama](https://ollama.com) runtime and focuses on transparent, logged orchestration with tools for testing and measuring agent behaviour. From the orchestration foundation it builds simple, robust skills with performance measurement and self-improvement research on top.
+A key feature is that all orchestration steps are logged in full, nothing is a black box.
 
-![MiniAgentFramework](progress/2026-03-30-WebUI.png)
+![MiniAgentFramework](progress/2026-04-03-WebUI.png)
+
+**What you can do with it:**
+
+- Run background web research or system-monitoring tasks on a schedule, entirely unattended.
+- Keep named chat sessions that survive restarts - park a session mid-conversation and resume it later.
+- Automate data collection and write results to structured CSV or text files using natural-language prompts.
+- Build and regression-test agent behaviours with the built-in test runner and pass-rate trend reporting.
 
 ## Documentation
 
@@ -14,13 +21,15 @@ The project uses a local [Ollama](https://ollama.com) runtime and focuses on tra
 |---|---|
 | **This file** | Modes, commands, task management, usage reference |
 | [README_GETTING_STARTED.md](README_GETTING_STARTED.md) | First-time setup: Python, Ollama, venv, first run |
-| [README_DEVS.md](README_DEVS.md) | Module architecture, design notes, internal flow |
+| [README_DEVS.md](README_DEVS.md) | Module architecture mapped to code folders |
+| [DESIGN.md](DESIGN.md) | Design claims, SSE event contract, component responsibilities |
 | [ChangeLog.md](ChangeLog.md) | Report of main changes per version |
+
 ---
 
-## Running: Web UI / API Mode
+## Running the Framework
 
-Running `main.py` with no special mode flags starts the FastAPI server and browser UI.
+Running `main.py` starts the server, which attempts to load the default parameters (which can be overriden by the command line), connect to Ollama and run the REST API that controls all its interactions.
 
 ```powershell
 python .\code\main.py
@@ -28,13 +37,34 @@ python .\code\main.py --ollamahost MONTBLANC
 python .\code\main.py --agentport 8010 --model 20b --ctx 65536
 ```
 
-What this mode provides:
-- Browser UI with schedule timeline, queue preview, live logs, and chat panel.
-- Background scheduler for tasks under `controldata/schedules/`.
-- Prompt queue with a separate total queued prompt count and a preview of the next prompts to be serviced.
-- REST API endpoints used by the UI for queue, timeline, logs, history, and prompt submission.
+## Running the WebUI
 
-Open the browser UI at `http://localhost:8000/` unless you changed `--agentport`.
+On startup, the framwork provides a URL to open in a browser:
+
+```
+===================================================================================
+SYSTEM STATUS  [14:21:09]
+===================================================================================
+
+Ollama host:     http://MONTBLANC:11434
+Requested model: nemotron-cascade-2:latest
+Resolved model:  nemotron-cascade-2:latest
+Mode:            api
+ctx:             256000
+LLM timeout:     600s
+Max iterations:  25
+Model runtime status: nemotron-cascade-2:latest not currently loaded (ollama ps).
+Log file:        C:/Util/MAF/controldata/logs/2026-04-03/run_20260403_142109.txt
+
+API mode - http://0.0.0.0:8000  (Ctrl+C to stop)
+Web UI:   http://localhost:8000/    <-- open this in your browser
+```
+
+The web UI provides:
+- Schedule timeline showing upcoming and recent task runs.
+- Live log panel with full orchestration evidence for every run.
+- Chat panel with streamed responses and session switching.
+- Prompt queue with count and next-prompt preview.
 
 ---
 
@@ -66,40 +96,11 @@ Only the keys shown above are recognised. Unknown keys are silently ignored. The
 
 ---
 
-## Scheduled Tasks
-
-Scheduled prompt tasks run inside Web UI / API mode. Each `*.json` file in `controldata/schedules/` can define one or more tasks with either a daily time (`HH:MM`) or a repeating interval (minutes). Tasks fire unattended and are serialised through the shared task queue.
-
-Schedule files live in `controldata/schedules/`. Each file must contain a top-level `"tasks"` list:
-
-```json
-{
-  "tasks": [
-    {
-      "name": "SystemHealth",
-      "enabled": true,
-      "schedule": { "type": "interval", "minutes": 60 },
-      "prompts": ["Summarise current system health: CPU, RAM, and disk."]
-    },
-    {
-      "name": "MorningWebScan",
-      "enabled": true,
-      "schedule": { "type": "daily", "time": "05:00" },
-      "prompts": ["Summarise today's tech news headlines."]
-    }
-  ]
-}
-```
-
-Each task file is typically named `task_<name>.json`. Tasks can be created, queried, and managed at runtime - see [Task Management](#task-management) below.
-
----
-
 ## Slash Commands
 
 Slash commands are available in the **Web UI** chat input and inside **scheduled task prompt lists**. They bypass the orchestration pipeline and take effect immediately.
 
-Type `/help` at any prompt to see the full list. Current commands:
+Type `/help` at any prompt to see the full list. Tab completion is available in the Web UI: pressing Tab after a `/` character opens a dropdown of matching commands and sub-commands.
 
 | Command | Description |
 |---|---|
@@ -121,7 +122,15 @@ Type `/help` at any prompt to see the full list. Current commands:
 | `/reskill [min\|max]` | Rebuild the skills catalog and set system prompt guidance mode. Defaults to `min` if omitted. |
 | `/sandbox <on\|off>` | Toggle the Python sandbox for `CodeExecute` skill. `on` (default) enforces the built-in allow-list; `off` removes restrictions (use with care). |
 | `/scratchdump <on\|off>` | Write scratchpad contents to `controldata/scratchpad_dump.txt` on every change. Defaults to `off`. |
-| `/deletelogs <days>` | Delete log date-folders under `controldata/logs/` older than N days. Each folder is named `YYYY-MM-DD` and contains all runs from that day. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
+| `/deletelogs <days>` | Delete date-folders older than N days under `controldata/logs/`, `controldata/chatsessions/`, and `controldata/test_results/`. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
+| `/defaults` | Show the active `default.json` settings and file path. `/defaults set` overwrites the file with the current model, ctx, and host values. |
+| `/session name <alias>` | Give the current session a persistent name. The session is saved to `controldata/chatsessions/named/` and can be resumed after a restart. |
+| `/session list` | List all named sessions with their creation time and message count. |
+| `/session resume <name>` | Switch to a named session and replay its chat history into the UI. |
+| `/session resumecopy <source> <new>` | Copy an existing named session to a new name and switch into it - useful as a jumping-off point without overwriting the original. |
+| `/session park` | Save the current chat under its existing name (or prompt you to name it first) and open a fresh unnamed chat. |
+| `/session delete <name\|all>` | Delete a named session by exact name, or `all` to delete every named session. If the active session is deleted, a fresh unnamed chat is opened automatically. |
+| `/session info` | Show the session ID, name, and message count for the current session. |
 | `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. The argument is matched as a case-insensitive substring, so `/test web` matches `test_web_skill_prompts.json`. |
 | `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. All results are written to a single combined CSV file (`test_results_<timestamp>_all.csv`) with a banner printed between each suite. Prints a final summary with host, model, elapsed time, and cumulative pass/fail count. |
 | `/testtrend [prompts-file]` | Show pass-rate trend across all historical test runs, optionally filtered by prompts file. |
@@ -152,6 +161,39 @@ Any bare hostname or IP address (no `://`) is automatically wrapped as `http://<
 Connectivity to the host is checked at switch time. If the target cannot be reached, the host change is rejected and the previous host remains active.
 
 New slash commands can be added in [code/input_layer/slash_commands.py](code/input_layer/slash_commands.py) by adding a handler function and registering it in `_REGISTRY` and `_DESCRIPTIONS`.
+
+---
+
+## Scheduled Tasks
+
+Each `*.json` file in `controldata/schedules/` defines one or more tasks with either a daily time (`HH:MM`) or a repeating interval (minutes). Tasks fire unattended and are serialised through the shared task queue. Each file must contain a top-level `"tasks"` list:
+
+```json
+{
+  "tasks": [
+    {
+      "name": "SystemHealth",
+      "enabled": true,
+      "schedule": { "type": "interval", "minutes": 60 },
+      "prompts": ["Summarise current system health: CPU, RAM, and disk."]
+    },
+    {
+      "name": "MorningWebScan",
+      "enabled": true,
+      "schedule": { "type": "daily", "time": "05:00" },
+      "prompts": ["Summarise today's tech news headlines."]
+    }
+  ]
+}
+```
+
+| Type | JSON | Meaning |
+|---|---|---|
+| Interval | `{ "type": "interval", "minutes": 60 }` | Fires every N minutes after the previous run |
+| Daily | `{ "type": "daily", "time": "08:30" }` | Fires once per calendar day at the given wall-clock time |
+
+Tasks can be created, queried, and managed at runtime - see [Task Management](#task-management) below.
+
 
 ---
 
@@ -208,13 +250,6 @@ Each task lives in its own `controldata/schedules/task_<name>.json` file and can
   ]
 }
 ```
-
-### Schedule types
-
-| Type | JSON | Meaning |
-|---|---|---|
-| Interval | `{ "type": "interval", "minutes": 60 }` | Fires every N minutes after the previous run |
-| Daily | `{ "type": "daily", "time": "08:30" }` | Fires once per calendar day at the given wall-clock time |
 
 ---
 
