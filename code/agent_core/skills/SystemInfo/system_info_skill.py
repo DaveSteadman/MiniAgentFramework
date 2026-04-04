@@ -27,6 +27,7 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import datetime
 import os
 import re
 import shutil
@@ -201,7 +202,8 @@ def get_static_system_info_string() -> str:
 
     Internal helper - not exposed as a callable tool.  Use get_system_info_dict() for tool-call access.
     """
-    d = get_system_info_dict()
+    d    = get_system_info_dict()
+    date = datetime.date.today().isoformat()
     return (
-        f"System info: framework={d['framework_version']}; os={d['os']}; python={d['python_version']}; ollama={d['ollama_version']}"
+        f"System info: framework={d['framework_version']}; os={d['os']}; python={d['python_version']}; ollama={d['ollama_version']}; date={date}"
     )

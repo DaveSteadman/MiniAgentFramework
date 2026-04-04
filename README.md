@@ -41,7 +41,7 @@ If you want the full standing-start walkthrough, including Ollama install and fi
 Once the UI is open, try one prompt that shows the full loop:
 
 ```text
-Summarise the latest developments in AI hardware in 200 words.
+Summarise todays developments in AI hardware in 5 bullet points.
 ```
 
 What you should see:
