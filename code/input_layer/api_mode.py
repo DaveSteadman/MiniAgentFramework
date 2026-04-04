@@ -223,6 +223,8 @@ def run_api_mode(
     try:
         _serve_in_current_thread()
     except KeyboardInterrupt:
+        print("\nShutting down...", flush=True)
+        logger.log_file_only("[API] Shutdown requested.")
         server.should_exit = True
     finally:
         shutdown.set()
@@ -231,6 +233,9 @@ def run_api_mode(
         except Exception:
             pass
         server.should_exit = True
-        sched_thread.join(timeout=2)
+        try:
+            sched_thread.join(timeout=2)
+        except KeyboardInterrupt:
+            pass
         print("\nAPI server stopped.", flush=True)
         logger.log("[API] Server stopped.")

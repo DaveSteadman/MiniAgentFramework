@@ -1,3 +1,6 @@
+# Version [0013 / 0.4+dev] #
+
+[ALL TESTS COMPLETE]  host=http://MONTBLANC:11434  model=nemotron-cascade-2:latest  elapsed=31m 55s  pass rate=96% (137/142)  prompt tokens=4,433,425  avg tok/s=159.5
 
 # Version [0009 / 0.3+dev] #
 

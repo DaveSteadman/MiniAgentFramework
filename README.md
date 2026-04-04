@@ -1,26 +1,76 @@
 # MiniAgentFramework
 
-A local AI agent framework that automates tasks, autoruns python code, and long chat sessions that can persist across restarts.
+Local-first agent framework for Ollama-based LLMs.
 
-MiniAgentFramework runs entirely on local hardware using [Ollama](https://ollama.com) as the LLM backend. You send a prompt; the LLM picks which Python skills to call, executes them in ordered steps, and returns the result. A background scheduler fires tasks on a timetable without manual intervention. 
+MiniAgentFramework runs locally, uses local tools, and shows you what it is doing as it goes. You send a prompt; the LLM chooses Python skills, executes them in ordered steps, and returns the result while the orchestration log streams live in the UI.
 
-A key feature is that all orchestration steps are logged in full, nothing is a black box.
+If you want local agents without cloud dependencies, hidden orchestration, or framework sprawl, this is the project.
 
 ![MiniAgentFramework](progress/2026-04-03-WebUI.png)
 
-**What you can do with it:**
+## Why this exists
+
+- Local-first: built around [Ollama](https://ollama.com), local Python tools, and local files.
+- Transparent: tool calls, intermediate steps, and orchestration logs are visible instead of hidden.
+- Practical: scheduled runs, persistent chat sessions, live logs, and file-writing workflows are built in.
+- Lightweight: aimed at real agent workflows without requiring a large abstraction stack.
+
+## Get Running Fast
+
+From a fresh clone:
+
+```powershell
+git clone https://github.com/DaveSteadman/MiniAgentFramework.git
+cd MiniAgentFramework
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python .\code\main.py
+```
+
+Then open:
+
+```text
+http://localhost:8000/
+```
+
+If you want the full standing-start walkthrough, including Ollama install and first model pull, use [README_GETTING_STARTED.md](README_GETTING_STARTED.md).
+
+## First 10 Minutes
+
+Once the UI is open, try one prompt that shows the full loop:
+
+```text
+Summarise the latest developments in AI hardware in 200 words.
+```
+
+What you should see:
+
+- the live log stream showing tool choices and execution steps
+- the final answer in the chat panel
+- a dated log file written under `controldata/logs/`
+
+This is the core experience of the framework: local LLM, local tools, visible reasoning pipeline.
+
+## What You Can Do
 
 - Run background web research or system-monitoring tasks on a schedule, entirely unattended.
 - Keep named chat sessions that survive restarts - park a session mid-conversation and resume it later.
 - Automate data collection and write results to structured CSV or text files using natural-language prompts.
 - Build and regression-test agent behaviours with the built-in test runner and pass-rate trend reporting.
 
+## Why Use This Instead of a Bigger Framework?
+
+- You want local execution and no API-key dependency.
+- You want to see exactly which tools were called and what happened at each step.
+- You want something you can inspect, edit, and extend without learning a large orchestration platform first.
+
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| **This file** | Modes, commands, task management, usage reference |
-| [README_GETTING_STARTED.md](README_GETTING_STARTED.md) | First-time setup: Python, Ollama, venv, first run |
+| **This file** | Positioning, quick start, main usage reference |
+| [README_GETTING_STARTED.md](README_GETTING_STARTED.md) | First-time setup from a blank machine: Python, Ollama, venv, first run |
 | [README_DEVS.md](README_DEVS.md) | Module architecture mapped to code folders |
 | [DESIGN.md](DESIGN.md) | Design claims, SSE event contract, component responsibilities |
 | [ChangeLog.md](ChangeLog.md) | Report of main changes per version |
@@ -29,7 +79,7 @@ A key feature is that all orchestration steps are logged in full, nothing is a b
 
 ## Running the Framework
 
-Running `main.py` starts the server, which attempts to load the default parameters (which can be overriden by the command line), connect to Ollama and run the REST API that controls all its interactions.
+Running `main.py` starts the local API server and Web UI. It loads defaults, connects to Ollama, and exposes the REST/SSE endpoints used by the browser UI.
 
 ```powershell
 python .\code\main.py
