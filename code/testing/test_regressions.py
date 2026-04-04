@@ -147,6 +147,49 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result.split()[0:2], ["#", "Stats"])
         self.assertGreaterEqual(len(body_words), 2500)
 
+    def test_fetch_page_text_routes_kiwix_article_paths_to_kiwix_skill(self) -> None:
+        with patch(
+            "agent_core.skills.WebFetch.web_fetch_skill._kiwix_get_article",
+            return_value="# Charles Dickens\n\nGreat Expectations was published in 1861.",
+        ) as get_article:
+            result = fetch_page_text(
+                url="/content/wikipedia_en_all_maxi_2025-08/Charles_Dickens",
+                max_words=400,
+                timeout_seconds=30,
+                query=None,
+            )
+
+        get_article.assert_called_once_with(
+            article_path="/content/wikipedia_en_all_maxi_2025-08/Charles_Dickens",
+            max_words=400,
+        )
+        self.assertIn("# Charles Dickens", result)
+        self.assertIn("Great Expectations", result)
+
+    def test_fetch_page_text_routes_kiwix_article_paths_through_query_extractor(self) -> None:
+        with patch(
+            "agent_core.skills.WebFetch.web_fetch_skill._kiwix_get_article",
+            return_value="# Charles Dickens\n\nGreat Expectations was published in 1861.",
+        ) as get_article:
+            with patch("agent_core.skills.WebFetch.web_fetch_skill._get_active_model", return_value="gpt-oss:20b"):
+                with patch("agent_core.skills.WebFetch.web_fetch_skill._get_active_num_ctx", return_value=131072):
+                    with patch(
+                        "agent_core.skills.WebFetch.web_fetch_skill._call_llm_chat",
+                        return_value=SimpleNamespace(response="Great Expectations"),
+                    ):
+                        result = fetch_page_text(
+                            url="/content/wikipedia_en_all_maxi_2025-08/Charles_Dickens",
+                            max_words=400,
+                            timeout_seconds=30,
+                            query="which novel is mentioned",
+                        )
+
+        get_article.assert_called_once_with(
+            article_path="/content/wikipedia_en_all_maxi_2025-08/Charles_Dickens",
+            max_words=10000,
+        )
+        self.assertEqual(result, "Great Expectations")
+
     def test_system_prompt_steers_exhaustive_fetches_into_scratchpad(self) -> None:
         system_message = _build_system_message("", None, {"skills": []})
 

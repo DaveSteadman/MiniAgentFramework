@@ -22,13 +22,159 @@
 # ====================================================================================================
 import asyncio
 import argparse
+import ctypes
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
-if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+# ----------------------------------------------------------------------------------------------------
+def _maybe_reexec_into_project_venv() -> None:
+    """Prefer the repository virtualenv interpreter when one exists.
+
+    The app is often launched as `python code/main.py`, which depends on whichever
+    global `python` happens to be first on PATH. That can diverge from the project's
+    `.venv`, causing ambient system info and package resolution to be inconsistent.
+
+    To keep startup automatic and deterministic, launch the repository `.venv`
+    interpreter if it exists and we are not already running inside it. The parent
+    process stays attached to the terminal and waits for the child so the shell
+    does not regain control while the real server process is still running.
+    Set MAF_SKIP_AUTO_VENV=1 to bypass.
+    """
+    if os.environ.get("MAF_SKIP_AUTO_VENV") == "1":
+        return
+
+    repo_root = Path(__file__).resolve().parent.parent
+    venv_python = (
+        repo_root / ".venv" / "Scripts" / "python.exe"
+        if sys.platform.startswith("win")
+        else repo_root / ".venv" / "bin" / "python"
+    )
+    if not venv_python.exists():
+        return
+
+    try:
+        current_python = Path(sys.executable).resolve()
+        target_python = venv_python.resolve()
+    except Exception:
+        return
+
+    if current_python == target_python:
+        return
+
+    child_env = dict(os.environ)
+    child_env["MAF_SKIP_AUTO_VENV"] = "1"
+    cmd = [str(target_python), str(Path(__file__).resolve()), *sys.argv[1:]]
+
+    child = subprocess.Popen(cmd, env=child_env)
+
+    job_handle = None
+    if sys.platform == "win32":
+        try:
+            job_handle = _attach_child_to_kill_on_close_job(child.pid)
+        except Exception:
+            job_handle = None
+
+    try:
+        raise SystemExit(child.wait())
+    except KeyboardInterrupt:
+        # If the child received the same terminal interrupt it should exit on its own.
+        try:
+            raise SystemExit(child.wait(timeout=5))
+        except subprocess.TimeoutExpired:
+            child.terminate()
+            raise SystemExit(child.wait(timeout=5))
+    finally:
+        if job_handle is not None:
+            ctypes.windll.kernel32.CloseHandle(job_handle)
+
+
+# ----------------------------------------------------------------------------------------------------
+def _attach_child_to_kill_on_close_job(pid: int):
+    """On Windows, tie the child process lifetime to this launcher process."""
+    kernel32 = ctypes.windll.kernel32
+
+    PROCESS_TERMINATE = 0x0001
+    PROCESS_SET_QUOTA = 0x0100
+    PROCESS_SET_INFORMATION = 0x0200
+    PROCESS_QUERY_INFORMATION = 0x0400
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+    JobObjectExtendedLimitInformation = 9
+
+    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", ctypes.c_uint32),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", ctypes.c_uint32),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", ctypes.c_uint32),
+            ("SchedulingClass", ctypes.c_uint32),
+        ]
+
+    class IO_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+            ("IoInfo", IO_COUNTERS),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError()
+
+    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+
+    ok = kernel32.SetInformationJobObject(
+        job,
+        JobObjectExtendedLimitInformation,
+        ctypes.byref(info),
+        ctypes.sizeof(info),
+    )
+    if not ok:
+        kernel32.CloseHandle(job)
+        raise ctypes.WinError()
+
+    process_handle = kernel32.OpenProcess(
+        PROCESS_TERMINATE | PROCESS_SET_QUOTA | PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION,
+        False,
+        int(pid),
+    )
+    if not process_handle:
+        kernel32.CloseHandle(job)
+        raise ctypes.WinError()
+
+    try:
+        ok = kernel32.AssignProcessToJobObject(job, process_handle)
+        if not ok:
+            kernel32.CloseHandle(job)
+            raise ctypes.WinError()
+    finally:
+        kernel32.CloseHandle(process_handle)
+
+    return job
+
+
+_maybe_reexec_into_project_venv()
 
 import agent_core.ollama_client as ollama_client
 from input_layer.api_mode import run_api_mode

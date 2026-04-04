@@ -1,0 +1,17 @@
+
+====================================================================================================
+SYSTEM STATUS  [14:43:44]
+====================================================================================================
+
+Ollama host:     http://MONTBLANC:11434
+Requested model: nemotron-cascade-2:latest
+Resolved model:  nemotron-cascade-2:latest
+Mode:            api
+ctx:             256000
+LLM timeout:     600s
+Max iterations:  25
+Model runtime status: nemotron-cascade-2:latest not currently loaded (ollama ps).
+Log file:        C:/Util/GithubRepos/MiniAgentFramework/controldata/logs/2026-04-04/run_20260404_144344.txt
+
+API mode - http://0.0.0.0:8000  (send interrupt to stop)
+Web UI:   http://localhost:8000/

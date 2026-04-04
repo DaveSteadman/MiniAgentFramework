@@ -89,7 +89,8 @@ def _run_one_test_file(candidate, ctx, wrapper, model: str, active_host: str, re
         return {"passed": 0, "total": 0, "prompt_tokens": 0, "tps_sum": 0.0, "tps_samples": 0}
 
     if test_passed is not None:
-        level = "success" if test_passed == test_total else "error"
+        suspicious_metrics = test_total > 0 and prompt_tokens_total == 0 and tps_samples == 0
+        level = "success" if test_passed == test_total and not suspicious_metrics else "error"
         pass_rate = (100.0 * test_passed / test_total) if test_total else 0.0
         avg_tps = (tps_sum / tps_samples) if tps_samples else 0.0
         ctx.output(f"[Test: {candidate.name}  Passed {test_passed}/{test_total}]", level)
@@ -98,6 +99,11 @@ def _run_one_test_file(candidate, ctx, wrapper, model: str, active_host: str, re
             f" | prompt tokens={prompt_tokens_total:,} | avg tok/s={avg_tps:.1f}",
             level,
         )
+        if suspicious_metrics:
+            ctx.output(
+                "[TEST WARNING] Suite reported no prompt-token or tok/s metrics; treat this run as suspicious and inspect the CSV/logs.",
+                "error",
+            )
         return {
             "passed": test_passed,
             "total": test_total,

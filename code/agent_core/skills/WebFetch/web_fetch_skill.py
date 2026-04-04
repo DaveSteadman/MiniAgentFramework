@@ -39,6 +39,7 @@ if _code_dir not in sys.path:
 from agent_core.ollama_client import call_llm_chat as _call_llm_chat
 from agent_core.ollama_client import get_active_model as _get_active_model
 from agent_core.ollama_client import get_active_num_ctx as _get_active_num_ctx
+from agent_core.skills.Kiwix.kiwix_skill import kiwix_get_article as _kiwix_get_article
 from utils.webpage_utils import fetch_html as _fetch_html
 from utils.webpage_utils import extract_content as _extract_content
 from utils.webpage_utils import truncate_to_words as _truncate_to_words
@@ -82,68 +83,18 @@ def _format_query_fallback(page_title: str, body: str, max_words: int) -> str:
     return _format_raw_fallback(page_title, body, fallback_words)
 
 
-# ====================================================================================================
-# MARK: PUBLIC SKILL API
-# ====================================================================================================
-def fetch_page_text(
-    url: str,
-    max_words: int = DEFAULT_MAX_WORDS,
-    timeout_seconds: int = DEFAULT_TIMEOUT,
-    query: str | None = None,
-) -> str:
-    """Fetch a web page and return its clean readable text, stripped of all HTML markup.
-
-    Removes navigation, scripts, advertisements, and other non-content elements.
-    Returns up to max_words words of body prose suitable for LLM consumption.
-    Returns a descriptive error string on network/parse failure - never raises.
-
-    When query is provided, the full page text is passed through an isolated LLM call that
-    extracts only the information relevant to the query. The returned answer is compact and
-    does not burden the caller's context window with raw page content.
-    """
-    if not url or not url.strip():
-        return "Error: url cannot be empty."
-
-    parsed = urllib.parse.urlparse(url.strip())
-    if parsed.scheme not in ("http", "https"):
-        return f"Error: unsupported URL scheme '{parsed.scheme}'. Only http and https are supported."
-
-    # When extracting for a specific query, fetch a larger cap so the inner LLM has
-    # maximum material - complete list pages can be long. For raw return, respect the
-    # caller-supplied max_words limit and the smaller cap.
-    fetch_words     = QUERY_WORDS_CAP if query else max(50, min(int(max_words), MAX_WORDS_CAP))
-    timeout_seconds = max(5,  min(int(timeout_seconds), 60))
-
-    try:
-        html_text, _ = _fetch_html(url.strip(), timeout=float(timeout_seconds))
-    except urllib.error.HTTPError as exc:
-        return f"Error fetching page: HTTP {exc.code} - {url}"
-    except urllib.error.URLError as exc:
-        return f"Error fetching page: {exc.reason} - {url}"
-    except Exception as exc:
-        return f"Error fetching page: {exc} - {url}"
-
-    page_title, body = _extract_content(html_text)
-
-    if not body.strip():
-        return f"Could not extract readable text from: {url}"
-
-    body = _truncate_to_words(body, fetch_words)
-    raw_fallback = _format_raw_fallback(page_title, body, max_words)
+# ----------------------------------------------------------------------------------------------------
+def _extract_query_from_text(page_title: str, body: str, max_words: int, query: str | None) -> str:
+    """Run the isolated extractor on already-fetched page text, or return raw fallback."""
+    raw_fallback   = _format_raw_fallback(page_title, body, max_words)
     query_fallback = _format_query_fallback(page_title, body, max_words)
 
     if not query:
-        # In raw mode, prefix the page title so the caller can confirm which page was fetched
-        # without the model having to infer it from the prose.
         return raw_fallback
 
-    # -- Isolated extraction call --
-    # Run a throwaway LLM call in its own context so the full page text never enters the
-    # main messages thread. Only the compact extracted answer is returned to the caller.
     model   = _get_active_model()
     num_ctx = _get_active_num_ctx()
     if not model:
-        # No model registered yet - fall back to raw extracted page text.
         return raw_fallback
 
     inner_messages = [
@@ -184,3 +135,82 @@ def fetch_page_text(
         return extracted
     except Exception:
         return query_fallback
+
+
+# ====================================================================================================
+# MARK: PUBLIC SKILL API
+# ====================================================================================================
+def fetch_page_text(
+    url: str,
+    max_words: int = DEFAULT_MAX_WORDS,
+    timeout_seconds: int = DEFAULT_TIMEOUT,
+    query: str | None = None,
+) -> str:
+    """Fetch a web page and return its clean readable text, stripped of all HTML markup.
+
+    Removes navigation, scripts, advertisements, and other non-content elements.
+    Returns up to max_words words of body prose suitable for LLM consumption.
+    Returns a descriptive error string on network/parse failure - never raises.
+
+    When query is provided, the full page text is passed through an isolated LLM call that
+    extracts only the information relevant to the query. The returned answer is compact and
+    does not burden the caller's context window with raw page content.
+    """
+    if not url or not url.strip():
+        return "Error: url cannot be empty."
+
+    clean_url = url.strip()
+
+    # Kiwix article paths are relative (/content/<book>/<article>) and are intended
+    # for kiwix_get_article rather than generic HTTP fetching. Route them automatically
+    # so the model can recover even if it picks the wrong tool.
+    if clean_url.startswith("/content/"):
+        fetch_words = QUERY_WORDS_CAP if query else max(50, min(int(max_words), MAX_WORDS_CAP))
+        article_text = _kiwix_get_article(article_path=clean_url, max_words=fetch_words)
+        if isinstance(article_text, str) and article_text.startswith("Error:"):
+            return article_text
+        if isinstance(article_text, str) and article_text.startswith("Failed to "):
+            return article_text
+        if isinstance(article_text, str) and article_text.startswith("No text could be extracted"):
+            return article_text
+
+        article_text = str(article_text or "").strip()
+        if not article_text:
+            return f"Could not extract readable text from: {clean_url}"
+
+        if article_text.startswith("# "):
+            first_break = article_text.find("\n")
+            page_title = article_text[2:first_break].strip() if first_break != -1 else article_text[2:].strip()
+            body = article_text[first_break:].strip() if first_break != -1 else ""
+        else:
+            page_title = ""
+            body = article_text
+
+        return _extract_query_from_text(page_title, body, max_words, query)
+
+    parsed = urllib.parse.urlparse(clean_url)
+    if parsed.scheme not in ("http", "https"):
+        return f"Error: unsupported URL scheme '{parsed.scheme}'. Only http and https are supported."
+
+    # When extracting for a specific query, fetch a larger cap so the inner LLM has
+    # maximum material - complete list pages can be long. For raw return, respect the
+    # caller-supplied max_words limit and the smaller cap.
+    fetch_words     = QUERY_WORDS_CAP if query else max(50, min(int(max_words), MAX_WORDS_CAP))
+    timeout_seconds = max(5,  min(int(timeout_seconds), 60))
+
+    try:
+        html_text, _ = _fetch_html(clean_url, timeout=float(timeout_seconds))
+    except urllib.error.HTTPError as exc:
+        return f"Error fetching page: HTTP {exc.code} - {clean_url}"
+    except urllib.error.URLError as exc:
+        return f"Error fetching page: {exc.reason} - {clean_url}"
+    except Exception as exc:
+        return f"Error fetching page: {exc} - {clean_url}"
+
+    page_title, body = _extract_content(html_text)
+
+    if not body.strip():
+        return f"Could not extract readable text from: {clean_url}"
+
+    body = _truncate_to_words(body, fetch_words)
+    return _extract_query_from_text(page_title, body, max_words, query)

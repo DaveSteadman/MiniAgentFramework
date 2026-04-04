@@ -58,6 +58,10 @@ Use `lookup_wikipedia` only when `kiwixurl` is not set in default.json.
 Never use `fetch_page_text("https://en.wikipedia.org/...")` when Kiwix is available.
 Search Kiwix first, then use `kiwix_get_article` with the returned path.
 
+**Never pass a Kiwix `article_path` to WebFetch.**
+Paths like `/content/wikipedia_en_all_maxi_2025-08/...` are not standalone URLs.
+They must be passed to `kiwix_get_article(article_path)` exactly as returned by `kiwix_search`.
+
 **Workflow: search then fetch.**
 Always call `kiwix_search` first to find the correct `article_path`, then call
 `kiwix_get_article` with that path. Do not guess article paths.

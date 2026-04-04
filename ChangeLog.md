@@ -1,4 +1,13 @@
 
+# Version 0.4+dev #
+- Runtime hardening: `python code/main.py` now reliably hands off to the repo `.venv` instead of silently running under the wrong Python.
+- API startup is cleaner: deprecated asyncio event-loop warnings removed, and `port already in use` now fails fast with a clear message instead of a raw bind traceback.
+- Shutdown behavior is more reliable: the supervised server child no longer outlives the launcher and keep port `8000` orphaned.
+- Kiwix/WebFetch guardrail: Kiwix `/content/...` article paths now route through `kiwix_get_article()` instead of failing as invalid WebFetch URLs.
+- TaskManagement guidance expanded for natural-language listing prompts such as `list all my scheduled tasks`.
+- Test reliability tightened: runs no longer count as clean passes when output is empty or orchestration validation failed just because the subprocess exited `0`, and suspicious `0 tokens / 0.0 tok/s` summaries are now flagged.
+- DESIGN.md now includes an explicit server-exit behavior section.
+
 # Version 0.4 #
 - Named chat sessions: `/session name|list|resume|resumecopy|park|delete|info` commands.
 - Session files promoted to `controldata/chatsessions/named/session_<slug>.json`; rename preserves old file as a frozen checkpoint.

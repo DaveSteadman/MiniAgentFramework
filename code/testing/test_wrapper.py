@@ -215,6 +215,48 @@ def extract_final_output(stdout_text: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
+def _log_indicates_validation_failure(log_file: str) -> bool:
+    """Return True when the run log records orchestration validation failure."""
+    if not log_file:
+        return False
+    try:
+        text = Path(log_file).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    lowered = text.lower()
+    return (
+        "[warn] orchestration validation failed" in lowered
+        or "validation failed" in lowered
+    )
+
+
+# ----------------------------------------------------------------------------------------------------
+def _single_item_pass_status(exit_code: int, final_output: str, log_file: str) -> tuple[bool, str]:
+    """Return (passed, failure_reason) for a standalone prompt run."""
+    if exit_code != 0:
+        return False, f"Exit code {exit_code}"
+    if not final_output.strip():
+        return False, "Empty final output"
+    if _log_indicates_validation_failure(log_file):
+        return False, "Orchestration validation failed"
+    return True, ""
+
+
+# ----------------------------------------------------------------------------------------------------
+def _exchange_pass_status(exit_code: int, turn_outputs: dict[int, str], any_assert_fail: bool, log_file: str) -> tuple[bool, str]:
+    """Return (passed, failure_reason) for a multi-turn exchange run."""
+    if exit_code != 0:
+        return False, f"Exit code {exit_code}"
+    if any_assert_fail:
+        return False, "Assert failed"
+    if any(not str(output).strip() for output in turn_outputs.values()):
+        return False, "One or more turns produced empty output"
+    if _log_indicates_validation_failure(log_file):
+        return False, "Orchestration validation failed"
+    return True, ""
+
+
+# ----------------------------------------------------------------------------------------------------
 def _evaluate_assert(expression: str, final_output: str, exit_code: int) -> str:
     # Returns 'PASS', 'FAIL', or 'SKIP' (no expression).
     if not expression:
@@ -461,16 +503,21 @@ def _run_single_item(
     append_csv_row(output_path=output_path, row=row)
     for turn_idx, (prompt_tokens, tps_str) in sorted(turn_metrics.items()):
         print(f"[TURN {turn_idx}] tokens={prompt_tokens} tps={tps_str}")
-    status_label = "OK" if row["exit_code"] == 0 else "FAIL"
+
+    _passed, _failure_reason = _single_item_pass_status(
+        exit_code=int(row["exit_code"]),
+        final_output=row["final_output"],
+        log_file=str(row["log_file"]),
+    )
+    status_label = "OK" if _passed else "FAIL"
     print(f"  [{status_label}] duration={row['duration_seconds']}s  exit_code={row['exit_code']}")
-    _passed   = row["exit_code"] == 0
     _duration = float(row["duration_seconds"])
     _record   = {
         "label":          prompt[:80],
         "source_file":    source_file,
         "duration":       _duration,
         "passed":         _passed,
-        "failure_reason": "" if _passed else f"Exit code {row['exit_code']}",
+        "failure_reason": _failure_reason,
     }
     return False, _passed, _record
 
@@ -537,16 +584,12 @@ def _run_exchange_item(
         assert_label = f"  assert={assert_result}" if assert_expr else ""
         print(f"  [Turn {turn_idx}/{n}] [{status_label}]{assert_label}: {user_prompt!r}")
 
-    _passed = exit_code == 0 and not any_assert_fail
-    if not _passed:
-        if any_assert_fail:
-            _reason = "Assert failed"
-        elif exit_code != 0:
-            _reason = f"Exit code {exit_code}"
-        else:
-            _reason = "Unknown"
-    else:
-        _reason = ""
+    _passed, _reason = _exchange_pass_status(
+        exit_code=exit_code,
+        turn_outputs=turn_outputs,
+        any_assert_fail=any_assert_fail,
+        log_file=log_file,
+    )
     _record = {
         "label":          name,
         "source_file":    source_file,

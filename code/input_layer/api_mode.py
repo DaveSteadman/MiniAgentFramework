@@ -22,6 +22,7 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import asyncio
+import socket
 import sys
 import threading
 import time
@@ -59,6 +60,20 @@ _DEFAULT_HOST         = "0.0.0.0"
 # MARK: API MODE
 # ====================================================================================================
 
+def _can_bind(host: str, port: int) -> tuple[bool, str]:
+    """Return whether the TCP listen socket can be bound, plus an optional reason."""
+    bind_host = "" if host == "0.0.0.0" else host
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((bind_host, int(port)))
+        return True, ""
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 10048:
+            return False, f"Port {port} is already in use."
+        return False, str(exc)
+    finally:
+        sock.close()
+
 def run_api_mode(
     config: OrchestratorConfig,
     logger: SessionLogger,
@@ -68,14 +83,18 @@ def run_api_mode(
 ) -> None:
     """Launch the FastAPI server with background scheduler.
 
-    Blocks until the user presses Ctrl+C or the process is terminated.
+    Blocks until a stop signal is received or the process is otherwise terminated.
     All log output is broadcast to connected /logs/stream SSE clients as well
     as written to the log file.
     """
     import uvicorn
 
-    if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    can_bind, bind_reason = _can_bind(host, port)
+    if not can_bind:
+        message = f"[API] Startup aborted: {bind_reason} Close the existing server or use --agentport <port>."
+        print(f"\n{message}", flush=True)
+        logger.log_file_only(message)
+        return
 
     shutdown = threading.Event()
 
@@ -159,7 +178,7 @@ def run_api_mode(
     sched_thread.start()
 
     push_log_line(f"[API] Server starting on http://{host}:{port}")
-    print(f"\nAPI mode - http://{host}:{port}  (Ctrl+C to stop)", flush=True)
+    print(f"\nAPI mode - http://{host}:{port}  (send interrupt to stop)", flush=True)
     print(f"Web UI:   http://localhost:{port}/", flush=True)
 
     uvicorn_config = uvicorn.Config(
@@ -170,7 +189,7 @@ def run_api_mode(
     )
     server = uvicorn.Server(uvicorn_config)
 
-    def _run_server() -> None:
+    def _serve_in_current_thread() -> None:
         if sys.platform != "win32":
             server.run()
             return
@@ -195,24 +214,23 @@ def run_api_mode(
         try:
             loop.run_until_complete(server.serve())
         finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:
+                pass
             loop.close()
 
-    # Run uvicorn in a background thread. When server.run() is not on the main thread,
-    # uvicorn's capture_signals() context manager detects the non-main thread and skips
-    # all signal installation entirely, so it never calls signal.raise_signal() and the
-    # CancelledError/KeyboardInterrupt tracebacks do not occur.
-    server_thread = threading.Thread(target=_run_server, daemon=True, name="uvicorn")
-    server_thread.start()
-
-    # Main thread owns signal handling.
     try:
-        while server_thread.is_alive():
-            server_thread.join(timeout=0.5)
+        _serve_in_current_thread()
     except KeyboardInterrupt:
-        pass
+        server.should_exit = True
     finally:
         shutdown.set()
+        try:
+            task_queue.stop()
+        except Exception:
+            pass
         server.should_exit = True
-        server_thread.join(timeout=10)
+        sched_thread.join(timeout=2)
         print("\nAPI server stopped.", flush=True)
         logger.log("[API] Server stopped.")

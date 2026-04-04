@@ -18,6 +18,7 @@ Use this file to check whether the system matches its stated design, or to ident
 - [Server - Skill system](#server---skill-system)
 - [Server - Scheduler](#server---scheduler)
 - [Server - API layer](#server---api-layer)
+- [Server - Exit behavior](#server---exit-behavior)
 - [Server - Slash commands](#server---slash-commands)
 - [Server - Session persistence](#server---session-persistence)
 - [Server - Testing](#server---testing)
@@ -215,6 +216,25 @@ The system is divided into two layers with a clean interface between them.
 - Run events are streamed per-run via SSE (`/runs/{id}/stream`); the stream is closed with a `None` sentinel when the run completes.
 - Log lines are streamed globally via SSE (`/logs/stream`); a separate endpoint (`/logs/file`) tails a specific file.
 - `_MAX_CHAT_HISTORY = 10` turns are retained in memory per session.
+
+---
+
+## Server - Exit behavior
+
+**Files:** `code/main.py`, `code/input_layer/api_mode.py`
+
+**Intent:** The API server must start and stop predictably across Windows and Linux, release its listen port on shutdown, and avoid leaving behind orphaned listener processes after an interrupt or termination request.
+
+**Claims:**
+- Startup is cross-platform; no shutdown or lifecycle requirement depends on a Windows-only mechanism.
+- The API mode shutdown path is signal-driven rather than tied to a specific key description.
+- User-facing startup text must describe shutdown generically as an interrupt/termination action, not rely on a single mandated keystroke.
+- On shutdown request, the server stop path sets shared shutdown state before waiting for worker threads to exit.
+- On shutdown request, the uvicorn server is asked to exit cleanly via its normal stop flag before any stronger fallback is considered.
+- The main thread waits for the server thread to finish for a bounded period; shutdown must not hang indefinitely.
+- If graceful shutdown times out, the process must still unwind through a normal Python exit path rather than using an unconditional hard process kill.
+- A successful clean shutdown releases the bound API port so a fresh process can bind the same port immediately afterward.
+- If startup cannot bind the configured port because another listener already owns it, startup fails fast with a clear message rather than emitting a raw socket traceback.
 
 ---
 

@@ -50,10 +50,18 @@ All functions return a plain-text status string confirming the operation or desc
 - `get_task(...)` - returns a formatted block with all fields of the named task.
 - All other functions return a confirmation or error string.
 
+## Tool Selection Guidance
+- For natural-language requests that ask to list, show, review, or summarise scheduled tasks, prefer `list_tasks()` immediately.
+- Treat phrases like `list all my scheduled tasks`, `show my tasks`, `what tasks do I have`, `what scheduled tasks are active`, and `what automation is configured` as direct matches for `list_tasks()`.
+- If the user names a specific task and asks for its details, use `get_task(name)` instead of `list_tasks()`.
+- If the user types the literal slash command `/tasks`, that is handled by the slash-command layer; otherwise, natural-language task-listing requests should use this skill.
+
 ## Triggers
 Invoke this skill when the prompt contains any of these concepts or phrases:
 - `create task`, `add task`, `schedule a task`
 - `list tasks`, `show tasks`, `what tasks are scheduled`
+- `list all my scheduled tasks`, `show my scheduled tasks`, `show all scheduled tasks`
+- `what tasks do I have`, `what scheduled tasks are active`, `what automation is configured`
 - `enable task`, `disable task`, `turn on task`, `turn off task`
 - `update task`, `change schedule`, `delete task`, `remove task`
 
@@ -65,6 +73,9 @@ when TaskManagement is invoked as one step within an interactive session plan.
 
 ## Examples
 - `list_tasks()` - show all scheduled tasks
+- User prompt: `list all my scheduled tasks` -> call `list_tasks()`
+- User prompt: `show my scheduled tasks` -> call `list_tasks()`
+- User prompt: `what tasks do I have configured` -> call `list_tasks()`
 - `get_task("PerformanceHeadroom")` - show full details of the named task
 - `create_task("DailyWeather", "08:00", "Check the weather forecast for today.")` - create a daily task
   - Returns: `"Task 'DailyWeather' created."`
