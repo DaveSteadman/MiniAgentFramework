@@ -11,6 +11,7 @@
 # ====================================================================================================
 
 import json
+import time
 from datetime import date
 from datetime import timedelta
 from pathlib import Path
@@ -36,6 +37,7 @@ from input_layer.slash_command_handlers_models import register_model_slash_comma
 from input_layer.slash_command_handlers_sessions import register_session_slash_commands
 from input_layer.slash_command_handlers_tasks import register_task_slash_commands
 from input_layer.slash_command_handlers_testing import register_testing_slash_commands
+from utils.workspace_utils import get_bootstrap_defaults_file
 from utils.workspace_utils import get_chatsessions_dir
 from utils.workspace_utils import get_controldata_dir
 from utils.workspace_utils import get_logs_dir
@@ -198,6 +200,10 @@ def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
 
 
 def _cmd_newchat(arg: str, ctx: SlashCommandContext) -> None:
+    if ctx.switch_session:
+        ctx.switch_session(f"web_{int(time.time() * 1000)}", "")
+        ctx.output("Conversation history cleared - starting a new chat.", "success")
+        return
     ctx.clear_history()
     ctx.output("Conversation history cleared - starting a new chat.", "success")
 
@@ -350,7 +356,7 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
 
 
 def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
-    defaults_path = get_controldata_dir() / "default.json"
+    defaults_path = get_bootstrap_defaults_file()
 
     def _load() -> dict:
         try:
@@ -362,7 +368,7 @@ def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
     if sub == "set":
         existing = _load()
         new_cfg = {"model": ctx.config.resolved_model, "ctx": ctx.config.num_ctx, "ollamahost": get_active_host()}
-        for key in ("agentport", "kiwixurl"):
+        for key in ("agentport", "kiwixurl", "ControlDataFolder", "UserDataFolder"):
             if key in existing:
                 new_cfg[key] = existing[key]
         try:

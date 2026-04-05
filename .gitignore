@@ -1,17 +1,11 @@
 *.pyc
 /code/__pycache__
-/data
-/logs
-/controldata/test_results
+/datauser
 
-/controldata/logs
-/code/testing/results
-/webresearch
-/code/skills/Memory/memory_store.txt
-/code/skills/Memory/memory_store.json
-/controldata/chatsessions
+/datacontrol/chatsessions
+/datacontrol/logs
+/datacontrol/test_results
+/datacontrol/chathistory.json
+/datacontrol/memory_store.json
+/datacontrol/task_queue.json
 
-controldata/chathistory.json
-controldata/task_queue.json
-
-controldata/scratchpad_dump.txt

@@ -465,6 +465,22 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
     font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.55;
+    display: inline-block;
+    padding: 6px 10px;
+}
+
+/* user bubble: bottom-right corner flat (speech tail side) */
+.chat-msg.user  .msg-text {
+    border:        1px solid rgba(96, 165, 250, 0.35);
+    border-radius: 10px 10px 0 10px;
+    background:    rgba(96, 165, 250, 0.05);
+}
+
+/* agent bubble: bottom-left corner flat (speech tail side) */
+.chat-msg.agent .msg-text {
+    border:        1px solid rgba(74, 222, 128, 0.35);
+    border-radius: 10px 10px 10px 0;
+    background:    rgba(74, 222, 128, 0.05);
 }
 
 .chat-msg .msg-meta {

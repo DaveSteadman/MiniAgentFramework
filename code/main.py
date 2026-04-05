@@ -191,9 +191,11 @@ from utils.runtime_logger import create_log_file_path
 from utils.runtime_logger import SessionLogger
 from input_layer.slash_commands import SlashCommandContext
 from input_layer.slash_commands import handle as handle_slash
+from utils.workspace_utils import get_bootstrap_defaults_file
 from utils.workspace_utils import get_chatsessions_day_dir
 from utils.workspace_utils import get_controldata_dir
 from utils.workspace_utils import get_logs_dir
+from utils.workspace_utils import get_user_data_dir
 
 
 # ====================================================================================================
@@ -203,7 +205,7 @@ DEFAULT_NUM_CTX      = 131072
 MAX_ITERATIONS       = 25   # safety cap; model exits naturally via native tool calling
 SKILLS_CATALOG_PATH  = Path(__file__).resolve().parent / "agent_core" / "skills" / "skills_catalog.json"
 LOG_DIR              = get_logs_dir()
-DEFAULTS_FILE        = get_controldata_dir() / "default.json"
+DEFAULTS_FILE        = get_bootstrap_defaults_file()
 
 # Keys accepted from default.json - must match the argparse dest names exactly.
 _DEFAULTS_KEYS = {"model", "ctx", "agentport", "ollamahost"}
@@ -211,7 +213,7 @@ _DEFAULTS_KEYS = {"model", "ctx", "agentport", "ollamahost"}
 # All valid keys in default.json - superset of _DEFAULTS_KEYS.
 # Keys here that are not in _DEFAULTS_KEYS are read directly by skills or slash commands
 # and are not passed through argparse.
-_KNOWN_KEYS = _DEFAULTS_KEYS | {"kiwixurl"}
+_KNOWN_KEYS = _DEFAULTS_KEYS | {"kiwixurl", "ControlDataFolder", "UserDataFolder"}
 
 
 # ====================================================================================================
@@ -408,10 +410,23 @@ def _run(args, logger, log_path) -> None:
 
     ollama_client.register_session_config(resolved_model, args.ctx)
 
+    _host_ok    = ollama_client.is_ollama_running()
+    try:
+        _known      = ollama_client.list_ollama_models()
+        _model_ok   = resolved_model in _known
+    except Exception:
+        _model_ok   = False
+    _cd = get_controldata_dir()
+    _ud = get_user_data_dir()
+    _tick = chr(0x2713)
+    _cross = chr(0x2717)
+
     logger.log_section("SYSTEM STATUS")
-    logger.log(f"Ollama host:     {ollama_client.get_active_host()}")
+    logger.log(f"Ollama host:     {ollama_client.get_active_host()} {_tick if _host_ok else _cross}")
     logger.log(f"Requested model: {args.model}")
-    logger.log(f"Resolved model:  {resolved_model}")
+    logger.log(f"Resolved model:  {resolved_model} {_tick if _model_ok else _cross}")
+    print(f"Control data:    {_cd} {_tick if _cd.exists() else _cross}", flush=True)
+    print(f"User data:       {_ud} {_tick if _ud.exists() else _cross}", flush=True)
     sequence_file_path = Path(os.environ["CHAT_SEQUENCE_FILE"]) if os.environ.get("CHAT_SEQUENCE_FILE") else None
     mode_label = (
         f"chat-sequence:{sequence_file_path.name}" if sequence_file_path else

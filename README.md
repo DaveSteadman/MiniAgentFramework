@@ -131,7 +131,7 @@ All options are optional. Unrecognised options are rejected at startup with a us
 
 ### Default overrides file
 
-`controldata/default.json` lets you persist your preferred settings without touching the command line. Values are applied after the factory defaults but before any explicit CLI argument, so a CLI flag always wins.
+`default.json` (repo root) lets you persist your preferred settings without touching the command line. Values are applied after the factory defaults but before any explicit CLI argument, so a CLI flag always wins.
 
 ```json
 {
@@ -190,7 +190,7 @@ Type `/help` at any prompt to see the full list. Tab completion is available in 
 | `/task delete <name>` | Permanently delete a task and remove its JSON file if it becomes empty. |
 | `/task run <name>` | Execute a task immediately, outside its normal schedule. Runs the same pipeline as the scheduler - useful for testing a task definition or triggering a one-off run. |
 | `/version` | Show the framework version. |
-| `/kiwixhost <url>` | Set the Kiwix server URL and save it to `controldata/default.json` (e.g. `/kiwixhost http://192.168.1.33:8080`). The URL is verified before saving. Takes effect immediately - no restart required. |
+| `/kiwixhost <url>` | Set the Kiwix server URL and save it to `default.json` (e.g. `/kiwixhost http://192.168.1.33:8080`). The URL is verified before saving. Takes effect immediately - no restart required. |
 
 ### Host targeting
 

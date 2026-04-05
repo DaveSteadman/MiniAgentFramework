@@ -12,7 +12,7 @@ Search and retrieve articles from a local Kiwix server. Kiwix hosts offline snap
   - `kiwix_get_article(article_path, max_words=600, timeout=15)`
 
 ## Configuration
-Set `"kiwixurl"` in `controldata/default.json` to the Kiwix server base URL, e.g.:
+Set `"kiwixurl"` in `default.json` (repo root) to the Kiwix server base URL, e.g.:
 ```json
 { "kiwixurl": "http://192.168.1.33:8080" }
 ```

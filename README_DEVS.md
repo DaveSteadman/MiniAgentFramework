@@ -162,7 +162,7 @@ code/
 ### `code/main.py`
 
 - Entry point.
-- Loads `controldata/default.json`.
+- Loads `default.json` (repo root).
 - Resolves model and host.
 - Loads `code/agent_core/skills/skills_catalog.json`.
 - Starts API mode via `input_layer/api_mode.py`.
@@ -401,7 +401,7 @@ Everything mutable lives under `controldata/`.
 
 | Path | Purpose |
 |---|---|
-| `controldata/default.json` | persisted startup defaults |
+| `default.json` | persisted startup defaults |
 | `controldata/chathistory.json` | UI input history |
 | `controldata/memory_store.json` | durable memory facts |
 | `controldata/chatsessions/` | session files and persisted conversation state |

@@ -8,6 +8,7 @@
 #
 # Path behavior:
 #   - bare file name or relative path resolves under data/
+#   - paths that already begin with "data/" are accepted and normalized
 #   - path starting with "./" resolves from workspace root (but still must be inside data/)
 #   - absolute paths are allowed only when they resolve inside the data/ directory
 # ====================================================================================================
@@ -19,6 +20,7 @@
 import json
 from pathlib import Path
 
+from utils.workspace_utils import get_user_data_dir
 from utils.workspace_utils import get_workspace_root
 
 
@@ -26,7 +28,7 @@ from utils.workspace_utils import get_workspace_root
 # MARK: CONSTANTS
 # ====================================================================================================
 WORKSPACE_ROOT   = get_workspace_root()
-DEFAULT_DATA_DIR = WORKSPACE_ROOT / "data"
+DEFAULT_DATA_DIR = get_user_data_dir()
 
 
 
@@ -46,9 +48,28 @@ def _sanitize_input_path(file_path: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
+def _normalize_data_relative_path(file_path: str) -> str:
+    """Accept either data-relative paths or workspace-relative paths rooted at data/.
+
+    This makes the FileAccess tools robust to results from find_files(), which reports
+    workspace-relative paths like "data/ai-sites.json". Passing that path back into
+    read_file()/write_file()/create_folder() should continue to work rather than creating
+    or looking up "data/data/...".
+    """
+    normalized = _sanitize_input_path(file_path)
+
+    if normalized == "data":
+        return ""
+    if normalized.startswith("data/"):
+        return normalized[5:]
+
+    return normalized
+
+
+# ----------------------------------------------------------------------------------------------------
 def _resolve_safe_path(file_path: str) -> Path:
     _ensure_data_dir()
-    normalized = _sanitize_input_path(file_path)
+    normalized = _normalize_data_relative_path(file_path)
 
     if normalized.startswith("./"):
         candidate = (WORKSPACE_ROOT / normalized[2:]).resolve()

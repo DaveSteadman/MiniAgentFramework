@@ -24,7 +24,10 @@ from agent_core.scratchpad import scratch_save
 from agent_core.session_runtime import bind_session
 from agent_core.skills_catalog_builder import build_tool_definitions
 from agent_core.skills_catalog_builder import load_skills_payload
+from agent_core.skills.FileAccess import file_access_skill as file_access_module
 from agent_core.skills.FileAccess.file_access_skill import write_file
+from agent_core.skills.FileAccess.file_access_skill import read_file
+from agent_core.skills.FileAccess.file_access_skill import create_folder
 from agent_core.skills.WebFetch.web_fetch_skill import fetch_page_text
 from agent_core.skills.WebSearch.web_search_skill import search_web
 from agent_core.skills.WebResearch.web_research_skill import research_traverse
@@ -32,6 +35,7 @@ from agent_core.skills.SystemInfo.system_info_skill import get_system_info_strin
 from agent_core.tool_loop import normalize_tool_request
 from input_layer import api as api_module
 from testing import test_wrapper as test_wrapper_module
+from utils import workspace_utils as workspace_utils_module
 
 
 class RegressionTests(unittest.TestCase):
@@ -59,6 +63,62 @@ class RegressionTests(unittest.TestCase):
         finally:
             if output_path.exists():
                 output_path.unlink()
+
+    def test_read_file_accepts_workspace_relative_data_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            data_dir = tmp_root / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            target = data_dir / "ai-sites.json"
+            target.write_text('{"ok": true}', encoding="utf-8")
+
+            with patch.object(file_access_module, "WORKSPACE_ROOT", tmp_root):
+                with patch.object(file_access_module, "DEFAULT_DATA_DIR", data_dir):
+                    result = read_file("data/ai-sites.json")
+
+        self.assertEqual(result, '{"ok": true}')
+
+    def test_create_folder_accepts_workspace_relative_data_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            data_dir = tmp_root / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+
+            with patch.object(file_access_module, "WORKSPACE_ROOT", tmp_root):
+                with patch.object(file_access_module, "DEFAULT_DATA_DIR", data_dir):
+                    result = create_folder("data/2026-04-05")
+
+            created = data_dir / "2026-04-05"
+            self.assertTrue(created.exists())
+            self.assertEqual(result, "Created folder: data/2026-04-05")
+
+    def test_workspace_utils_reads_folder_overrides_from_bootstrap_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            bootstrap = tmp_root / "default.json"
+            bootstrap.parent.mkdir(parents=True, exist_ok=True)
+            bootstrap.write_text(
+                '{\n'
+                '  "ControlDataFolder": "custom_control",\n'
+                '  "UserDataFolder": "userdata"\n'
+                '}\n',
+                encoding="utf-8",
+            )
+
+            workspace_utils_module.get_bootstrap_defaults_file.cache_clear()
+            workspace_utils_module._load_path_overrides.cache_clear()
+            workspace_utils_module.get_controldata_dir.cache_clear()
+            workspace_utils_module.get_user_data_dir.cache_clear()
+
+            try:
+                with patch.object(workspace_utils_module, "get_workspace_root", return_value=tmp_root):
+                    self.assertEqual(workspace_utils_module.get_controldata_dir(), (tmp_root / "custom_control").resolve())
+                    self.assertEqual(workspace_utils_module.get_user_data_dir(), (tmp_root / "userdata").resolve())
+            finally:
+                workspace_utils_module.get_bootstrap_defaults_file.cache_clear()
+                workspace_utils_module._load_path_overrides.cache_clear()
+                workspace_utils_module.get_controldata_dir.cache_clear()
+                workspace_utils_module.get_user_data_dir.cache_clear()
 
     def test_execute_tool_call_runs_datetime(self) -> None:
         result = execute_tool_call(

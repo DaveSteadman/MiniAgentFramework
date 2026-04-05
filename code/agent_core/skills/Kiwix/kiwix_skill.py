@@ -13,13 +13,13 @@
 #   kiwix_get_article(article_path, max_words) -- fetches and extracts text from an article
 #
 # Configuration:
-#   Set "kiwixurl" in controldata/default.json, e.g. "http://192.168.1.33:8080".
+#   Set "kiwixurl" in default.json (repo root), e.g. "http://192.168.1.33:8080".
 #   If the key is absent or the server is unreachable all functions return a human-readable
 #   error string - they never raise.
 #
 # Related modules:
 #   - webpage_utils.py           -- extract_content() used for article text extraction
-#   - workspace_utils.py         -- get_controldata_dir() for config loading
+#   - workspace_utils.py         -- get_workspace_root() for config loading
 #   - skills_catalog_builder.py  -- reads skill.md to build the catalog
 # ====================================================================================================
 
@@ -35,13 +35,13 @@ import urllib.request
 
 from utils.webpage_utils import extract_content
 from utils.webpage_utils import HTTP_HEADERS
-from utils.workspace_utils import get_controldata_dir
+from utils.workspace_utils import get_workspace_root
 
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-_DEFAULTS_PATH = get_controldata_dir() / "default.json"
+_DEFAULTS_PATH = get_workspace_root() / "default.json"
 
 MAX_RESULTS_CAP = 20
 DEFAULT_MAX_RESULTS = 5

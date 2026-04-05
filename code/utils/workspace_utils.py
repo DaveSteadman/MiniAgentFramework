@@ -32,6 +32,7 @@
 # ====================================================================================================
 # MARK: IMPORTS
 # ====================================================================================================
+import json
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -52,12 +53,55 @@ def get_workspace_root() -> Path:
 
 
 # ====================================================================================================
+# MARK: DEFAULTS BOOTSTRAP
+# ====================================================================================================
+@lru_cache(maxsize=1)
+def get_bootstrap_defaults_file() -> Path:
+    """Return the stable bootstrap location for default.json.
+
+    This file lives at <repo_root>/default.json (repo root) so startup can discover
+    path overrides - including ControlDataFolder itself - before any data folders
+    are resolved.
+    """
+    return get_workspace_root() / "default.json"
+
+
+@lru_cache(maxsize=1)
+def _load_path_overrides() -> dict:
+    """Load ControlDataFolder/UserDataFolder overrides from <repo_root>/default.json."""
+    path = get_bootstrap_defaults_file()
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return {}
+    except Exception:
+        return {}
+
+    overrides: dict[str, Path] = {}
+    for key in ("ControlDataFolder", "UserDataFolder"):
+        value = raw.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        p = Path(value.strip())
+        overrides[key] = p if p.is_absolute() else (get_workspace_root() / p).resolve()
+    return overrides
+
+
+# ====================================================================================================
 # MARK: CONTROLDATA DIRECTORY ACCESSORS
 # ====================================================================================================
 @lru_cache(maxsize=1)
 def get_controldata_dir() -> Path:
     """Return the absolute path to the controldata/ directory."""
-    return get_workspace_root() / "controldata"
+    return _load_path_overrides().get("ControlDataFolder", get_workspace_root() / "controldata")
+
+
+@lru_cache(maxsize=1)
+def get_user_data_dir() -> Path:
+    """Return the absolute path to the user-data directory."""
+    return _load_path_overrides().get("UserDataFolder", get_workspace_root() / "data")
 
 
 @lru_cache(maxsize=1)

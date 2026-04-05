@@ -11,7 +11,7 @@ from agent_core.ollama_client import register_session_config
 from agent_core.ollama_client import resolve_model_name
 from agent_core.ollama_client import stop_model
 from input_layer.slash_command_context import SlashCommandContext
-from utils.workspace_utils import get_controldata_dir
+from utils.workspace_utils import get_bootstrap_defaults_file
 
 
 def _cmd_models(arg: str, ctx: SlashCommandContext) -> None:
@@ -87,7 +87,7 @@ def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
 
 
 def _cmd_kiwixhost(arg: str, ctx: SlashCommandContext) -> None:
-    defaults_path = get_controldata_dir() / "default.json"
+    defaults_path = get_bootstrap_defaults_file()
 
     def _load_defaults() -> dict:
         try:

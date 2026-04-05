@@ -192,9 +192,7 @@ function _createPanelScrollController(panel, {
         if (state.suppressScrollEvent) return;
         if (isNearBottom()) {
             if (allowAutoResume) setLive(true);
-            return;
         }
-        setLive(false);
     });
 
     panel.addEventListener("wheel", (e) => {
@@ -858,6 +856,11 @@ function appendChatMessage(role, text, meta) {
     return wrap;
 }
 
+function clearChatPanel() {
+    dom.chat().replaceChildren();
+    if (_chatScrollCtl) _chatScrollCtl.followNow();
+}
+
 function appendChatLine(wrap, text) {
     if (!wrap) return;
     const body = wrap.querySelector(".msg-text");
@@ -945,7 +948,10 @@ function listenRun(runId) {
                 _sessionTitle = label;
                 dom.chatTitle().textContent = label;
                 _persistActiveSession();
-                appendChatMessage("agent", "\u2500\u2500\u2500 Session: " + (label || ev.session_id) + " \u2500\u2500\u2500");
+                clearChatPanel();
+                if (label) {
+                    appendChatMessage("agent", "\u2500\u2500\u2500 Session: " + label + " \u2500\u2500\u2500");
+                }
                 _loadSessionHistory(ev.session_id);
                 _loadCompletions();
             } else if (ev.type === "done") {
@@ -1329,6 +1335,7 @@ function init() {
     });
 
     // Restore any existing chat session after a browser refresh.
+    clearChatPanel();
     _loadSessionHistory(_sessionId);
 
     // Recenter the schedule timeline whenever the queue subpanel changes height.
