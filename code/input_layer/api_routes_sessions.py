@@ -21,6 +21,7 @@ def register_session_routes(
     handle_stoprun_immediate,
     load_session,
     save_session,
+    flush_scratch_session,
     build_summary_block,
     create_session_context,
     clear_session_scratch,
@@ -137,6 +138,7 @@ def register_session_routes(
                             session_context=session_context,
                             quiet=True,
                             conversation_summary=summary_block or None,
+                            on_tool_round_complete=lambda: flush_scratch_session(session_id),
                         )
                         history.add(_prompt, response)
                         summaries = save_session(session_id, history, summaries, p_tokens, get_active_num_ctx())

@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from agent_core.skills.WebFetch.web_fetch_skill import fetch_page_text
 from agent_core.skills.WebSearch.web_search_skill import search_web
 from agent_core.skills.WebResearch.web_research_skill import research_traverse
 from agent_core.skills.SystemInfo.system_info_skill import get_system_info_string
+from input_layer import api as api_module
 
 
 class RegressionTests(unittest.TestCase):
@@ -189,6 +191,34 @@ class RegressionTests(unittest.TestCase):
             max_words=10000,
         )
         self.assertEqual(result, "Great Expectations")
+
+    def test_session_write_path_uses_dated_folder_for_unnamed_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            named_dir = tmp_root / "named"
+            day_dir = tmp_root / "2026-04-04"
+
+            with patch.object(api_module, "get_chatsessions_dir", return_value=tmp_root):
+                with patch.object(api_module, "get_chatsessions_named_dir", return_value=named_dir):
+                    with patch.object(api_module, "get_chatsessions_day_dir", return_value=day_dir):
+                        result = api_module._session_write_path("web_1775338532521")
+
+        self.assertEqual(result, day_dir / "web_1775338532521.json")
+
+    def test_session_path_reads_legacy_root_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            named_dir = tmp_root / "named"
+            day_dir = tmp_root / "2026-04-04"
+            legacy_root = tmp_root / "web_1775338532521.json"
+            legacy_root.write_text("{}", encoding="utf-8")
+
+            with patch.object(api_module, "get_chatsessions_dir", return_value=tmp_root):
+                with patch.object(api_module, "get_chatsessions_named_dir", return_value=named_dir):
+                    with patch.object(api_module, "get_chatsessions_day_dir", return_value=day_dir):
+                        result = api_module._session_path("web_1775338532521")
+
+        self.assertEqual(result, legacy_root)
 
     def test_system_prompt_steers_exhaustive_fetches_into_scratchpad(self) -> None:
         system_message = _build_system_message("", None, {"skills": []})

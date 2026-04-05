@@ -33,7 +33,6 @@
 # ====================================================================================================
 import re
 import threading
-from pathlib import Path
 
 from agent_core.session_runtime import get_active_session_id
 
@@ -49,7 +48,6 @@ _KEY_RE = re.compile(r"^[a-zA-Z0-9_]+$")
 # ====================================================================================================
 _SESSION_STORES: dict[str, dict[str, str]] = {}
 _STORE_LOCK: threading.RLock = threading.RLock()
-_DUMP_ENABLED:  bool           = False   # toggled by /scratchdump slash command
 
 
 def _resolve_session_id(session_id: str | None = None) -> str:
@@ -97,57 +95,6 @@ def _validate_key(key: str) -> str:
 
 
 # ====================================================================================================
-# MARK: DUMP FILE CONTROL
-# ====================================================================================================
-def set_dump_enabled(enabled: bool) -> None:
-    global _DUMP_ENABLED
-    _DUMP_ENABLED = enabled
-
-
-# ----------------------------------------------------------------------------------------------------
-def get_dump_enabled() -> bool:
-    return _DUMP_ENABLED
-
-
-# ----------------------------------------------------------------------------------------------------
-def _dump_path() -> Path:
-    """Return the path to the persistent scratchpad dump file in controldata/."""
-    from utils.workspace_utils import get_controldata_dir  # lazy import - avoids circular at startup
-    return get_controldata_dir() / "scratchpad_dump.txt"
-
-
-# ----------------------------------------------------------------------------------------------------
-def _flush_to_file() -> None:
-    """Overwrite the dump file with the current store contents when dumping is enabled."""
-    if not _DUMP_ENABLED:
-        return
-    path = _dump_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(scratch_dump(), encoding="utf-8")
-    except Exception:
-        pass   # best-effort; failures must not break the skill call
-
-
-# ----------------------------------------------------------------------------------------------------
-def flush_now() -> Path | None:
-    """Force an immediate write to the dump file regardless of pending mutations.
-
-    Returns the Path written to, or None when dumping is disabled.
-    Used by the /scratchdump slash command to confirm the feature is active.
-    """
-    if not _DUMP_ENABLED:
-        return None
-    path = _dump_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(scratch_dump(), encoding="utf-8")
-        return path
-    except Exception:
-        return None
-
-
-# ====================================================================================================
 # MARK: PUBLIC API
 # ====================================================================================================
 def scratch_save(key: str, value: str, session_id: str | None = None) -> str:
@@ -157,7 +104,6 @@ def scratch_save(key: str, value: str, session_id: str | None = None) -> str:
     with _STORE_LOCK:
         store[validated] = str(value)
     result = f"Saved to scratchpad key '{validated}' ({len(str(value))} chars)"
-    _flush_to_file()
     return result
 
 
@@ -204,7 +150,6 @@ def scratch_delete(key: str, session_id: str | None = None) -> str:
         return f"Scratchpad key '{validated}' not found - nothing deleted."
     with _STORE_LOCK:
         del store[validated]
-    _flush_to_file()
     return f"Deleted scratchpad key '{validated}'."
 
 
@@ -324,7 +269,6 @@ def scratch_query(
                 return f"Error in save_result_key: {exc}"
             with _STORE_LOCK:
                 store[validated_save] = extracted
-            _flush_to_file()
             return f"[Result saved to '{validated_save}']\n{extracted}"
         return extracted
     except Exception as exc:
@@ -339,7 +283,6 @@ def scratch_clear(session_id: str | None = None) -> str:
     count = len(store)
     with _STORE_LOCK:
         _SESSION_STORES[resolved] = {}
-    _flush_to_file()
     return f"Scratchpad cleared ({count} key(s) removed)."
 
 

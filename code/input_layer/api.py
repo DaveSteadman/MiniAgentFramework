@@ -78,7 +78,9 @@ from agent_core.orchestration import get_sandbox_enabled
 from agent_core.orchestration import orchestrate_prompt
 from agent_core.orchestration import request_stop
 from agent_core.orchestration import set_sandbox_enabled
+from agent_core.scratchpad import get_store as get_scratch_store
 from agent_core.scratchpad import scratch_clear
+from agent_core.scratchpad import scratch_save as scratch_restore_key
 from input_layer.api_routes_logs import register_log_routes
 from input_layer.api_routes_sessions import register_session_routes
 from input_layer.api_routes_status import register_status_routes
@@ -420,12 +422,46 @@ def _handle_stoprun_immediate(run_id: str, run_q: "queue.Queue") -> None:
 # ====================================================================================================
 # MARK: SESSION HELPERS
 # ====================================================================================================
-def _session_path(session_id: str) -> Path:
-    """Return the canonical session file path - named/ subfolder first, then root."""
+def _session_write_path(session_id: str) -> Path:
+    """Return the canonical write path for a session file.
+
+    Named sessions stay in chatsessions/named/. Unnamed sessions are always written
+    to today's dated chatsessions subfolder.
+    """
     named = get_chatsessions_named_dir() / f"{session_id}.json"
     if named.exists():
         return named
-    return get_chatsessions_dir() / f"{session_id}.json"
+    return get_chatsessions_day_dir() / f"{session_id}.json"
+
+
+def _session_path(session_id: str) -> Path:
+    """Return the best available existing session file path for reads.
+
+    Preference order:
+    1. named/ session file
+    2. today's dated session file
+    3. legacy root-level session file
+    4. any dated session file under chatsessions/YYYY-MM-DD/
+
+    If no existing file is found, return the canonical write path.
+    """
+    named = get_chatsessions_named_dir() / f"{session_id}.json"
+    if named.exists():
+        return named
+
+    today = get_chatsessions_day_dir() / f"{session_id}.json"
+    if today.exists():
+        return today
+
+    legacy_root = get_chatsessions_dir() / f"{session_id}.json"
+    if legacy_root.exists():
+        return legacy_root
+
+    for dated_path in sorted(get_chatsessions_dir().glob(f"*/{session_id}.json"), reverse=True):
+        if dated_path.is_file():
+            return dated_path
+
+    return today
 
 
 def _load_session(session_id: str) -> tuple["ConversationHistory", list[dict]]:
@@ -437,13 +473,7 @@ def _load_session(session_id: str) -> tuple["ConversationHistory", list[dict]]:
     """
     history   = ConversationHistory()  # unlimited - compaction governs retention
     summaries: list[dict] = []
-    path      = _session_path(session_id)
-
-    # Fall back to legacy date-dir file if no root canonical file exists yet.
-    if not path.exists():
-        legacy = get_chatsessions_day_dir() / f"{session_id}.json"
-        if legacy.exists():
-            path = legacy
+    path = _session_path(session_id)
 
     if path.exists():
         try:
@@ -454,6 +484,8 @@ def _load_session(session_id: str) -> tuple["ConversationHistory", list[dict]]:
                 ar = t.get("assistant_response", "")
                 if up and ar:
                     history.add(up, ar)
+            for key, value in data.get("scratch", {}).items():
+                scratch_restore_key(key, str(value), session_id)
         except Exception:
             pass
     return history, summaries
@@ -552,16 +584,31 @@ def _save_session(
         batch_size  = max(1, len(pairs) // 2)
         pairs, summaries = _compact_old_turns(pairs, summaries, batch_size)
 
-    path = _session_path(session_id)
+    path = _session_write_path(session_id)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        named_scratch = {k: v for k, v in get_scratch_store(session_id).items() if not k.startswith("_tc_")}
         path.write_text(
-            json.dumps({"turns": pairs, "summaries": summaries}, indent=2, ensure_ascii=False),
+            json.dumps({"turns": pairs, "summaries": summaries, "scratch": named_scratch}, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
     except Exception:
         pass
     return summaries
+
+
+def _flush_scratch_to_session(session_id: str) -> None:
+    # Partial update: read existing JSON, replace "scratch" key only, write back.
+    # Called at the end of every tool round for crash-visibility; cheaper than a full save.
+    path = _session_write_path(session_id)
+    try:
+        named_scratch = {k: v for k, v in get_scratch_store(session_id).items() if not k.startswith("_tc_")}
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"turns": [], "summaries": []}
+        data["scratch"] = named_scratch
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
 
 
 # ====================================================================================================
@@ -634,6 +681,7 @@ register_session_routes(
     handle_stoprun_immediate=_handle_stoprun_immediate,
     load_session=_load_session,
     save_session=_save_session,
+    flush_scratch_session=_flush_scratch_to_session,
     build_summary_block=_build_summary_block,
     create_session_context=SessionContext,
     clear_session_scratch=scratch_clear,

@@ -187,6 +187,7 @@ def run_tool_loop(
     call_llm_chat,
     stop_requested,
     clear_stop,
+    on_tool_round_complete: object | None = None,
 ) -> tuple[str, int, int, bool, float, list[ToolCallResult]]:
     def _log(message: str = "") -> None:
         logger.log_file_only(message) if quiet else logger.log(message)
@@ -314,6 +315,12 @@ def run_tool_loop(
             tool_outputs.append(output)
             messages.append({"role": "tool", "tool_call_id": tc_id, "name": func_name, "content": result_content})
             context_map.append({"round": round_num, "role": "tool", "label": func_name, "chars": len(result_content), "auto_key": auto_scratch_key, "msg_idx": len(messages) - 1})
+
+        if on_tool_round_complete is not None:
+            try:
+                on_tool_round_complete()
+            except Exception:
+                pass
 
         _log_file_only(f"TOOL ROUND {round_num} - EXECUTION FLOW")
         _log_file_only(format_tool_outputs(round_outputs))

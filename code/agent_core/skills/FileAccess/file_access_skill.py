@@ -80,7 +80,10 @@ def write_file(path: str, content: str) -> str:
     except ValueError as err:
         return f"Error: {err}"
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(str(content), encoding="utf-8")
+    text_to_write = str(content).replace("\\n", "\n")  # unescape literal \n from model output
+    if not text_to_write.endswith("\n"):
+        text_to_write += "\n"
+    target_path.write_text(text_to_write, encoding="utf-8")
     return f"Wrote {target_path.relative_to(WORKSPACE_ROOT).as_posix()}"
 
 

@@ -22,15 +22,13 @@ from agent_core.ollama_client import register_session_config
 from agent_core.ollama_client import set_llm_timeout
 from agent_core.context_manager import get_last_context_map
 from agent_core.context_manager import get_last_messages
-from agent_core.orchestration import compact_context
-from agent_core.orchestration import format_context_map
+from agent_core.context_manager import compact_context
+from agent_core.context_manager import format_context_map
 from agent_core.orchestration import get_skill_guidance_enabled
 from agent_core.orchestration import request_stop
+from agent_core.orchestration import get_sandbox_enabled
 from agent_core.orchestration import set_sandbox_enabled
 from agent_core.orchestration import set_skill_guidance_enabled
-from agent_core.scratchpad import flush_now
-from agent_core.scratchpad import get_dump_enabled
-from agent_core.scratchpad import set_dump_enabled
 from agent_core.skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
 from agent_core.skills.Memory.memory_skill import MEMORY_STORE_PATH
 from input_layer.slash_command_context import SlashCommandContext
@@ -198,23 +196,6 @@ def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
     old = get_llm_timeout()
     set_llm_timeout(value)
     ctx.output(f"LLM timeout changed: {old}s \u2192 {value}s", "success")
-
-
-def _cmd_scratchdump(arg: str, ctx: SlashCommandContext) -> None:
-    sub = arg.strip().lower()
-    if sub == "on":
-        set_dump_enabled(True)
-        dump_path = get_controldata_dir() / "scratchpad_dump.txt"
-        ctx.output("Scratchpad file dump enabled.", "success")
-        ctx.output(f"  Writing to: {dump_path}", "dim")
-        ctx.output("  File is overwritten on every scratch_save / scratch_delete / scratch_clear.", "dim")
-        flush_now()
-    elif sub == "off":
-        set_dump_enabled(False)
-        ctx.output("Scratchpad file dump disabled.", "success")
-    else:
-        state = "on" if get_dump_enabled() else "off"
-        ctx.output(f"Usage: /scratchdump <on|off>  |  current: {state}", "dim")
 
 
 def _cmd_newchat(arg: str, ctx: SlashCommandContext) -> None:
@@ -437,7 +418,6 @@ _REGISTRY: dict[str, Callable] = {
     "/rounds": _cmd_rounds,
     "/timeout": _cmd_timeout,
     "/stoprun": _cmd_stoprun,
-    "/scratchdump": _cmd_scratchdump,
     "/newchat": _cmd_newchat,
     "/clearmemory": _cmd_clearmemory,
     "/reskill": _cmd_reskills,
@@ -454,7 +434,6 @@ _DESCRIPTIONS: dict[str, str] = {
     "/rounds": "<n>  Set max tool-call rounds per prompt (e.g. /rounds 6)",
     "/timeout": "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
     "/stoprun": "Cancel the active LLM run (after its current round) and clear all pending queued prompts",
-    "/scratchdump": "<on|off>  Write scratchpad contents to controldata/scratchpad_dump.txt on every change (default: off)",
     "/newchat": "Clear conversation history and session context, starting a fresh chat",
     "/clearmemory": "Delete the memory store file, starting with a blank memory next session",
     "/reskill": "[min|max]  Rebuild skills catalog and set system prompt guidance mode (default: min)",

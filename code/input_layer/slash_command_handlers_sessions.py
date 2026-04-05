@@ -4,8 +4,29 @@ import time
 from typing import Callable
 
 from input_layer.slash_command_context import SlashCommandContext
+from utils.workspace_utils import get_chatsessions_day_dir
 from utils.workspace_utils import get_chatsessions_dir
 from utils.workspace_utils import get_chatsessions_named_dir
+
+
+def _readable_session_path(session_id: str):
+    named_path = get_chatsessions_named_dir() / f"{session_id}.json"
+    if named_path.exists():
+        return named_path
+
+    day_path = get_chatsessions_day_dir() / f"{session_id}.json"
+    if day_path.exists():
+        return day_path
+
+    root_path = get_chatsessions_dir() / f"{session_id}.json"
+    if root_path.exists():
+        return root_path
+
+    dated_matches = sorted(get_chatsessions_dir().glob(f"*/{session_id}.json"), reverse=True)
+    if dated_matches:
+        return dated_matches[0]
+
+    return day_path
 
 
 def _session_file_scan() -> list[tuple]:
@@ -32,8 +53,16 @@ def _session_set_name(session_id: str, name: str) -> str:
     named_dir = get_chatsessions_named_dir()
     target_path = named_dir / f"{new_session_id}.json"
     current_named = named_dir / f"{session_id}.json"
-    root_path = get_chatsessions_dir() / f"{session_id}.json"
-    src_path = current_named if current_named.exists() else (root_path if root_path.exists() else None)
+    current_day = get_chatsessions_day_dir() / f"{session_id}.json"
+    legacy_root = get_chatsessions_dir() / f"{session_id}.json"
+    src_path = (
+        current_named if current_named.exists() else
+        (current_day if current_day.exists() else (legacy_root if legacy_root.exists() else None))
+    )
+
+    if src_path is None:
+        resolved = _readable_session_path(session_id)
+        src_path = resolved if resolved.exists() else None
 
     if target_path.exists() and src_path != target_path:
         raise ValueError(f"A session named '{name}' already exists. Choose a different name.")
@@ -210,9 +239,7 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
         if not ctx.session_id:
             ctx.output("No active session.", "dim")
             return
-        named_path = get_chatsessions_named_dir() / f"{ctx.session_id}.json"
-        root_path = get_chatsessions_dir() / f"{ctx.session_id}.json"
-        path = named_path if named_path.exists() else root_path
+        path = _readable_session_path(ctx.session_id)
         if not path.exists():
             ctx.output(f"Session '{ctx.session_id}' has no saved file yet.", "dim")
             return
