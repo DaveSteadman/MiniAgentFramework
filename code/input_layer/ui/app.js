@@ -13,7 +13,7 @@ const POLL_QUEUE_MS     = 3_000;
 const POLL_TIMELINE_MS  = 30_000;
 const POLL_LATEST_LOG_MS = 1_000;
 const MAX_QUEUE_ITEMS   = 10;
-const MAX_LOG_LINES     = 500;
+const MAX_LOG_LINES_LIVE = 500;
 const MAX_CHAT_MESSAGES = 200;
 
 // CSS class name constants used by toggleWrap.
@@ -24,8 +24,8 @@ const CSS_WRAP_ACTIVE = "wrap-active";
 const _ALL_COMMANDS = [
     "/help", "/models", "/model", "/ctx", "/rounds", "/timeout",
     "/stopmodel", "/stoprun", "/ollamahost", "/kiwixhost",
-    "/newchat", "/clearmemory", "/reskill", "/sandbox", "/scratchdump",
-    "/recall", "/deletelogs", "/test", "/testtrend", "/tasks", "/task",
+    "/newchat", "/clearmemory", "/reskill", "/sandbox",
+    "/deletelogs", "/test", "/testtrend", "/tasks", "/task",
     "/version", "/defaults", "/session",
 ];
 
@@ -48,12 +48,9 @@ let _ollamaReachable   = true;   // updated by refreshOllamaStatus; used in subm
 let _timelineRefreshTimer = null;
 let _queueResizeObserver  = null;
 let _currentLogPath       = "";
-let _logLive              = true;   // when false, refreshLatestLogFile() is suppressed
-let _logScrollTarget      = -1;     // target scrollTop for log smooth-scroll
-let _logScrollRafId       = null;   // rAF handle for log scroll loop
-let _chatScrollTarget     = -1;     // target scrollTop for chat smooth-scroll
-let _chatScrollRafId      = null;   // rAF handle for chat scroll loop
-let _chatLive             = true;   // when false, new messages do not auto-scroll
+let _logScrollCtl      = null;
+let _chatScrollCtl     = null;
+let _logLineLimit      = MAX_LOG_LINES_LIVE;
 
 // Tab-completion state.
 let _completions  = { sessions: [], test_files: [], task_names: [], models: [] };
@@ -80,6 +77,120 @@ const dom = {
     input:        () => $("chat-input"),
     sendBtn:      () => $("send-btn"),
 };
+
+// ====================================================================================================
+// MARK: PANEL AUTO-FOLLOW
+// ====================================================================================================
+
+function _createPanelScrollController(panel, {
+    threshold = 4,
+    initialLive = true,
+    allowAutoResume = true,
+    onLiveChange = null,
+} = {}) {
+    const state = {
+        panel,
+        threshold,
+        live: initialLive,
+        rafId: null,
+        suppressScrollEvent: false,
+        resizeObserver: null,
+    };
+
+    function _notify() {
+        if (typeof onLiveChange === "function") onLiveChange(state.live);
+    }
+
+    function isNearBottom() {
+        return (panel.scrollHeight - panel.scrollTop - panel.clientHeight) <= state.threshold;
+    }
+
+    function _flushFollow() {
+        state.rafId = null;
+        if (!state.live) return;
+        state.suppressScrollEvent = true;
+        panel.scrollTop = Math.max(0, panel.scrollHeight - panel.clientHeight);
+        requestAnimationFrame(() => {
+            state.suppressScrollEvent = false;
+        });
+    }
+
+    function followNow() {
+        if (!state.live) return;
+        if (state.rafId !== null) {
+            cancelAnimationFrame(state.rafId);
+            state.rafId = null;
+        }
+        _flushFollow();
+    }
+
+    function followSoon() {
+        if (!state.live) return;
+        if (state.rafId !== null) return;
+        state.rafId = requestAnimationFrame(_flushFollow);
+    }
+
+    function setLive(nextLive, { snap = false } = {}) {
+        const normalized = !!nextLive;
+        if (state.live === normalized) {
+            if (normalized && snap) followNow();
+            return;
+        }
+        state.live = normalized;
+        _notify();
+        if (state.live && snap) followNow();
+    }
+
+    function runWithoutScrollTracking(callback) {
+        state.suppressScrollEvent = true;
+        try {
+            callback();
+        } finally {
+            requestAnimationFrame(() => {
+                state.suppressScrollEvent = false;
+            });
+        }
+    }
+
+    panel.addEventListener("scroll", () => {
+        if (state.suppressScrollEvent) return;
+        if (isNearBottom()) {
+            if (allowAutoResume) setLive(true);
+            return;
+        }
+        setLive(false);
+    });
+
+    panel.addEventListener("wheel", (e) => {
+        if (e.deltaY < 0) setLive(false);
+        if (allowAutoResume && e.deltaY > 0 && isNearBottom()) setLive(true);
+    }, { passive: true });
+
+    panel.addEventListener("pointerdown", (e) => {
+        const rect = panel.getBoundingClientRect();
+        if (e.clientX >= rect.left + panel.clientWidth) {
+            setLive(false);
+        }
+    });
+
+    if (window.ResizeObserver) {
+        state.resizeObserver = new ResizeObserver(() => {
+            if (state.live) followNow();
+        });
+        state.resizeObserver.observe(panel);
+    }
+
+    _notify();
+    if (state.live) followSoon();
+    return {
+        get live() { return state.live; },
+        setLive,
+        followSoon,
+        followNow,
+        isNearBottom,
+        runWithoutScrollTracking,
+    };
+}
 
 // ====================================================================================================
 // MARK: FETCH HELPERS
@@ -435,28 +546,40 @@ function toggleWrap(bodyId, btnId) {
     const body = $(bodyId);
     const btn  = $(btnId);
     if (!body || !btn) return;
+    const ctl = body === dom.log() ? _logScrollCtl : (body === dom.chat() ? _chatScrollCtl : null);
+    const wasLive = ctl ? ctl.live : null;
 
-    // Capture anchor before reflow: first child whose bottom edge meets the panel midpoint.
-    const bodyRect = body.getBoundingClientRect();
-    const midY     = bodyRect.top + bodyRect.height / 2;
-    let anchor     = null;
-    for (const child of body.children) {
-        if (child.getBoundingClientRect().bottom >= midY) { anchor = child; break; }
-    }
-    const anchorTopBefore = anchor ? anchor.getBoundingClientRect().top : null;
-
-    // Toggle class - triggers browser reflow.
-    const nowrapOn = body.classList.toggle(CSS_NOWRAP);
-    btn.classList.toggle(CSS_WRAP_ACTIVE, !nowrapOn);
-
-    // After reflow the anchor may have moved in viewport coords (content height changed).
-    // Compensate by exactly that delta so the anchor stays at the same screen position.
-    if (anchor !== null && anchorTopBefore !== null) {
-        const delta = anchor.getBoundingClientRect().top - anchorTopBefore;
-        if (delta !== 0) {
-            body.scrollTop += delta;
+    const applyToggle = () => {
+        // Capture anchor before reflow: first child whose bottom edge meets the panel midpoint.
+        const bodyRect = body.getBoundingClientRect();
+        const midY     = bodyRect.top + bodyRect.height / 2;
+        let anchor     = null;
+        for (const child of body.children) {
+            if (child.getBoundingClientRect().bottom >= midY) { anchor = child; break; }
         }
+        const anchorTopBefore = anchor ? anchor.getBoundingClientRect().top : null;
+
+        // Toggle class - triggers browser reflow.
+        const nowrapOn = body.classList.toggle(CSS_NOWRAP);
+        btn.classList.toggle(CSS_WRAP_ACTIVE, !nowrapOn);
+
+        // After reflow the anchor may have moved in viewport coords (content height changed).
+        // Compensate by exactly that delta so the anchor stays at the same screen position.
+        if (anchor !== null && anchorTopBefore !== null) {
+            const delta = anchor.getBoundingClientRect().top - anchorTopBefore;
+            if (delta !== 0) {
+                body.scrollTop += delta;
+            }
+        }
+    };
+
+    if (ctl) {
+        ctl.runWithoutScrollTracking(applyToggle);
+        if (wasLive) ctl.followSoon();
+        return;
     }
+
+    applyToggle();
 }
 
 // ====================================================================================================
@@ -490,14 +613,12 @@ function appendLogLine(text) {
     div.textContent = text;
     el.appendChild(div);
     _logLines.push(div);
-    // Trim excess.
-    while (_logLines.length > MAX_LOG_LINES) {
+    // Trim excess only for aggregate live-stream mode; specific file views keep the full file.
+    while (_logLineLimit > 0 && _logLines.length > _logLineLimit) {
         const old = _logLines.shift();
         old.remove();
     }
-    if (_logLive) {
-        _scrollLogSmooth();
-    }
+    if (_logScrollCtl) _logScrollCtl.followSoon();
 }
 
 function clearLogLines() {
@@ -510,77 +631,6 @@ function _displayLogPath(path) {
     if (!path) return "";
     const normalized = path.replace(/\\/g, "/");
     return normalized.split("/").pop();
-}
-
-function _isLogNearBottom() {
-    const el = dom.log();
-    const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
-    return remaining < 1;
-}
-
-// Instantly clamp the log panel to the very bottom.
-function _snapLogToBottom() {
-    const el = dom.log();
-    el.scrollTop = el.scrollHeight - el.clientHeight;
-}
-
-// Smooth-scroll the log panel to the bottom using a rAF decay loop.
-// Only scrolls when _logLive is true or a rAF loop is already in flight.
-function _scrollLogSmooth() {
-    if (!_logLive && _logScrollRafId === null) return;
-    const el = dom.log();
-    _logScrollTarget = el.scrollHeight - el.clientHeight;
-    if (_logScrollRafId !== null) return;
-    function step() {
-        // If live mode was cancelled while the loop was in flight, stop immediately.
-        if (!_logLive) {
-            _logScrollRafId = null;
-            return;
-        }
-        const panel  = dom.log();
-        const target = _logScrollTarget;
-        const diff   = target - panel.scrollTop;
-        if (Math.abs(diff) < 1) {
-            panel.scrollTop = target;
-            _logScrollRafId = null;
-            return;
-        }
-        panel.scrollTop += diff * 0.3;
-        _logScrollRafId = requestAnimationFrame(step);
-    }
-    _logScrollRafId = requestAnimationFrame(step);
-}
-
-function _isChatNearBottom() {
-    const el = dom.chat();
-    return (el.scrollHeight - el.scrollTop - el.clientHeight) <= 4;
-}
-
-// Smooth scroll for the chat panel - same rAF decay pattern as _scrollLogSmooth.
-// Only scrolls when _chatLive is true or a rAF loop is already in flight.
-function _scrollChatSmooth() {
-    if (!_chatLive && _chatScrollRafId === null) return;
-    const el = dom.chat();
-    _chatScrollTarget = el.scrollHeight - el.clientHeight;
-    if (_chatScrollRafId !== null) return;
-    function step() {
-        // If live mode was cancelled while the loop was in flight, stop immediately.
-        if (!_chatLive) {
-            _chatScrollRafId = null;
-            return;
-        }
-        const panel  = dom.chat();
-        const target = _chatScrollTarget;
-        const diff   = target - panel.scrollTop;
-        if (Math.abs(diff) < 1) {
-            panel.scrollTop  = target;
-            _chatScrollRafId = null;
-            return;
-        }
-        panel.scrollTop += diff * 0.3;
-        _chatScrollRafId = requestAnimationFrame(step);
-    }
-    _chatScrollRafId = requestAnimationFrame(step);
 }
 
 function _setLogPanelTitle(path) {
@@ -604,6 +654,7 @@ function _setChatMessageMeta(wrap, meta) {
 function startLogStream() {
     if (_logEventSource) _logEventSource.close();
     _currentLogPath = "";
+    _logLineLimit = MAX_LOG_LINES_LIVE;
     _logEventSource = new EventSource(API_BASE + "/logs/stream");
     _logEventSource.onmessage = e => {
         try {
@@ -626,6 +677,7 @@ function startLogStream() {
 function _switchLogStream(path) {
     if (!path) return;
     _currentLogPath = path;
+    _logLineLimit = 0;
     _setLogPanelTitle(path);
 
     clearLogLines();
@@ -651,7 +703,7 @@ function _switchLogStream(path) {
 }
 
 async function refreshLatestLogFile() {
-    if (!_logLive) return;
+    if (!_logScrollCtl || !_logScrollCtl.live) return;
     const data = await apiFetch("/logs/latest");
     if (!data || !data.path) return;
     if (data.path === _currentLogPath) return;
@@ -662,18 +714,17 @@ async function refreshLatestLogFile() {
 
 function _setLiveBtn(on) {
     const btn = $("log-btn-live");
+    const body = dom.log();
     if (!btn) return;
     btn.classList.toggle(CSS_WRAP_ACTIVE, on);
+    if (body) body.classList.toggle("live-follow", on);
 }
 
 function toggleLogLive() {
-    _logLive = !_logLive;
-    _setLiveBtn(_logLive);
-    if (_logLive) {
-        // Snap back to latest file and resume auto-scroll.
-        refreshLatestLogFile();
-        _snapLogToBottom();
-    }
+    if (!_logScrollCtl) return;
+    const nextLive = !_logScrollCtl.live;
+    _logScrollCtl.setLive(nextLive, { snap: nextLive });
+    if (nextLive) refreshLatestLogFile();
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -730,10 +781,9 @@ async function logNavStep(delta) {
     const next = allFiles[idx + delta];
     if (!next) return;  // already at boundary
 
-    // Navigating away from live stream - pause live mode.
-    if (_logLive) {
-        _logLive = false;
-        _setLiveBtn(false);
+    // Navigating away from live stream pauses follow mode.
+    if (_logScrollCtl && _logScrollCtl.live) {
+        _logScrollCtl.setLive(false);
     }
 
     const logsDir = _currentLogPath.replace(/\\/g, "/").split("/logs/")[0] + "/logs/";
@@ -768,7 +818,7 @@ function appendChatMessage(role, text, meta) {
     }
 
     el.appendChild(wrap);
-    _scrollChatSmooth();
+    if (_chatScrollCtl) _chatScrollCtl.followSoon();
     return wrap;
 }
 
@@ -777,7 +827,7 @@ function appendChatLine(wrap, text) {
     const body = wrap.querySelector(".msg-text");
     if (!body) return;
     body.textContent = body.textContent ? body.textContent + "\n" + text : text;
-    _scrollChatSmooth();
+    if (_chatScrollCtl) _chatScrollCtl.followSoon();
 }
 
 function appendThinking(runId) {
@@ -787,7 +837,7 @@ function appendThinking(runId) {
     wrap.setAttribute("data-run-id", runId);
     wrap.textContent = "thinking...";
     el.appendChild(wrap);
-    _scrollChatSmooth();
+    if (_chatScrollCtl) _chatScrollCtl.followSoon();
 }
 
 function removeThinking(runId) {
@@ -817,7 +867,7 @@ function listenRun(runId) {
                 appendThinking(runId);
             } else if (ev.type === "log_file") {
                 // Only follow the new log file if live mode is active.
-                if (_logLive) {
+                if (_logScrollCtl && _logScrollCtl.live) {
                     _switchLogStream(ev.path);
                 }
             } else if (ev.type === "test_agent_response") {
@@ -920,6 +970,7 @@ async function _pushHistory(text) {
 function submitPrompt() {
     const text = dom.input().value.trim();
     if (!text) return;
+    _hideSuggest();
 
     // Slash commands run locally and don't need Ollama - always allow.
     // Real prompts are discarded with a message if Ollama is unreachable.
@@ -1227,54 +1278,11 @@ function init() {
     dom.input().addEventListener("blur",  () => { setTimeout(_hideSuggest, 120); });
     dom.sendBtn().addEventListener("click", submitPrompt);
 
-    // Chat scroll listener: reaching the bottom re-engages auto-scroll.
-    // The rAF guard prevents programmatic scroll events from toggling live mode.
-    dom.chat().addEventListener("scroll", () => {
-        if (_chatScrollRafId !== null) return;  // programmatic scroll; ignore
-        if (_isChatNearBottom()) {
-            _chatLive = true;
-        } else {
-            _chatLive = false;
-        }
-    });
-
-    // Wheel: any upward wheel input exits chat live mode immediately, even during a rAF
-    // loop (wheel events are fired independently of scroll, so the rAF guard above does
-    // not suppress them). This prevents rubber-banding when new messages arrive while
-    // the user is scrolling up.
-    dom.chat().addEventListener("wheel", (e) => {
-        if (e.deltaY < 0) _chatLive = false;
-    }, { passive: true });
-
-    // Scrollbar grab: pointerdown on the scrollbar track (right of clientWidth) also
-    // exits live mode so dragging the scrollbar upward does not rubber-band.
-    dom.chat().addEventListener("pointerdown", (e) => {
-        if (!_chatLive) return;
-        const el   = dom.chat();
-        const rect = el.getBoundingClientRect();
-        if (e.clientX >= rect.left + el.clientWidth) _chatLive = false;
-    });
-
-    // Wheel event: any upward wheel scroll in the log panel exits live mode.
-    // Re-entry is only via the live button - no auto-reselect.
-    dom.log().addEventListener("wheel", (e) => {
-        if (e.deltaY < 0 && _logLive) {
-            _logLive = false;
-            _setLiveBtn(false);
-        }
-    }, { passive: true });
-
-    // Scrollbar grab: pointerdown on the scrollbar track (right of clientWidth) exits
-    // live mode. Clicks inside the content area are ignored so normal interaction is
-    // unaffected. Re-entry is only via the live button.
-    dom.log().addEventListener("pointerdown", (e) => {
-        if (!_logLive) return;
-        const el   = dom.log();
-        const rect = el.getBoundingClientRect();
-        if (e.clientX >= rect.left + el.clientWidth) {
-            _logLive = false;
-            _setLiveBtn(false);
-        }
+    _chatScrollCtl = _createPanelScrollController(dom.chat(), { initialLive: true });
+    _logScrollCtl  = _createPanelScrollController(dom.log(), {
+        initialLive: true,
+        allowAutoResume: false,
+        onLiveChange: (live) => _setLiveBtn(live),
     });
 
     // Recenter the schedule timeline whenever the queue subpanel changes height.
@@ -1284,12 +1292,6 @@ function init() {
         });
         _queueResizeObserver.observe(dom.timelineQueue());
 
-        // Re-anchor log to bottom on panel resize (e.g. window shrink, splitter drag).
-        // Snap instantly so the resize scroll event fires with us already at the bottom,
-        // which means _isLogNearBottom() returns true - live mode stays engaged.
-        new ResizeObserver(() => {
-            if (_logLive) _snapLogToBottom();
-        }).observe(dom.log());
     }
 
     // Redraw timeline on resize so the row window recentres correctly.

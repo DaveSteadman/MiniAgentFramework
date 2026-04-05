@@ -112,7 +112,6 @@ The system is divided into two layers with a clean interface between them.
 - `scratch_peek(key, substring, context_chars)` returns a windowed view with `>>>match<<<` highlighting; it does not load the full value into the response.
 - Large tool results (>= 600 chars) are automatically saved to `_tc_r{round}_{funcname}` keys by the orchestration loop; the message thread receives a truncated version with a key reference.
 - Auto-saved keys are prefixed `_tc_` to distinguish them from user-named keys.
-- The scratchpad dump file is controlled by `/scratchdump on|off`; it is off by default.
 - `scratch_clear()` is called at session reset; it removes all keys including auto-saved ones.
 
 ### Token substitution
@@ -262,8 +261,6 @@ The system is divided into two layers with a clean interface between them.
 | `/clearmemory` | delete the persistent memory store |
 | `/reskill` | rebuild the skills catalog |
 | `/sandbox <on/off>` | toggle Python execution sandbox |
-| `/scratchdump <on/off>` | toggle scratchpad dump file |
-| `/recall <query>` | inspect memory store entries |
 | `/deletelogs` | delete log files |
 | `/test <file>` | run a test prompt sequence |
 | `/testtrend` | show pass/fail trend for recent test runs |

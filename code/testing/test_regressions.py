@@ -13,15 +13,15 @@ if str(CODE_DIR) not in sys.path:
     sys.path.insert(0, str(CODE_DIR))
 
 from agent_core.skill_executor import execute_tool_call
-from agent_core.orchestration import _build_system_message
-from agent_core.orchestration import _normalize_tool_request
 from agent_core.orchestration import _delegate_tls
 from agent_core.orchestration import delegate_subrun
 from agent_core.orchestration import OrchestratorConfig
+from agent_core.prompt_builder import build_system_message
 from agent_core.scratchpad import scratch_clear
 from agent_core.scratchpad import scratch_load
 from agent_core.scratchpad import scratch_query
 from agent_core.scratchpad import scratch_save
+from agent_core.session_runtime import bind_session
 from agent_core.skills_catalog_builder import build_tool_definitions
 from agent_core.skills_catalog_builder import load_skills_payload
 from agent_core.skills.FileAccess.file_access_skill import write_file
@@ -29,6 +29,7 @@ from agent_core.skills.WebFetch.web_fetch_skill import fetch_page_text
 from agent_core.skills.WebSearch.web_search_skill import search_web
 from agent_core.skills.WebResearch.web_research_skill import research_traverse
 from agent_core.skills.SystemInfo.system_info_skill import get_system_info_string
+from agent_core.tool_loop import normalize_tool_request
 from input_layer import api as api_module
 
 
@@ -78,7 +79,7 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(tool["function"]["parameters"]["type"], "object")
 
     def test_normalize_tool_request_rewrites_assistant_delegate_wrapper(self) -> None:
-        func_name, arguments, note = _normalize_tool_request(
+        func_name, arguments, note = normalize_tool_request(
             "assistant",
             {
                 "name": "delegate",
@@ -221,21 +222,21 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result, legacy_root)
 
     def test_system_prompt_steers_exhaustive_fetches_into_scratchpad(self) -> None:
-        system_message = _build_system_message("", None, {"skills": []})
+        system_message = build_system_message("", None, {"skills": []}, skill_guidance_enabled=False, sandbox_enabled=True)
 
         self.assertIn("complete list, full history, many-year table scan", system_message)
         self.assertIn("auto-saved to the scratchpad", system_message)
         self.assertIn("scratch_query or scratch_peek", system_message)
 
     def test_system_prompt_steers_research_traverse_to_page_keys(self) -> None:
-        system_message = _build_system_message("", None, {"skills": []})
+        system_message = build_system_message("", None, {"skills": []}, skill_guidance_enabled=False, sandbox_enabled=True)
 
         self.assertIn("page scratch keys", system_message)
         self.assertIn("research_page_*", system_message)
         self.assertIn("instead of scratch_load on the entire combined research bundle", system_message)
 
     def test_system_prompt_steers_article_harvests_away_from_hub_urls(self) -> None:
-        system_message = _build_system_message("", None, {"skills": []})
+        system_message = build_system_message("", None, {"skills": []}, skill_guidance_enabled=False, sandbox_enabled=True)
 
         self.assertIn("concrete article/detail pages", system_message)
         self.assertIn("Do not count homepages, category pages, topic pages, search-result pages, or section fronts", system_message)
@@ -278,6 +279,41 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(second["status"], "ok")
         self.assertEqual(first["depth"], 1)
         self.assertEqual(second["depth"], 1)
+
+    def test_delegate_subrun_binds_child_to_parent_session(self) -> None:
+        dummy_logger = SimpleNamespace(log_file_only=lambda *_args, **_kwargs: None)
+        config = OrchestratorConfig(
+            resolved_model="gpt-oss:20b",
+            num_ctx=131072,
+            max_iterations=3,
+            skills_payload=self.skills_payload,
+        )
+
+        previous_logger = getattr(_delegate_tls, "logger", None)
+        previous_depth = getattr(_delegate_tls, "delegate_depth", 0)
+        previous_config = getattr(_delegate_tls, "config", None)
+
+        _delegate_tls.logger = dummy_logger
+        _delegate_tls.delegate_depth = 0
+        _delegate_tls.config = config
+
+        captured = {}
+
+        def fake_orchestrate_prompt(**kwargs):
+            captured["bound_session_id"] = kwargs.get("bound_session_id")
+            return ("ok", 0, 0, True, 0.0)
+
+        try:
+            with bind_session("parent_session"):
+                with patch("agent_core.orchestration.orchestrate_prompt", side_effect=fake_orchestrate_prompt):
+                    result = delegate_subrun("child task", scratchpad_visible_keys=["saved_key"])
+        finally:
+            _delegate_tls.logger = previous_logger
+            _delegate_tls.delegate_depth = previous_depth
+            _delegate_tls.config = previous_config
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(captured["bound_session_id"], "parent_session")
 
     def test_search_web_prefer_article_urls_promotes_article_results(self) -> None:
         html_text = "".join([

@@ -171,7 +171,6 @@ Type `/help` at any prompt to see the full list. Tab completion is available in 
 | `/newchat` | Clear conversation history and session context, starting a fresh chat without restarting. |
 | `/reskill [min\|max]` | Rebuild the skills catalog and set system prompt guidance mode. Defaults to `min` if omitted. |
 | `/sandbox <on\|off>` | Toggle the Python sandbox for `CodeExecute` skill. `on` (default) enforces the built-in allow-list; `off` removes restrictions (use with care). |
-| `/scratchdump <on\|off>` | Write scratchpad contents to `controldata/scratchpad_dump.txt` on every change. Defaults to `off`. |
 | `/deletelogs <days>` | Delete date-folders older than N days under `controldata/logs/`, `controldata/chatsessions/`, and `controldata/test_results/`. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
 | `/defaults` | Show the active `default.json` settings and file path. `/defaults set` overwrites the file with the current model, ctx, and host values. |
 | `/session name <alias>` | Give the current session a persistent name. The session is saved to `controldata/chatsessions/named/` and can be resumed after a restart. |
@@ -184,7 +183,6 @@ Type `/help` at any prompt to see the full list. Tab completion is available in 
 | `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. The argument is matched as a case-insensitive substring, so `/test web` matches `test_web_skill_prompts.json`. |
 | `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. All results are written to a single combined CSV file (`test_results_<timestamp>_all.csv`) with a banner printed between each suite. Prints a final summary with host, model, elapsed time, and cumulative pass/fail count. |
 | `/testtrend [prompts-file]` | Show pass-rate trend across all historical test runs, optionally filtered by prompts file. |
-| `/recall` | Show a summary of all skill outputs stored in the current session context (URLs fetched, files written, search results, etc.). |
 | `/tasks` | List all scheduled tasks with their status (on/off), schedule, and prompt preview. |
 | `/task enable <name>` | Enable a task by name. The API scheduler picks up the change on its next reload cycle. |
 | `/task disable <name>` | Disable a task without deleting it. |

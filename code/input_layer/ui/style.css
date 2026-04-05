@@ -270,6 +270,8 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
     font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.6;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
 }
@@ -288,6 +290,16 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
 .panel-body::-webkit-scrollbar       { width: 4px; height: 4px; }
 .panel-body::-webkit-scrollbar-track  { background: transparent; }
 .panel-body::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 2px; }
+
+/* Live-follow mode is intentionally non-manual: hide the scrollbar to make the auto state explicit. */
+.panel-body.live-follow {
+    scrollbar-width: none;
+}
+
+.panel-body.live-follow::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
 
 /* ============================================================
    TIMELINE PANEL  (col 1, rows 1)

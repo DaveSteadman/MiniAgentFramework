@@ -2,6 +2,7 @@ import copy
 import threading
 
 from agent_core.scratchpad import scratch_save as scratch_auto_save
+from agent_core.session_runtime import get_active_session_id
 from utils.workspace_utils import trunc
 
 
@@ -69,6 +70,7 @@ def run_delegate_subrun(
     child_prompt = f"{instructions}\n\n{prompt}".strip() if instructions else prompt
     child_iterations = max(1, min(int(max_iterations), 8))
     allowlist_set = set(tools_allowlist) if tools_allowlist else None
+    parent_session_id = get_active_session_id()
 
     def _skill_in_allowlist(skill: dict) -> bool:
         if allowlist_set is None:
@@ -107,6 +109,7 @@ def run_delegate_subrun(
             quiet=True,
             delegate_depth=depth + 1,
             scratchpad_visible_keys=scratchpad_visible_keys,
+            bound_session_id=parent_session_id,
         )
         status = "ok" if run_success else "error"
     except Exception as exc:

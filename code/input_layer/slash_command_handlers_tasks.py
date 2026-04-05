@@ -40,7 +40,10 @@ def _cmd_tasks(arg: str, ctx: SlashCommandContext) -> None:
                 sched_str = schedule_type
             prompts = task.get("prompts", [])
             status = "on " if enabled else "off"
-            first_prompt = trunc(prompts[0], 60) if prompts else "(no prompts)"
+            first_prompt = prompts[0] if prompts else ""
+            if isinstance(first_prompt, dict):
+                first_prompt = first_prompt.get("prompt", "")
+            first_prompt = trunc(str(first_prompt), 60) if first_prompt else "(no prompts)"
             ctx.output(f"  [{status}]  {name:<28}  {sched_str:<18}  {first_prompt}", "item")
             total += 1
 

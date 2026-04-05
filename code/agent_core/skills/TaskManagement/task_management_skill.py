@@ -135,7 +135,10 @@ def list_tasks() -> str:
             prompts  = task.get("prompts", [])
             status   = "on " if enabled else "off"
             sched    = _schedule_str(schedule)
-            preview  = trunc(prompts[0], 70) if prompts else "(no prompts)"
+            first_prompt = prompts[0] if prompts else ""
+            if isinstance(first_prompt, dict):
+                first_prompt = first_prompt.get("prompt", "")
+            preview  = trunc(str(first_prompt), 70) if first_prompt else "(no prompts)"
             lines.append(f"  [{status}]  {name:<28}  {sched:<18}  {preview}")
             total += 1
 

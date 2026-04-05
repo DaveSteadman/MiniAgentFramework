@@ -186,7 +186,19 @@ class SessionContext:
         if persist_path and persist_path.exists():
             try:
                 data = json.loads(persist_path.read_text(encoding="utf-8"))
-                self._turns = data.get("turns", [])
+                raw_turns = data.get("turns", [])
+                if isinstance(raw_turns, list):
+                    # API session history files also use a top-level "turns" key but store
+                    # plain conversation pairs without the structured session-context schema.
+                    # Ignore those entries here instead of crashing on missing keys like "turn".
+                    self._turns = [
+                        turn for turn in raw_turns
+                        if isinstance(turn, dict)
+                        and "turn" in turn
+                        and "user_prompt" in turn
+                        and "assistant_response" in turn
+                        and "skill_outputs" in turn
+                    ]
             except Exception:
                 pass
 
@@ -365,6 +377,7 @@ def orchestrate_prompt(
     scratchpad_visible_keys: list[str] | None = None,
     conversation_summary: str | None = None,
     on_tool_round_complete: object | None = None,
+    bound_session_id: str | None = None,
 ) -> tuple[str, int, int, bool, float]:
     """Run the tool-calling pipeline for one prompt.
 
@@ -390,7 +403,11 @@ def orchestrate_prompt(
     from agent_core.skills_catalog_builder import load_skills_payload
 
     user_prompt = resolve_tokens(user_prompt)
-    active_session_id = session_context.session_id if session_context is not None else "default"
+    active_session_id = (
+        str(bound_session_id).strip()
+        if bound_session_id is not None and str(bound_session_id).strip()
+        else (session_context.session_id if session_context is not None else "default")
+    )
 
     with bind_session(active_session_id):
         # -- Auto-reload catalog if the runtime JSON catalog has been updated since last load --

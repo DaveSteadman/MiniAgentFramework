@@ -40,7 +40,6 @@ from utils.workspace_utils import get_chatsessions_dir
 from utils.workspace_utils import get_controldata_dir
 from utils.workspace_utils import get_logs_dir
 from utils.workspace_utils import get_test_results_dir
-from utils.workspace_utils import trunc
 from utils.version import __version__
 
 
@@ -263,28 +262,6 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output(f"Error rebuilding skills catalog: {exc}", "error")
 
 
-def _cmd_recall(arg: str, ctx: SlashCommandContext) -> None:
-    session_context = ctx.session_context
-    if session_context is None:
-        ctx.output("No session context available in this mode.", "error")
-        return
-    count = session_context.turn_count()
-    if count == 0:
-        ctx.output("Session context is empty - no skill outputs stored yet.", "dim")
-        return
-    ctx.output(f"Session context: {count} turn(s) stored", "info")
-    for turn in session_context.get_turns():
-        ctx.output(f"  Turn {turn['turn']}: {trunc(turn['user_prompt'], 80)}", "item")
-        for output in turn["skill_outputs"]:
-            skill = output.get("skill", "?")
-            summary = output.get("summary", "")
-            url = output.get("url", "")
-            extra = f"  url: {url}" if url else ""
-            ctx.output(f"    [{skill}] {summary}{extra}", "dim")
-            for result in output.get("results", []):
-                ctx.output(f"      \u00b7 {result.get('url', '')}  {trunc(result.get('title', ''), 60)}", "dim")
-
-
 def _cmd_stoprun(arg: str, ctx: SlashCommandContext) -> None:
     request_stop()
     ctx.output("Stop requested. Active run will halt after its current LLM round.", "info")
@@ -421,7 +398,6 @@ _REGISTRY: dict[str, Callable] = {
     "/newchat": _cmd_newchat,
     "/clearmemory": _cmd_clearmemory,
     "/reskill": _cmd_reskills,
-    "/recall": _cmd_recall,
     "/version": _cmd_version,
     "/sandbox": _cmd_sandbox,
     "/deletelogs": _cmd_deletelogs,
@@ -437,7 +413,6 @@ _DESCRIPTIONS: dict[str, str] = {
     "/newchat": "Clear conversation history and session context, starting a fresh chat",
     "/clearmemory": "Delete the memory store file, starting with a blank memory next session",
     "/reskill": "[min|max]  Rebuild skills catalog and set system prompt guidance mode (default: min)",
-    "/recall": "Show a summary of prior skill outputs stored in this session's context",
     "/version": "Show framework version, active model, and context size",
     "/sandbox": "<on|off>  Enable/disable Python code execution sandbox (import whitelist + blocked builtins)",
     "/deletelogs": "<days>  Delete log, chatsession, and test_results date-folders older than N days (e.g. /deletelogs 10)",
