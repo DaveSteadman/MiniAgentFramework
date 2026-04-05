@@ -38,10 +38,17 @@ def _session_file_scan() -> list[tuple]:
         if path.is_file():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
+                if not data.get("name") and path.stem.startswith("session_"):
+                    data["name"] = path.stem.removeprefix("session_")
                 results.append((path, data))
             except Exception:
                 pass
     return results
+
+
+def _named_session_scan() -> list[tuple]:
+    """Return only user-visible named sessions."""
+    return [(path, data) for path, data in _session_file_scan() if data.get("name")]
 
 
 def _session_set_name(session_id: str, name: str) -> str:
@@ -109,8 +116,7 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
         return
 
     if sub == "list":
-        sessions = _session_file_scan()
-        named = [(path, data) for path, data in sessions if data.get("name")]
+        named = _named_session_scan()
         if not named:
             ctx.output("No named sessions found. Use /session name <alias> to name the current session.", "dim")
             return
@@ -132,7 +138,7 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
         if not ctx.switch_session:
             ctx.output("Session switching is not available in this mode.", "error")
             return
-        sessions = _session_file_scan()
+        sessions = _named_session_scan()
         match = next(((path, data) for path, data in sessions if data.get("name", "").lower() == rest.lower()), None)
         if not match:
             ctx.output(f"No session named '{rest}' found. Use /session list to see available sessions.", "error")
@@ -154,7 +160,7 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
         if not ctx.switch_session:
             ctx.output("Session switching is not available in this mode.", "error")
             return
-        sessions = _session_file_scan()
+        sessions = _named_session_scan()
         match = next(((path, data) for path, data in sessions if data.get("name", "").lower() == src_name.lower()), None)
         if not match:
             match = next(((path, data) for path, data in sessions if src_name.lower() in data.get("name", "").lower()), None)
@@ -196,7 +202,7 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
         if not rest:
             ctx.output("Usage: /session delete <name>  |  /session delete all", "dim")
             return
-        sessions = _session_file_scan()
+        sessions = _named_session_scan()
         if rest.lower() == "all":
             if not sessions:
                 ctx.output("No named sessions to delete.", "dim")
@@ -262,7 +268,7 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output("  /session resume <name>               - switch to a named session", "item")
     ctx.output("  /session resumecopy <old> <new>      - copy a session to a new name and resume it", "item")
     ctx.output("  /session park                        - save current session and start a fresh one", "item")
-    ctx.output("  /session delete <name>               - delete a named session (substring match)", "item")
+    ctx.output("  /session delete <name>               - delete a named session (exact match)", "item")
     ctx.output("  /session delete all                  - delete all named sessions", "item")
     ctx.output("  /session info                        - show current session details", "item")
 

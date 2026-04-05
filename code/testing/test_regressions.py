@@ -31,6 +31,7 @@ from agent_core.skills.WebResearch.web_research_skill import research_traverse
 from agent_core.skills.SystemInfo.system_info_skill import get_system_info_string
 from agent_core.tool_loop import normalize_tool_request
 from input_layer import api as api_module
+from testing import test_wrapper as test_wrapper_module
 
 
 class RegressionTests(unittest.TestCase):
@@ -333,6 +334,24 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(article_results[0]["page_kind"], "article")
         self.assertEqual(article_results[1]["page_kind"], "hub")
 
+    def test_search_web_extracts_results_when_ddg_attributes_are_reordered(self) -> None:
+        html_text = "".join([
+            '<a class="result-link result-link--body" rel="nofollow" href="https://example.com/news/openai-releases-new-model">OpenAI releases new model</a>',
+            '<td class="result-snippet">Detailed article page.</td>',
+            '<a data-testid="organic" href="https://example.com/category/ai" class="result-link extra">AI category</a>',
+            '<td class="result-snippet">Hub page for AI coverage.</td>',
+        ])
+
+        with patch("agent_core.skills.WebSearch.web_search_skill._fetch_html", return_value=(html_text, "https://lite.duckduckgo.com/lite/?q=ai")):
+            with patch("agent_core.skills.WebSearch.web_search_skill.time.sleep", return_value=None):
+                results = search_web(query="recent AI news", max_results=2, timeout_seconds=10)
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["title"], "OpenAI releases new model")
+        self.assertEqual(results[0]["page_kind"], "article")
+        self.assertEqual(results[1]["title"], "AI category")
+        self.assertEqual(results[1]["page_kind"], "hub")
+
     def test_research_traverse_saves_page_level_scratchpad_artifacts(self) -> None:
         search_results = [
             {
@@ -366,6 +385,25 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("Williams won at Imola in 1981 and 1982.", saved_page)
         self.assertIn(f"SCRATCH_KEY: {scratch_key}", result["full_report"])
         self.assertNotIn("EXTRACT:", result["full_report"])
+
+    def test_test_wrapper_fails_single_prompt_on_no_results_output(self) -> None:
+        passed, reason = test_wrapper_module._single_item_pass_status(
+            exit_code=0,
+            final_output="No results were found for this query.",
+            log_file="",
+        )
+        self.assertFalse(passed)
+        self.assertEqual(reason, "Search returned no results")
+
+    def test_test_wrapper_fails_exchange_on_search_failure_output(self) -> None:
+        passed, reason = test_wrapper_module._exchange_pass_status(
+            exit_code=0,
+            turn_outputs={1: "Search failed: HTTP 429", 2: "fallback"},
+            any_assert_fail=False,
+            log_file="",
+        )
+        self.assertFalse(passed)
+        self.assertEqual(reason, "Search returned no results")
 
     def test_scratch_query_rejects_exhaustive_answers_from_search_results(self) -> None:
         search_results = (

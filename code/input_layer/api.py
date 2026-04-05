@@ -588,8 +588,21 @@ def _save_session(
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         named_scratch = {k: v for k, v in get_scratch_store(session_id).items() if not k.startswith("_tc_")}
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        session_name = existing.get("name")
+        if not session_name and session_id.startswith("session_"):
+            session_name = session_id.removeprefix("session_")
         path.write_text(
-            json.dumps({"turns": pairs, "summaries": summaries, "scratch": named_scratch}, indent=2, ensure_ascii=False),
+            json.dumps(
+                {
+                    "name": session_name,
+                    "turns": pairs,
+                    "summaries": summaries,
+                    "scratch": named_scratch,
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
     except Exception:

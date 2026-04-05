@@ -7,7 +7,8 @@
 // MARK: CONFIG
 // ====================================================================================================
 const API_BASE          = "";           // same origin
-let   _sessionId        = "web_" + Date.now();  // mutable: /session resume changes this
+const SESSION_STORAGE_KEY = "maf.activeSession";
+let   _sessionId        = _restoreSessionId();  // mutable: /session resume changes this
 const POLL_OLLAMA_MS    = 10_000;
 const POLL_QUEUE_MS     = 3_000;
 const POLL_TIMELINE_MS  = 30_000;
@@ -51,6 +52,7 @@ let _currentLogPath       = "";
 let _logScrollCtl      = null;
 let _chatScrollCtl     = null;
 let _logLineLimit      = MAX_LOG_LINES_LIVE;
+let _sessionTitle      = "";
 
 // Tab-completion state.
 let _completions  = { sessions: [], test_files: [], task_names: [], models: [] };
@@ -77,6 +79,40 @@ const dom = {
     input:        () => $("chat-input"),
     sendBtn:      () => $("send-btn"),
 };
+
+function _restoreSessionId() {
+    try {
+        const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        if (raw) {
+            const saved = JSON.parse(raw);
+            if (saved && typeof saved.sessionId === "string" && saved.sessionId.trim()) {
+                return saved.sessionId.trim();
+            }
+        }
+    } catch (_) { /* ignore */ }
+    return "web_" + Date.now();
+}
+
+function _persistActiveSession() {
+    try {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+            sessionId: _sessionId,
+            title: _sessionTitle,
+        }));
+    } catch (_) { /* ignore */ }
+}
+
+function _restoreSessionUiState() {
+    try {
+        const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (saved && typeof saved.title === "string") {
+            _sessionTitle = saved.title;
+            dom.chatTitle().textContent = _sessionTitle;
+        }
+    } catch (_) { /* ignore */ }
+}
 
 // ====================================================================================================
 // MARK: PANEL AUTO-FOLLOW
@@ -899,12 +935,16 @@ function listenRun(runId) {
             } else if (ev.type === "rename_session") {
                 // Same chat, file renamed - update routing ID and title in-place; no history replay.
                 _sessionId = ev.session_id;
-                dom.chatTitle().textContent = ev.name || "";
+                _sessionTitle = ev.name || "";
+                dom.chatTitle().textContent = _sessionTitle;
+                _persistActiveSession();
                 _loadCompletions();
             } else if (ev.type === "switch_session") {
                 _sessionId = ev.session_id;
                 const label = ev.name || "";
+                _sessionTitle = label;
                 dom.chatTitle().textContent = label;
+                _persistActiveSession();
                 appendChatMessage("agent", "\u2500\u2500\u2500 Session: " + (label || ev.session_id) + " \u2500\u2500\u2500");
                 _loadSessionHistory(ev.session_id);
                 _loadCompletions();
@@ -1263,6 +1303,9 @@ function startPolling() {
 // ====================================================================================================
 
 function init() {
+    _restoreSessionUiState();
+    _persistActiveSession();
+
     // Initialise drag-resize splitters and apply stored layout.
     initSplitters();
 
@@ -1284,6 +1327,9 @@ function init() {
         allowAutoResume: false,
         onLiveChange: (live) => _setLiveBtn(live),
     });
+
+    // Restore any existing chat session after a browser refresh.
+    _loadSessionHistory(_sessionId);
 
     // Recenter the schedule timeline whenever the queue subpanel changes height.
     if (window.ResizeObserver) {

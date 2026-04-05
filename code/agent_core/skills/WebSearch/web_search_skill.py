@@ -38,10 +38,14 @@ _DDG_PAGE_URL = "https://lite.duckduckgo.com/lite/?q={q}&s={s}&dc={dc}"  # pagin
 _REDIRECT_RE = re.compile(r"/l/\?uddg=([^&\"'>]+)")
 
 # DuckDuckGo Lite result block patterns.
-# Lite uses single-quoted attributes and puts href before class:
-#   <a rel="nofollow" href="//duckduckgo.com/l/?uddg=..." class='result-link'>Title</a>
+# Attribute order and class composition can vary, so match anchors using lookaheads:
+# - class attribute contains the token "result-link"
+# - href attribute is present somewhere in the tag
 _ANCHOR_RE  = re.compile(
-    r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]+class=[\"']result-link[\"'][^>]*>(.*?)</a>",
+    r"<a"
+    r"(?=[^>]*\bclass=[\"'][^\"']*\bresult-link\b[^\"']*[\"'])"
+    r"(?=[^>]*\bhref=[\"']([^\"']+)[\"'])"
+    r"[^>]*>(.*?)</a>",
     re.IGNORECASE | re.DOTALL,
 )
 _SNIPPET_RE = re.compile(

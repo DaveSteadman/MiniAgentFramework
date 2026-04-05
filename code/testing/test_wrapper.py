@@ -231,12 +231,27 @@ def _log_indicates_validation_failure(log_file: str) -> bool:
 
 
 # ----------------------------------------------------------------------------------------------------
+def _output_indicates_no_results(final_output: str) -> bool:
+    """Return True when the model output is a known no-results / search-failed sentinel."""
+    text = (final_output or "").strip().lower()
+    if not text:
+        return False
+    return (
+        text.startswith("no results were found")
+        or text.startswith("search failed")
+        or text.startswith("duckduckgo returned no results")
+    )
+
+
+# ----------------------------------------------------------------------------------------------------
 def _single_item_pass_status(exit_code: int, final_output: str, log_file: str) -> tuple[bool, str]:
     """Return (passed, failure_reason) for a standalone prompt run."""
     if exit_code != 0:
         return False, f"Exit code {exit_code}"
     if not final_output.strip():
         return False, "Empty final output"
+    if _output_indicates_no_results(final_output):
+        return False, "Search returned no results"
     if _log_indicates_validation_failure(log_file):
         return False, "Orchestration validation failed"
     return True, ""
@@ -251,6 +266,8 @@ def _exchange_pass_status(exit_code: int, turn_outputs: dict[int, str], any_asse
         return False, "Assert failed"
     if any(not str(output).strip() for output in turn_outputs.values()):
         return False, "One or more turns produced empty output"
+    if any(_output_indicates_no_results(str(output)) for output in turn_outputs.values()):
+        return False, "Search returned no results"
     if _log_indicates_validation_failure(log_file):
         return False, "Orchestration validation failed"
     return True, ""
