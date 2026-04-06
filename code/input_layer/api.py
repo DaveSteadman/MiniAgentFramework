@@ -266,6 +266,37 @@ def serve_favicon():
     return FileResponse(str(ico), media_type="image/x-icon", headers={"Cache-Control": "no-cache"})
 
 
+@app.get("/README.md", include_in_schema=False)
+def serve_readme():
+    import markdown
+    from starlette.responses import HTMLResponse
+    readme = _WEB_DIR.parent.parent.parent / "README.md"
+    if not readme.exists():
+        from starlette.responses import Response
+        return Response(status_code=404)
+    md_text = readme.read_text(encoding="utf-8")
+    body    = markdown.markdown(md_text, extensions=["tables", "fenced_code", "toc"])
+    html    = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<title>README</title>"
+        "<style>"
+        "body{font-family:sans-serif;max-width:860px;margin:40px auto;padding:0 20px;line-height:1.6;color:#ccc;background:#1a1a1a}"
+        "h1,h2,h3{color:#e8e8e8;border-bottom:1px solid #333;padding-bottom:4px}"
+        "a{color:#6ab0f5}"
+        "code{background:#2a2a2a;padding:2px 5px;border-radius:3px;font-size:0.9em}"
+        "pre{background:#2a2a2a;padding:12px;border-radius:4px;overflow-x:auto}"
+        "pre code{background:none;padding:0}"
+        "table{border-collapse:collapse;width:100%}"
+        "th,td{border:1px solid #444;padding:6px 12px;text-align:left}"
+        "th{background:#2a2a2a}"
+        "blockquote{border-left:3px solid #555;margin:0;padding-left:16px;color:#999}"
+        "</style></head><body>"
+        + body
+        + "</body></html>"
+    )
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
+
+
 register_status_routes(
     app,
     get_active_host=get_active_host,

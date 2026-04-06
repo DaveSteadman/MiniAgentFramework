@@ -28,3 +28,14 @@ Output:
 
 Housekeeping:
 - After writing the report, save an updated version of ai-sites.json with successful sites at the top and unsuccessful ones at the bottom. If a web search highlighted a new source, add it to the list.
+
+
+
+
+
+
+
+
+
+Read through all the AI related articles on MiniFeed for the last 5 days.
+The required output is a de-duplicated report of the top 5 stories. 250 words each.

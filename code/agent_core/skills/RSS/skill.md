@@ -19,7 +19,7 @@ Search and retrieve news articles that have been ingested by a local MiniFeed se
 
 For any request to read, summarise, or report on news articles from MiniFeed, follow this pattern exactly:
 
-1. **Search or browse** - call `rss_search(query, limit=20)` or `rss_get_recent(hours=N, limit=50)` to get a list of entries. Each entry includes `id`, `domain`, and `headline`.
+1. **Search or browse** - call `rss_search(query, limit=20)` (do NOT pass `fetch_full=True` here) or `rss_get_recent(hours=N, limit=20)` to get a readable list of entries. Each entry includes `id`, `domain`, and `headline`. Do NOT use `research_traverse` or `search_web` for this step - MiniFeed is local and cannot be found on the web.
 2. **Select** - pick the entries you want to read. Filter on `headline` to confirm AI-relevance. For "top stories" tasks, prefer entries from established news outlets (Ars Technica, BBC, Wired, TechCrunch, Tom's Hardware, The Verge) over personal blogs, GitHub repos, and App Store pages.
 3. **Fetch body text** - for each selected entry call `rss_get_entry(domain=entry["domain"], entry_id=entry["id"])`. This returns the full `page_text` already scraped and stored by MiniFeed.
 4. **Summarise** - produce the output from the `page_text` returned in step 3.
@@ -122,6 +122,33 @@ fetch_page_text(...)    # WRONG - page_text is already in entry; there is nothin
 **RULE 2 - For topic-specific requests, start with rss_search, not rss_get_recent.**
 `rss_get_recent` returns whatever was ingested most recently across all feeds. For an AI news request, the most recent items are almost certainly not AI stories - they will be general news. Start with `rss_search(query="artificial intelligence", limit=50)` to get topic-matched results immediately.
 
+**RULE 3 - Never use research_traverse or search_web to discover MiniFeed content.**
+MiniFeed is a local server - it has no public URL and cannot be found by any web search engine. Calling `research_traverse` or `search_web` with a query mentioning "MiniFeed" will return nothing useful. All article discovery must use the RSS tools: `rss_search`, `rss_get_recent`, `rss_get_entries`, or `rss_get_entry`. Web tools are only valid if the user explicitly asks for information from the open web that is not in MiniFeed.
+
+Wrong pattern (never do this):
+```
+research_traverse(query="AI industry stories from MiniFeed ...")  # WRONG - MiniFeed is local; web search cannot reach it
+search_web(query="MiniFeed AI articles ...")                      # WRONG - same reason
+```
+
+**RULE 4 - Never use fetch_full=True on bulk searches.**
+Using `fetch_full=True` with `limit > 2` produces a response too large to read inline, triggering scratchpad auto-save and hiding all results from the model in the same round. Always search with `fetch_full=False` (or omit it) to get a readable list of headlines and IDs, then call `rss_get_entry(domain, entry_id)` individually for each article you actually need to summarise.
+
+Wrong pattern (never do this):
+```
+rss_search(query="AI", limit=20, fetch_full="true")     # WRONG - floods context; auto-saves to scratchpad
+rss_get_recent(hours="120", limit=50)                   # already fine since fetch_full defaults False, but limit 50 still floods
+```
+
+Correct pattern:
+```
+results = rss_search(query="artificial intelligence", limit=20)   # fetch_full omitted - returns headlines + ids only
+# inspect results in-context, pick the 5 most relevant by headline
+for entry_id, domain in selected:
+    entry = rss_get_entry(domain=domain, entry_id=entry_id)       # fetch body one at a time
+    # summarise from entry["page_text"]
+```
+
 **Always check MiniFeed before reaching for web tools.**
 MiniFeed is a local server - queries are instant and free. For any news, headlines, or recent articles request, call rss_search or rss_get_recent first. Only move to web tools if MiniFeed returns no useful results or the user explicitly asks for a broader search.
 
@@ -130,9 +157,6 @@ When a result is large it is auto-saved and the visible portion ends with `... [
 
 **`rss_search` and `rss_get_recent` always search all domains - there is no domain filter.**
 Domain names are internal to MiniFeed and MiniAgentFramework has no way to know them in advance. Use `rss_list_domains` only when you need exact domain names to pass to `rss_get_entries` or `rss_get_entry`.
-
-**Use `fetch_full=True` only for single-article fetches - never on bulk searches.**
-When summarising multiple articles, search with fetch_full=False to get headlines and entry IDs, then call `rss_get_entry(domain, entry_id)` for each article individually. Using fetch_full=True with limit > 2 makes the response too large to read inline and triggers scratchpad auto-save, hiding results from the model.
 
 **Never use web fetch tools on URLs returned by MiniFeed results** (see RULE 1 above).
 The article body text is already scraped and stored locally. Call `rss_get_entry(domain, entry_id)` using the `domain` and `id` fields from the result.

@@ -38,6 +38,12 @@ def normalize_tool_request(func_name: str, arguments: dict | None) -> tuple[str,
             normalized_name = nested_name
             normalized_args = dict(nested_args)
             note_parts.append(f"assistant(...) -> {nested_name}(...)")
+    # Handle model wrapping a tool call in its own function-call envelope:
+    # e.g. get_page_links(id='functions.get_page_links', arguments={...})
+    nested_args = normalized_args.get("arguments")
+    if isinstance(nested_args, dict) and "id" in normalized_args and len(normalized_args) == 2:
+        normalized_args = dict(nested_args)
+        note_parts.append(f"{normalized_name}(id=..., arguments={{...}}) -> {normalized_name}(...)")
     if normalized_name == "delegate" and "task" in normalized_args and "prompt" not in normalized_args:
         normalized_args["prompt"] = normalized_args.pop("task")
         note_parts.append("delegate(task=...) -> delegate(prompt=...)")
