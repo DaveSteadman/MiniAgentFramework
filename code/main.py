@@ -213,7 +213,7 @@ _DEFAULTS_KEYS = {"model", "ctx", "agentport", "ollamahost"}
 # All valid keys in default.json - superset of _DEFAULTS_KEYS.
 # Keys here that are not in _DEFAULTS_KEYS are read directly by skills or slash commands
 # and are not passed through argparse.
-_KNOWN_KEYS = _DEFAULTS_KEYS | {"kiwixurl", "ControlDataFolder", "UserDataFolder"}
+_KNOWN_KEYS = _DEFAULTS_KEYS | {"kiwixurl", "ControlDataFolder", "UserDataFolder", "minifeedurl"}
 
 
 # ====================================================================================================

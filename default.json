@@ -4,6 +4,7 @@
   "ollamahost": "http://MONTBLANC:11434",
   "agentport": 8000,
   "kiwixurl": "http://192.168.1.33:8080",
+  "minifeedurl": "http://localhost:8100",
   "ControlDataFolder": "datacontrol",
   "UserDataFolder": "datauser"
 }

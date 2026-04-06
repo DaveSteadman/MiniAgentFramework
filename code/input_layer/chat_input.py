@@ -4,7 +4,7 @@
 # Persistent prompt-history file I/O for the web UI session.
 #
 # Exposes load_history() and append_to_history() so the API endpoints and the web UI
-# client can share a single history store (controldata/chathistory.json) without
+# client can share a single history store (via get_chathistory_file()) without
 # duplicating file-handling logic.
 #
 # Related modules:
@@ -19,13 +19,13 @@ import json
 import threading
 from pathlib import Path
 
-from utils.workspace_utils import get_workspace_root
+from utils.workspace_utils import get_chathistory_file
 
 
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-_HISTORY_FILE = get_workspace_root() / "controldata" / "chathistory.json"
+_HISTORY_FILE = get_chathistory_file()
 _MAX_HISTORY  = 32    # hard cap; oldest entries are dropped when exceeded
 _HISTORY_LOCK = threading.Lock()
 

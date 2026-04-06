@@ -42,7 +42,9 @@ from collections import OrderedDict
 from html.parser import HTMLParser
 
 try:
-    from bs4 import BeautifulSoup
+    from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+    import warnings
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
@@ -165,10 +167,20 @@ def fetch_html(url: str, timeout: float = _DEFAULT_TIMEOUT, no_cache: bool = Fal
             elif "deflate" in content_encoding:
                 import zlib
                 raw = zlib.decompress(raw)
+            # Prefer strict UTF-8 decode when the raw bytes are valid UTF-8,
+            # regardless of what the Content-Type header declares.  Many sites
+            # serve UTF-8 content but label it as windows-1252 or latin-1,
+            # which causes the â€" / â€˜ corruption pattern when decoded naively.
+            # Only fall back to the declared charset when the bytes are not
+            # valid UTF-8 (e.g. legacy Latin / CP1252 pages that really do use
+            # single-byte encodings).
             try:
-                result = raw.decode(charset, errors="replace"), final_url
-            except LookupError:
-                result = raw.decode("utf-8", errors="replace"), final_url
+                result = raw.decode("utf-8", errors="strict"), final_url
+            except (UnicodeDecodeError, LookupError):
+                try:
+                    result = raw.decode(charset, errors="replace"), final_url
+                except LookupError:
+                    result = raw.decode("utf-8", errors="replace"), final_url
 
             # Store in cache, evicting the oldest entry if at capacity.
             # Skip caching when no_cache is set so callers can re-fetch freely.

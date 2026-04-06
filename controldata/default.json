@@ -1,9 +1,0 @@
-{
-  "model": "nemotron-cascade-2:latest",
-  "ctx": 256000,
-  "ollamahost": "http://MONTBLANC:11434",
-  "agentport": 8000,
-  "kiwixurl": "http://192.168.1.33:8080",
-  "ControlDataFolder": "data-control",
-  "UserDataFolder": "data-user"
-}

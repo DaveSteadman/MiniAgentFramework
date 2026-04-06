@@ -276,6 +276,62 @@
       }
     },
     {
+      "skill_name": "RSS Skill",
+      "relative_path": "agent_core/skills/RSS/skill.md",
+      "purpose": "Search and retrieve news articles that have been ingested by a local MiniFeed server. MiniFeed is a separate background service that monitors RSS feeds, fetches article body text, and stores everything in a full-text searchable database. This skill is a clean REST consumer - it never parses RSS directly. Use it to find recent news, browse articles by topic domain, or retrieve full article body text.",
+      "module": "code/agent_core/skills/RSS/rss_skill.py",
+      "trigger_keyword": "rss",
+      "triggers": [
+        "latest news",
+        "recent articles",
+        "news briefing",
+        "news summary",
+        "what is happening in",
+        "headlines for",
+        "top stories",
+        "search news for",
+        "find articles about",
+        "what happened in the last",
+        "last N hours",
+        "past 24 hours",
+        "what feeds are tracked",
+        "what topics are monitored",
+        "rss",
+        "feeds",
+        "news feed"
+      ],
+      "functions": [
+        "rss_list_domains()",
+        "rss_list_feeds()",
+        "rss_search(query, limit=20, fetch_full=False)",
+        "rss_get_recent(hours=24, limit=20)",
+        "rss_get_entries(domain, limit=20, offset=0)",
+        "rss_get_entry(domain, entry_id)"
+      ],
+      "inputs": [],
+      "outputs": [],
+      "param_descriptions": {
+        "rss_search": {
+          "query": "search terms matched against entry headlines and article body text. Searches all ingested domains. Multiple terms can be space- or comma-separated (e.g. c-130 pilot or c-130, pilot) - all terms must appear in the article (AND logic). Phrase order does not matter.",
+          "limit": "maximum number of results to return.",
+          "fetch_full": "when true, each result includes page_text (the full scraped article body already stored in MiniFeed - no web fetch needed). Do not use on the first search call. For multiple articles, search with fetch_full=False first to get headlines and IDs, then call rss_get_entry for each article you need to summarise. Using fetch_full=True with more than 2 results will produce a response too large to read inline."
+        },
+        "rss_get_recent": {
+          "hours": "look back window in hours (e.g. 6, 48). Searches all ingested domains.",
+          "limit": "maximum entries to return."
+        },
+        "rss_get_entries": {
+          "domain": "domain name to browse (from `rss_list_domains`).",
+          "limit": "entries per page.",
+          "offset": "skip this many entries for pagination."
+        },
+        "rss_get_entry": {
+          "domain": "domain the entry belongs to.",
+          "entry_id": "numeric entry ID (from a search or browse result)."
+        }
+      }
+    },
+    {
       "skill_name": "Scratchpad Skill",
       "relative_path": "agent_core/skills/Scratchpad/skill.md",
       "purpose": "Store and retrieve named working values within a session so that bulk data returned by other skills\n(web pages, file content, computation results) can be parked under a short key and referenced later\nwithout consuming context window space.  Use this skill whenever the plan involves multi-step tool\nchains where an intermediate result is needed again in a later step.  Do not use it for durable\nfacts that should survive across sessions - use the Memory skill for that.",

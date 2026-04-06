@@ -11,7 +11,9 @@ from utils.workspace_utils import get_workspace_root
 from utils.workspace_utils import trunc
 
 
-TOOL_MSG_MAX_CHARS: int = 1500
+# Cap for tool result content in messages; longer content is auto-saved to scratchpad and truncated in the message with a reference note
+TOOL_MSG_MAX_CHARS: int = 4096 
+
 TOOL_MSG_AUTO_SCRATCH_MIN: int = 600
 
 _COT_PLANNING_RE = re.compile(
