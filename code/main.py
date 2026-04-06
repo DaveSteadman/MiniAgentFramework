@@ -377,6 +377,12 @@ def main() -> None:
 
 # ----------------------------------------------------------------------------------------------------
 def _run(args, logger, log_path) -> None:
+    # When running as a subprocess (test_wrapper, pipe) Windows defaults stdout
+    # to cp1252, which cannot encode the tick/cross characters printed in the
+    # status block.  Reconfigure to UTF-8 early so all print() calls survive.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     register_llm_call_logger(logger.log_file_only)
 
     # Set the active host once; all subsequent Ollama calls use this value.

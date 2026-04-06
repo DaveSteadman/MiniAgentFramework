@@ -6,6 +6,7 @@ from typing import Callable
 
 from agent_core.ollama_client import get_active_host
 from input_layer.slash_command_context import SlashCommandContext
+from utils.workspace_utils import get_test_prompts_dir
 from utils.workspace_utils import get_test_results_dir
 
 
@@ -157,11 +158,11 @@ def _cmd_test(arg: str, ctx: SlashCommandContext) -> None:
     import sys
     import time
 
-    test_prompts_dir = Path(__file__).resolve().parent.parent.parent / "controldata" / "test_prompts"
+    test_prompts_dir = get_test_prompts_dir()
     wrapper = Path(__file__).resolve().parent.parent / "testing" / "test_wrapper.py"
 
     if not arg:
-        ctx.output("Usage: /test <prompts-file|all>  (filename from controldata/test_prompts/ or full path)", "dim")
+        ctx.output(f"Usage: /test <prompts-file|all>  (filename from {test_prompts_dir} or full path)", "dim")
         if test_prompts_dir.exists():
             files = sorted(test_prompts_dir.glob("*.json"))
             if files:

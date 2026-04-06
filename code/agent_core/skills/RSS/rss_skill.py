@@ -169,6 +169,11 @@ def rss_search(
         data = _get_json(url)
         if not data:
             return f'No results found for "{query}".'
+        # Strip the raw URL so the model cannot pass it to fetch_page_text.
+        # Article body text is already stored in MiniFeed - use rss_get_entry(domain, id) instead.
+        if isinstance(data, list):
+            for entry in data:
+                entry.pop("url", None)
         return data
     except RuntimeError as exc:
         return str(exc)
@@ -181,9 +186,9 @@ def rss_get_recent(
 ) -> list[dict] | str:
     """Return entries ingested within the last N hours, newest first.
 
-    Searches all domains. Each entry includes id, feed_name, headline, url,
+    Searches all domains. Each entry includes id, feed_name, headline,
     published, ingested_at, and domain fields.
-    Use rss_get_entry if body text is needed for a specific result.
+    Use rss_get_entry(domain, id) to retrieve the article body text.
     """
     base = _get_base_url()
     if not base:
@@ -199,6 +204,11 @@ def rss_get_recent(
         data = _get_json(url)
         if not data:
             return f'No entries found in the last {hours} hours.'
+        # Strip the raw URL so the model cannot pass it to fetch_page_text.
+        # Article body text is already stored in MiniFeed - use rss_get_entry(domain, id) instead.
+        if isinstance(data, list):
+            for entry in data:
+                entry.pop("url", None)
         return data
     except RuntimeError as exc:
         return str(exc)
@@ -237,8 +247,10 @@ def rss_get_entries(
 def rss_get_entry(domain: str, entry_id: int) -> dict | str:
     """Fetch a single RSS entry by domain and numeric ID.
 
-    Returns the full record including page_text (body text of the article
-    as ingested by MiniFeed). Returns an error string on failure.
+    Returns the full record including page_text (the article body already
+    scraped and stored by MiniFeed). Use page_text directly for summarisation
+    - do NOT call fetch_page_text on the entry URL.
+    Returns an error string on failure.
     """
     base = _get_base_url()
     if not base:
@@ -250,6 +262,10 @@ def rss_get_entry(domain: str, entry_id: int) -> dict | str:
         data = _get_json(url)
         if not data:
             return f'Entry {entry_id} not found in domain "{domain}".'
+        # Strip the raw URL - page_text already contains the article body.
+        # There is no need to call fetch_page_text on this URL.
+        if isinstance(data, dict):
+            data.pop("url", None)
         return data
     except RuntimeError as exc:
         return str(exc)

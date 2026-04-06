@@ -36,6 +36,7 @@ from agent_core.tool_loop import normalize_tool_request
 from input_layer import api as api_module
 from testing import test_wrapper as test_wrapper_module
 from utils import workspace_utils as workspace_utils_module
+from utils.workspace_utils import get_user_data_dir
 
 
 class RegressionTests(unittest.TestCase):
@@ -47,14 +48,16 @@ class RegressionTests(unittest.TestCase):
         scratch_clear()
 
     def test_write_file_writes_system_info_csv(self) -> None:
-        output_path = REPO_ROOT / "data" / "test_systemstats_regression.csv"
+        user_data_dir = get_user_data_dir()
+        output_path = user_data_dir / "test_systemstats_regression.csv"
+        expected_label = f"{user_data_dir.name}/test_systemstats_regression.csv"
 
         if output_path.exists():
             output_path.unlink()
 
         try:
             result = write_file("test_systemstats_regression.csv", get_system_info_string())
-            self.assertEqual(result, "Wrote data/test_systemstats_regression.csv")
+            self.assertEqual(result, f"Wrote {expected_label}")
             self.assertTrue(output_path.exists())
 
             content = output_path.read_text(encoding="utf-8")

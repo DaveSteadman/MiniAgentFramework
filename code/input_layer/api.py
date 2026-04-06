@@ -97,6 +97,7 @@ from utils.workspace_utils import get_chatsessions_day_dir
 from utils.workspace_utils import get_chatsessions_dir
 from utils.workspace_utils import get_chatsessions_named_dir
 from utils.workspace_utils import get_logs_dir
+from utils.workspace_utils import get_test_prompts_dir
 from utils.version import __version__
 
 
@@ -294,7 +295,7 @@ def get_completions():
             except Exception:
                 pass
 
-    test_dir   = Path(__file__).resolve().parent.parent.parent / "controldata" / "test_prompts"
+    test_dir   = get_test_prompts_dir()
     test_files = []
     if test_dir.exists():
         test_files = sorted(p.stem for p in test_dir.glob("*.json"))

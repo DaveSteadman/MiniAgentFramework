@@ -313,7 +313,7 @@
       "param_descriptions": {
         "rss_search": {
           "query": "search terms matched against entry headlines and article body text. Searches all ingested domains. Multiple terms can be space- or comma-separated (e.g. c-130 pilot or c-130, pilot) - all terms must appear in the article (AND logic). Phrase order does not matter.",
-          "limit": "maximum number of results to return.",
+          "limit": "maximum number of results to return. The parameter name is `limit` - not `max_results`, `count`, or `num`.",
           "fetch_full": "when true, each result includes page_text (the full scraped article body already stored in MiniFeed - no web fetch needed). Do not use on the first search call. For multiple articles, search with fetch_full=False first to get headlines and IDs, then call rss_get_entry for each article you need to summarise. Using fetch_full=True with more than 2 results will produce a response too large to read inline."
         },
         "rss_get_recent": {
