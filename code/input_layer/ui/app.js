@@ -1029,6 +1029,7 @@ function submitPrompt() {
 
     // Clear input and reset history cursor immediately so the user can keep typing.
     dom.input().value = "";
+    _resizeTextarea();
     _historyIdx = -1;
 
     // Dispatch immediately so the Python queue reflects the real prompt backlog.
@@ -1283,6 +1284,14 @@ function onInputKeydown(e) {
 function onInputChange() {
     // Update the suggestion dropdown on every keystroke.
     _updateSuggest();
+    // Grow the textarea to fit its content.
+    _resizeTextarea();
+}
+
+function _resizeTextarea() {
+    const ta = dom.input();
+    ta.style.height = "auto";
+    ta.style.height = ta.scrollHeight + "px";
 }
 
 // ====================================================================================================

@@ -33,8 +33,8 @@
     --bg-wrap-btn-active: rgba(174, 180, 7, 0.274);
     --font-mono:    "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace;
     --radius:       2px;
-    --gap:          8px;
-    --header-h:     44px;
+    --gap:          4px;
+    --header-h:     32px;
 }
 
 html, body {
@@ -145,7 +145,7 @@ html, body {
 #main-grid {
     display: grid;
     grid-template-columns: 200px 5px 1fr 5px 1fr;
-    grid-template-rows: 1fr 5px 120px;
+    grid-template-rows: minmax(100px, 1fr) 5px auto;
     gap: 0;
     padding: var(--gap);
     height: 100%;
@@ -519,9 +519,9 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
 
 #panel-input .panel-body {
     display: flex;
-    align-items: stretch;
+    align-items: flex-end;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 4px 8px;
     overflow: hidden;
 }
 
@@ -538,6 +538,9 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
     outline: none;
     transition: border-color 0.15s;
     line-height: 1.5;
+    min-height: 48px;
+    max-height: 260px;
+    overflow-y: auto;
 }
 
 #chat-input:focus { border-color: var(--border-hi); }
@@ -621,7 +624,7 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
 @media (max-width: 900px) {
     #main-grid {
         grid-template-columns: 1fr 5px 1fr;
-        grid-template-rows: 1fr 5px 120px;
+        grid-template-rows: minmax(100px, 1fr) 5px auto;
     }
     #panel-timeline { display: none; }
     #splitter-v1    { display: none; }
@@ -635,7 +638,7 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
 @media (max-width: 600px) {
     #main-grid {
         grid-template-columns: 1fr;
-        grid-template-rows: 1fr 5px 1fr 5px 100px;
+        grid-template-rows: minmax(60px, 1fr) 5px minmax(60px, 1fr) 5px auto;
     }
     #splitter-v1 { display: none; }
     #splitter-v2 { display: none; }

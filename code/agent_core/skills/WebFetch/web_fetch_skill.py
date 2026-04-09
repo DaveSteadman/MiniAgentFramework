@@ -39,7 +39,6 @@ if _code_dir not in sys.path:
 from agent_core.ollama_client import call_llm_chat as _call_llm_chat
 from agent_core.ollama_client import get_active_model as _get_active_model
 from agent_core.ollama_client import get_active_num_ctx as _get_active_num_ctx
-from agent_core.skills.Kiwix.kiwix_skill import kiwix_get_article as _kiwix_get_article
 from utils.webpage_utils import fetch_html as _fetch_html
 from utils.webpage_utils import extract_content as _extract_content
 from utils.webpage_utils import truncate_to_words as _truncate_to_words
@@ -160,33 +159,6 @@ def fetch_page_text(
         return "Error: url cannot be empty."
 
     clean_url = url.strip()
-
-    # Kiwix article paths are relative (/content/<book>/<article>) and are intended
-    # for kiwix_get_article rather than generic HTTP fetching. Route them automatically
-    # so the model can recover even if it picks the wrong tool.
-    if clean_url.startswith("/content/"):
-        fetch_words = QUERY_WORDS_CAP if query else max(50, min(int(max_words), MAX_WORDS_CAP))
-        article_text = _kiwix_get_article(article_path=clean_url, max_words=fetch_words)
-        if isinstance(article_text, str) and article_text.startswith("Error:"):
-            return article_text
-        if isinstance(article_text, str) and article_text.startswith("Failed to "):
-            return article_text
-        if isinstance(article_text, str) and article_text.startswith("No text could be extracted"):
-            return article_text
-
-        article_text = str(article_text or "").strip()
-        if not article_text:
-            return f"Could not extract readable text from: {clean_url}"
-
-        if article_text.startswith("# "):
-            first_break = article_text.find("\n")
-            page_title = article_text[2:first_break].strip() if first_break != -1 else article_text[2:].strip()
-            body = article_text[first_break:].strip() if first_break != -1 else ""
-        else:
-            page_title = ""
-            body = article_text
-
-        return _extract_query_from_text(page_title, body, max_words, query)
 
     parsed = urllib.parse.urlparse(clean_url)
     if parsed.scheme not in ("http", "https"):

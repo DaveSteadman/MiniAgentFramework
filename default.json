@@ -5,6 +5,7 @@
   "agentport": 8000,
   "kiwixurl": "http://192.168.1.33:8080",
   "minifeedurl": "http://localhost:8100",
+  "koredataurl": "http://localhost:8200",
   "ControlDataFolder": "datacontrol",
   "UserDataFolder": "datauser"
 }

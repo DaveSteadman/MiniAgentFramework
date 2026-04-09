@@ -205,28 +205,38 @@ Single JSON payload for orchestration planning.
       }
     },
     {
-      "skill_name": "Kiwix Skill",
-      "relative_path": "agent_core/skills/Kiwix/skill.md",
-      "purpose": "Search and retrieve articles from a local Kiwix server. Kiwix hosts offline snapshots of Wikipedia, Project Gutenberg, and other reference libraries. Use this skill for factual lookups, article content, and reference research when a Kiwix server is available on the local network. Because Kiwix is local there is no rate-limiting, no bot detection, and no internet dependency.",
-      "module": "code/agent_core/skills/Kiwix/kiwix_skill.py",
-      "trigger_keyword": "kiwix",
+      "skill_name": "KoreData Skill",
+      "relative_path": "agent_core/skills/KoreData/skill.md",
+      "purpose": "Search and retrieve content from the local KoreData system via the KoreDataGateway. KoreData\naggregates three services behind a single search API:\n- **KoreFeeds** - a repackaged RSS archive with full article text\n- **KoreReference** - a local encyclopedia (Wikipedia clone)\n- **KoreLibrary** - a local book repository\n\nUse this skill to search recent news, look up encyclopedia articles, or find books - all in\none call. Follow up with the appropriate get function to retrieve full content.",
+      "module": "code/agent_core/skills/KoreData/koredata_skill.py",
+      "trigger_keyword": "koredata",
       "triggers": [],
       "functions": [
-        "kiwix_search(query, max_results=5, timeout=15)",
-        "kiwix_get_article(article_path, max_words=600, timeout=15)"
+        "koredata_search(query, domains=None, since=None, until=None, limit=5)",
+        "koredata_get_article(title)",
+        "koredata_get_entry(domain, entry_id)",
+        "koredata_get_book(book_id)",
+        "koredata_status()"
       ],
       "inputs": [],
       "outputs": [],
       "param_descriptions": {
-        "kiwix_search": {
-          "query": "search terms to look up across all installed Kiwix books.",
-          "max_results": "number of results to return.",
-          "timeout": "network timeout in seconds."
+        "koredata_search": {
+          "query": "natural-language or keyword query string matched across all requested",
+          "domains": "list of services to search: `\"feeds\"`, `\"reference\"`, `\"library\"`.",
+          "since": "ISO 8601 date `YYYY-MM-DD` - earliest published-date filter, applied",
+          "until": "ISO 8601 date `YYYY-MM-DD` - latest published-date filter, applied to",
+          "limit": "maximum results per domain."
         },
-        "kiwix_get_article": {
-          "article_path": "the path from a `kiwix_search` result, e.g. `/content/wikipedia_en_all_maxi_2025-08/Python_(programming_language)`.",
-          "max_words": "word cap on returned text.",
-          "timeout": "network timeout in seconds."
+        "koredata_get_article": {
+          "title": "article title exactly as it appears in a `koredata_search` reference"
+        },
+        "koredata_get_entry": {
+          "domain": "the `source` field from a feed search result (domain slug).",
+          "entry_id": "the `id` field from a feed search result."
+        },
+        "koredata_get_book": {
+          "book_id": "numeric book ID from a library search result."
         }
       }
     },
@@ -630,40 +640,6 @@ Single JSON payload for orchestration planning.
           "max_chars_per_result": "maximum characters of snippet text per result, 0-2000. Set to 0 to disable truncation.",
           "offset": "skip this many results; use to retrieve page 2+ when the first page was exhausted.",
           "prefer_article_urls": "same behavior as `search_web(...)`; when enabled the formatted output also includes each result's `page_kind` tag."
-        }
-      }
-    },
-    {
-      "skill_name": "Wikipedia Skill",
-      "relative_path": "agent_core/skills/Wikipedia/skill.md",
-      "purpose": "Look up a topic on Wikipedia and return a plain-text article summary. Use this for authoritative factual reference data about a person, place, concept, event, or technology. For current news or live data, use WebSearch instead.",
-      "module": "code/agent_core/skills/Wikipedia/wikipedia_skill.py",
-      "trigger_keyword": "wikipedia",
-      "triggers": [
-        "what is",
-        "tell me about",
-        "who is",
-        "look up on Wikipedia",
-        "Wikipedia article",
-        "background on",
-        "history of",
-        "definition of",
-        "bio",
-        "biography",
-        "life of",
-        "biography of"
-      ],
-      "functions": [
-        "lookup_wikipedia(topic: str, timeout: int = 15)"
-      ],
-      "inputs": [],
-      "outputs": [
-        "`lookup_wikipedia(...)` - returns a plain-text block starting with `\"Wikipedia - <article title>\"` followed by the article extract (up to 400 words). Returns `\"No Wikipedia data found for '<topic>'\"` when no matching article is found. Skips disambiguation pages automatically and tries the next candidate."
-      ],
-      "param_descriptions": {
-        "lookup_wikipedia": {
-          "topic": "subject to look up: a name, term, acronym, or short phrase.",
-          "timeout": "network timeout in seconds."
         }
       }
     }
