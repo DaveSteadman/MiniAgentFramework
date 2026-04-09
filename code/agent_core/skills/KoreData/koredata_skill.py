@@ -48,8 +48,8 @@ _DEFAULTS_PATH   = get_workspace_root() / "default.json"
 _CONFIG_KEY      = "koredataurl"
 _DEFAULT_TIMEOUT = 10
 
-DEFAULT_LIMIT    = 5
-MAX_LIMIT        = 20
+DEFAULT_LIMIT    = 20
+MAX_LIMIT        = 100
 
 
 # ====================================================================================================

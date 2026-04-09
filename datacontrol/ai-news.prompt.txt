@@ -1,30 +1,39 @@
 I need to produce a report of the latest AI news headlines.
 
-Step 1 - Read the source list:
-- Your very first action must be to read ai-sites.json (path: "ai-sites.json", no leading "./" prefix).
-- This file contains the list of sites to visit. Use their URLs as your primary starting points - do not skip to web search before trying these.
+Step 1 - Search KoreData feeds:
+- Run koredata_search multiple times with different targeted queries to build a pool of candidate articles. Use limit=20 for each call and restrict to domains=["feeds"].
+- Required queries (run all of them, do not skip any):
+    "artificial intelligence"
+    "machine learning"
+    "large language model"
+    "OpenAI OR Anthropic OR Google DeepMind"
+    "AI regulation OR AI safety OR AI ethics"
+    "neural network OR generative AI"
+- Set since to 7 days before today's date on every call so only recent articles are returned.
+- After all queries, de-duplicate by entry ID and keep a combined pool.
+- For each candidate in the pool: call koredata_get_entry to fetch the full article text and save it to the scratchpad. Discard entries with fewer than 200 words of body text - they are not substantive enough to write a section from.
+- You must have the full entry text in the scratchpad before writing any section. Never write a section based only on a title or snippet - that produces fabricated content.
 
-Step 2 - Gather articles:
-- Work through every source URL in ai-sites.json. Do not stop early because you think you have enough articles - attempt all sources (or until you have 10 confirmed articles with fetched content).
-- For each source URL, fetch the landing page and extract links to individual articles.
-- You'll often load a page that is a landing page linking to articles rather than containing the content itself. In these cases you need to drill down through the layers of the website extracting the links and downloading each further page. Only go 3 layers deep.
-- For each candidate article link, fetch the article page and read its content into the scratchpad. Discard it if it doesn't have enough content or doesn't match the "ai headlines" criteria.
-- You must fetch and read the individual article page before writing a summary for it. Never write a section based only on an article title - that produces fabricated content.
-- If a source returns an HTTP error or blocks access, mark it as failed and move on to the next source.
+Step 2 - Supplement with web sources if needed:
+- If the KoreData pool has fewer than 8 substantive articles after Step 1, read ai-sites.json ("ai-sites.json", no leading "./" prefix) and work through the listed URLs.
+- For each source URL, fetch the landing page, extract article links, and drill down up to 3 layers deep to reach individual article pages.
+- Fetch each article page and save content to the scratchpad. Discard if fewer than 200 words or not AI-relevant.
+- If still short after exhausting ai-sites.json, supplement with search_web. If search_web fails, retry with search_web_text.
+- Do not use an explicit ISO date string in the web search query - DuckDuckGo cannot handle date strings like 2026-04-04.
 
-Step 3 - Web search as supplement:
-- After exhausting the ai-sites.json sources (or if fewer than 8 articles found), supplement with a web search.
-- Use search_web first. If it returns no results or an error, immediately retry the same query with search_web_text - that variant works when search_web fails.
-- Do not use an explicit ISO date in the web search query - DuckDuckGo cannot handle date strings like 2026-04-04.
+Step 3 - Write the report:
+- Select the 8-10 best de-duplicated stories from the combined pool.
+- Write each as a flowing news summary paragraph using only facts present in the fetched article text. Do not invent details, quotes, statistics, or events not found in the source.
+- If you cannot reach 8 sections from real fetched content, write fewer sections rather than fabricating topics to fill the quota. State at the end of the report how many sources were used.
+- Each section must be a minimum of 400 words. Target approximately 500 words per section. Do not use bullet lists.
+- Number sections sequentially (1, 2, 3 ...) with no duplicated numbers.
 
 Notes:
-- Kiwix and wikipedia are encyclopedia reference sources. They do not contain headlines or news. They are prohibited for this task even when all other sources fail.
-- File paths passed to read_file and write_file must NOT start with "./". Use bare relative paths like "ai-sites.json" or "data/2026-04-05/ai-headlines.md".
+- Kiwix and Wikipedia are encyclopedia reference sources. They do not contain news headlines and are prohibited for this task.
+- File paths passed to read_file and write_file must NOT start with "./". Use bare relative paths like "2026-04-05/ai-headlines.md".
 
 Output:
-- Write the report to a markdown file at data/{todays date}/ai-headlines.md (create the folder first with create_folder if needed).
-- The report should contain 8 to 10 de-duplicated sections. Fewer sections are acceptable only if source material is genuinely unavailable.
-- Write each section as a flowing news summary paragraph. Each section must be a minimum of 400 words - short sections are not acceptable. Target approximately 500 words per section. Do not use bullet lists.
+- Create the output folder first with create_folder if needed, then write the report to a markdown file at data/{todays date}/ai-headlines.md.
 
 Housekeeping:
 - After writing the report, save an updated version of ai-sites.json with successful sites at the top and unsuccessful ones at the bottom. If a web search highlighted a new source, add it to the list.
@@ -35,7 +44,3 @@ Housekeeping:
 
 
 
-
-
-Read through all the AI related articles on MiniFeed for the last 5 days.
-The required output is a de-duplicated report of the top 5 stories. 250 words each.

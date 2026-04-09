@@ -55,11 +55,16 @@ def _normalize_data_relative_path(file_path: str) -> str:
     workspace-relative paths like "data/ai-sites.json". Passing that path back into
     read_file()/write_file()/create_folder() should continue to work rather than creating
     or looking up "data/data/...".
+
+    Also handles "./data/..." paths that a model produces when it knows the workspace
+    layout - these are equivalent to bare data-relative paths.
     """
     normalized = _sanitize_input_path(file_path)
 
-    if normalized == "data":
+    if normalized == "data" or normalized == "./data":
         return ""
+    if normalized.startswith("./data/"):
+        return normalized[7:]
     if normalized.startswith("data/"):
         return normalized[5:]
 
