@@ -100,7 +100,7 @@ def _resolve_safe_path(file_path: str) -> Path:
 # ====================================================================================================
 
 # ----------------------------------------------------------------------------------------------------
-def write_file(path: str, content: str) -> str:
+def file_write(path: str, content: str) -> str:
     try:
         target_path = _resolve_safe_path(path)
     except ValueError as err:
@@ -114,7 +114,7 @@ def write_file(path: str, content: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def append_file(path: str, content: str) -> str:
+def file_append(path: str, content: str) -> str:
     try:
         target_path = _resolve_safe_path(path)
     except ValueError as err:
@@ -129,7 +129,7 @@ def append_file(path: str, content: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def read_file(path: str, max_chars: int = 8000) -> str:
+def file_read(path: str, max_chars: int = 8000) -> str:
     try:
         target_path = _resolve_safe_path(path)
     except ValueError as err:
@@ -166,7 +166,7 @@ def _normalise_keywords(keywords: list[str] | str) -> list[str]:
 
 
 # ----------------------------------------------------------------------------------------------------
-def find_files(keywords: list[str], search_root: str = "") -> str:
+def file_find(keywords: list[str], search_root: str = "") -> str:
     """Search the workspace for files whose name contains all of the given keyword fragments.
 
     Returns a newline-separated list of matching workspace-relative paths.
@@ -203,7 +203,7 @@ def find_files(keywords: list[str], search_root: str = "") -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def find_folders(keywords: list[str], search_root: str = "") -> str:
+def folder_find(keywords: list[str], search_root: str = "") -> str:
     """Search the workspace for folders whose name contains all of the given keyword fragments.
 
     Returns a newline-separated list of matching workspace-relative paths.
@@ -240,7 +240,7 @@ def find_folders(keywords: list[str], search_root: str = "") -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def create_folder(path: str) -> str:
+def folder_create(path: str) -> str:
     """Create a directory (and any missing parents) at the given workspace-relative path.
 
     Safe to call when the directory already exists - returns a success message either way.
@@ -270,7 +270,7 @@ def folder_exists(path: str) -> str:
 
 
 # ----------------------------------------------------------------------------------------------------
-def write_from_scratch(scratch_key: str, path: str) -> str:
+def file_write_from_scratch(scratch_key: str, path: str) -> str:
     """Write the content stored in a scratchpad key to a file at path.
 
     Reads the auto-saved scratchpad key (e.g. _tc_r5_fetch_page_text shown in a truncation

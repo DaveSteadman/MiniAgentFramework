@@ -519,7 +519,7 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
 
 #panel-input .panel-body {
     display: flex;
-    align-items: flex-end;
+    align-items: stretch;
     gap: 8px;
     padding: 4px 8px;
     overflow: hidden;
@@ -539,7 +539,6 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
     transition: border-color 0.15s;
     line-height: 1.5;
     min-height: 48px;
-    max-height: 260px;
     overflow-y: auto;
 }
 

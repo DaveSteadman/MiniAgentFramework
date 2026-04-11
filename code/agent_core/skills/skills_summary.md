@@ -9,7 +9,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "CodeExecute Skill",
       "relative_path": "agent_core/skills/CodeExecute/skill.md",
-      "purpose": "- Execute a self-contained Python code snippet and return the captured stdout.\n- **Always prefer code over a direct answer for any calculation, sequence, table, string operation, or data generation task** - even when the answer seems obvious from training knowledge. Running code is more reliable and verifiable than recall.\n- Only Python stdlib is available; third-party packages (numpy, pandas, sympy) are not.\n- When sandbox is off (`/sandbox off`), all modules are accessible. To install and use a third-party package, use `subprocess` to pip-install it first, then import normally:\n  ```python\n  import subprocess, sys\n  subprocess.run([sys.executable, \"-m\", \"pip\", \"install\", \"numpy\"], check=True)\n  import numpy as np\n  print(np.array([1,2,3]).mean())\n  ```\n- When paired with FileAccess, call this skill first to generate the content, then park the output with `scratch_save`, and pass `{scratch:key}` as the content argument to `write_file` - this avoids carrying the full output string as an inline argument through the tool-calling loop.\n- Code must use `print()` for all output. Favour simple linear code - avoid complex class hierarchies or deeply nested call stacks.",
+      "purpose": "- Execute a self-contained Python code snippet and return the captured stdout.\n- **Always prefer code over a direct answer for any calculation, sequence, table, string operation, or data generation task** - even when the answer seems obvious from training knowledge. Running code is more reliable and verifiable than recall.\n- Only Python stdlib is available; third-party packages (numpy, pandas, sympy) are not.\n- When sandbox is off (`/sandbox off`), all modules are accessible. To install and use a third-party package, use `subprocess` to pip-install it first, then import normally:\n  ```python\n  import subprocess, sys\n  subprocess.run([sys.executable, \"-m\", \"pip\", \"install\", \"numpy\"], check=True)\n  import numpy as np\n  print(np.array([1,2,3]).mean())\n  ```\n- When paired with FileAccess, call this skill first to generate the content, then park the output with `scratch_save`, and pass `{scratch:key}` as the content argument to `file_write` - this avoids carrying the full output string as an inline argument through the tool-calling loop.\n- Code must use `print()` for all output. Favour simple linear code - avoid complex class hierarchies or deeply nested call stacks.",
       "module": "code/agent_core/skills/CodeExecute/code_execute_skill.py",
       "trigger_keyword": "calculate",
       "triggers": [
@@ -151,54 +151,54 @@ Single JSON payload for orchestration planning.
         "does folder exist"
       ],
       "functions": [
-        "write_file(path: str, content: str)",
-        "append_file(path: str, content: str)",
-        "read_file(path: str, max_chars: int = 8000)",
-        "write_from_scratch(scratch_key: str, path: str)",
-        "find_files(keywords: list[str], search_root: str = \"\")",
-        "find_folders(keywords: list[str], search_root: str = \"\")",
-        "create_folder(path: str)",
+        "file_write(path: str, content: str)",
+        "file_append(path: str, content: str)",
+        "file_read(path: str, max_chars: int = 8000)",
+        "file_write_from_scratch(scratch_key: str, path: str)",
+        "file_find(keywords: list[str], search_root: str = \"\")",
+        "folder_find(keywords: list[str], search_root: str = \"\")",
+        "folder_create(path: str)",
         "folder_exists(path: str)"
       ],
       "inputs": [],
       "outputs": [
-        "`write_file(...)` - returns `\"Wrote data/filename.txt\"` on success, or `\"Error: ...\"` on failure.",
-        "`append_file(...)` - returns `\"Appended data/filename.txt\"` on success, or `\"Error: ...\"` on failure.",
-        "`read_file(...)` - returns the file content as a string, or `\"File not found: ...\"` if the file does not exist.",
-        "`find_files(...)` - returns a newline-separated list of matching workspace-relative paths, or a `\"No files found...\"` message.",
-        "`find_folders(...)` - returns a newline-separated list of matching workspace-relative paths, or a `\"No folders found...\"` message.",
-        "`write_from_scratch(...)` - returns `\"Wrote data/file.md (12345 chars from scratch key '_tc_r5_fetch_page_text')\"` on success, or `\"Error: ...\"` on failure.",
-        "`create_folder(...)` - returns `\"Created folder: path\"` or `\"Folder already exists: path\"`, or `\"Error: ...\"` on failure.",
+        "`file_write(...)` - returns `\"Wrote data/filename.txt\"` on success, or `\"Error: ...\"` on failure.",
+        "`file_append(...)` - returns `\"Appended data/filename.txt\"` on success, or `\"Error: ...\"` on failure.",
+        "`file_read(...)` - returns the file content as a string, or `\"File not found: ...\"` if the file does not exist.",
+        "`file_find(...)` - returns a newline-separated list of matching workspace-relative paths, or a `\"No files found...\"` message.",
+        "`folder_find(...)` - returns a newline-separated list of matching workspace-relative paths, or a `\"No folders found...\"` message.",
+        "`file_write_from_scratch(...)` - returns `\"Wrote data/file.md (12345 chars from scratch key '_tc_r5_fetch_page_text')\"` on success, or `\"Error: ...\"` on failure.",
+        "`folder_create(...)` - returns `\"Created folder: path\"` or `\"Folder already exists: path\"`, or `\"Error: ...\"` on failure.",
         "`folder_exists(...)` - returns `\"yes\"` or `\"no\"`."
       ],
       "param_descriptions": {
-        "write_from_scratch": {
+        "file_write_from_scratch": {
           "scratch_key": "scratchpad key holding the content to write, e.g. `\"_tc_r5_fetch_page_text\"` (the key shown in a truncation notice). Reads the stored value directly without requiring a separate `scratch_load` call.",
-          "path": "destination path; same resolution rules as `write_file`."
+          "path": "destination path; same resolution rules as `file_write`."
         },
-        "create_folder": {
+        "folder_create": {
           "path": "path of the directory to create, resolved under `data/`, e.g. `\"webresearch/01-Mine/2026-03-22\"`. Creates all missing parent directories. Safe to call if the folder already exists."
         },
         "folder_exists": {
           "path": "workspace-relative path to check."
         },
-        "write_file": {
+        "file_write": {
           "path": "workspace-relative path. A bare name like `\"x.txt\"` resolves to `data/x.txt`. A path starting with `\"./\"` resolves from workspace root.",
           "content": "content to write. Overwrites the file if it exists. Supports `{scratch:key}` token substitution - use `\"{scratch:mykey}\"` to write scratchpad content directly without calling `scratch_load` first."
         },
-        "append_file": {
-          "path": "same path rules as `write_file`.",
+        "file_append": {
+          "path": "same path rules as `file_write`.",
           "content": "content to append. A newline is added automatically if missing. Supports `{scratch:key}` token substitution - use `\"{scratch:mykey}\"` to append scratchpad content directly."
         },
-        "read_file": {
-          "path": "same path rules as `write_file`.",
+        "file_read": {
+          "path": "same path rules as `file_write`.",
           "max_chars": "maximum characters to return; content is truncated with `[truncated]` if exceeded."
         },
-        "find_files": {
+        "file_find": {
           "keywords": "list of case-insensitive fragments that must ALL appear in the file name, e.g. `[\"pulse\", \"2026\"]`.",
           "search_root": "workspace-relative directory to restrict the search, e.g. `\"data\"`. Leave empty to search the whole workspace."
         },
-        "find_folders": {
+        "folder_find": {
           "keywords": "list of case-insensitive fragments that must ALL appear in the folder name.",
           "search_root": "workspace-relative directory to restrict the search. Leave empty to search the whole workspace."
         }
@@ -443,42 +443,42 @@ Single JSON payload for orchestration planning.
         "remove task"
       ],
       "functions": [
-        "list_tasks()",
-        "get_task(name: str)",
-        "create_task(name: str, schedule: str, prompt: str)",
-        "set_task_enabled(name: str, enabled: bool)",
-        "set_task_schedule(name: str, schedule: str)",
-        "set_task_prompt(name: str, prompt: str)",
-        "delete_task(name: str)"
+        "task_list()",
+        "task_get(name: str)",
+        "task_create(name: str, schedule: str, prompt: str)",
+        "task_set_enabled(name: str, enabled: bool)",
+        "task_set_schedule(name: str, schedule: str)",
+        "task_set_prompt(name: str, prompt: str)",
+        "task_delete(name: str)"
       ],
       "inputs": [],
       "outputs": [
-        "`list_tasks()` - returns one line per task: `[on/off]  name  schedule  prompt-preview`.",
-        "`get_task(...)` - returns a formatted block with all fields of the named task.",
+        "`task_list()` - returns one line per task: `[on/off]  name  schedule  prompt-preview`.",
+        "`task_get(...)` - returns a formatted block with all fields of the named task.",
         "All other functions return a confirmation or error string."
       ],
       "param_descriptions": {
-        "get_task": {
+        "task_get": {
           "name": "exact task name (case-insensitive)."
         },
-        "create_task": {
+        "task_create": {
           "name": "unique task name; alphanumeric, hyphens, underscores only.",
           "schedule": "interval as a plain integer string, e.g. `\"60\"` = every 60 minutes; OR a daily wall-clock time as `\"HH:MM\"`, e.g. `\"08:30\"` = every day at 08:30.",
           "prompt": "the natural-language instruction the scheduler will run on each firing."
         },
-        "set_task_enabled": {
+        "task_set_enabled": {
           "name": "task name.",
           "enabled": "`true` to enable, `false` to disable."
         },
-        "set_task_schedule": {
+        "task_set_schedule": {
           "name": "task name.",
-          "schedule": "same format as `create_task`: integer minutes or `\"HH:MM\"`."
+          "schedule": "same format as `task_create`: integer minutes or `\"HH:MM\"`."
         },
-        "set_task_prompt": {
+        "task_set_prompt": {
           "name": "task name.",
           "prompt": "replacement prompt text."
         },
-        "delete_task": {
+        "task_delete": {
           "name": "name of the task to permanently remove."
         }
       }

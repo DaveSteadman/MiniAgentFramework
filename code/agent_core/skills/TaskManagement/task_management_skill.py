@@ -109,7 +109,7 @@ def _save(json_path: Path, data: dict) -> None:
 # MARK: PUBLIC SKILL FUNCTIONS
 # ====================================================================================================
 
-def list_tasks() -> str:
+def task_list() -> str:
     """Return a formatted summary of all scheduled tasks."""
     schedules_dir = get_schedules_dir()
     if not schedules_dir.exists():
@@ -148,7 +148,7 @@ def list_tasks() -> str:
 
 # ----------------------------------------------------------------------------------------------------
 
-def get_task(name: str) -> str:
+def task_get(name: str) -> str:
     """Return full details of a named task."""
     try:
         name = _validate_name(name)
@@ -174,7 +174,7 @@ def get_task(name: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 
-def create_task(name: str, schedule: str, prompt: str) -> str:
+def task_create(name: str, schedule: str, prompt: str) -> str:
     """Create a new scheduled task.
 
     name     -- unique task identifier (letters, digits, hyphens, underscores)
@@ -215,7 +215,7 @@ def create_task(name: str, schedule: str, prompt: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 
-def set_task_enabled(name: str, enabled: bool) -> str:
+def task_set_enabled(name: str, enabled: bool) -> str:
     """Enable or disable a task without changing its schedule or prompt."""
     # Coerce string values that some LLMs send instead of JSON booleans
     # (e.g. "false" instead of false).  bool("false") == True, so we must
@@ -240,7 +240,7 @@ def set_task_enabled(name: str, enabled: bool) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 
-def set_task_schedule(name: str, schedule: str) -> str:
+def task_set_schedule(name: str, schedule: str) -> str:
     """Update the schedule of an existing task.
 
     schedule -- interval in minutes (e.g. '60') or daily HH:MM (e.g. '08:30')
@@ -267,7 +267,7 @@ def set_task_schedule(name: str, schedule: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 
-def set_task_prompt(name: str, prompt: str) -> str:
+def task_set_prompt(name: str, prompt: str) -> str:
     """Replace the prompt of an existing task."""
     try:
         name = _validate_name(name)
@@ -290,7 +290,7 @@ def set_task_prompt(name: str, prompt: str) -> str:
 
 # ----------------------------------------------------------------------------------------------------
 
-def delete_task(name: str) -> str:
+def task_delete(name: str) -> str:
     """Permanently delete a task. Removes the JSON file if it becomes empty."""
     try:
         name = _validate_name(name)

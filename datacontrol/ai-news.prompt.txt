@@ -30,10 +30,10 @@ Step 3 - Write the report:
 
 Notes:
 - Wikipedia is an encyclopedia reference source. It does not contain news headlines and is prohibited for this task.
-- File paths passed to read_file and write_file must NOT start with "./". Use bare relative paths like "2026-04-05/ai-headlines.md".
+- File paths passed to file_read and file_write must NOT start with "./". Use bare relative paths like "2026-04-05/ai-headlines.md".
 
 Output:
-- Create the output folder first with create_folder if needed, then write the report to a markdown file at data/{todays date}/ai-headlines.md.
+- Create the output folder first with folder_create if needed, then write the report to a markdown file at data/{todays date}/ai-headlines.md.
 
 Housekeeping:
 - After writing the report, save an updated version of ai-sites.json with successful sites at the top and unsuccessful ones at the bottom. If a web search highlighted a new source, add it to the list.

@@ -11,7 +11,7 @@
   import numpy as np
   print(np.array([1,2,3]).mean())
   ```
-- When paired with FileAccess, call this skill first to generate the content, then park the output with `scratch_save`, and pass `{scratch:key}` as the content argument to `write_file` - this avoids carrying the full output string as an inline argument through the tool-calling loop.
+- When paired with FileAccess, call this skill first to generate the content, then park the output with `scratch_save`, and pass `{scratch:key}` as the content argument to `file_write` - this avoids carrying the full output string as an inline argument through the tool-calling loop.
 - Code must use `print()` for all output. Favour simple linear code - avoid complex class hierarchies or deeply nested call stacks.
 
 ## Trigger keyword: calculate

@@ -293,13 +293,13 @@ The `TaskManagement` skill exposes the same operations as proper skill functions
 
 | Chat prompt | Skill call |
 |---|---|
-| `"list my scheduled tasks"` | `list_tasks()` |
-| `"show me the PerformanceHeadroom task"` | `get_task("PerformanceHeadroom")` |
-| `"create a task called DailyWeather running at 8am to check the forecast"` | `create_task("DailyWeather", "08:00", "...")` |
-| `"change PerformanceHeadroom to run every 30 minutes"` | `set_task_schedule("PerformanceHeadroom", "30")` |
-| `"disable the PerformanceHeadroom task"` | `set_task_enabled("PerformanceHeadroom", False)` |
-| `"update the DailyWeather prompt to ask about London"` | `set_task_prompt("DailyWeather", "...")` |
-| `"delete the OldTask task"` | `delete_task("OldTask")` |
+| `"list my scheduled tasks"` | `task_list()` |
+| `"show me the PerformanceHeadroom task"` | `task_get("PerformanceHeadroom")` |
+| `"create a task called DailyWeather running at 8am to check the forecast"` | `task_create("DailyWeather", "08:00", "...")` |
+| `"change PerformanceHeadroom to run every 30 minutes"` | `task_set_schedule("PerformanceHeadroom", "30")` |
+| `"disable the PerformanceHeadroom task"` | `task_set_enabled("PerformanceHeadroom", False)` |
+| `"update the DailyWeather prompt to ask about London"` | `task_set_prompt("DailyWeather", "...")` |
+| `"delete the OldTask task"` | `task_delete("OldTask")` |
 
 The skills catalog (`code/agent_core/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` is newer than the summary - so newly added skills are always available to the model without any manual step. Use `/reskill` to force a rebuild during an active session.
 

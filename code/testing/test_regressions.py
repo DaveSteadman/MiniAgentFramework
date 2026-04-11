@@ -25,9 +25,9 @@ from agent_core.session_runtime import bind_session
 from agent_core.skills_catalog_builder import build_tool_definitions
 from agent_core.skills_catalog_builder import load_skills_payload
 from agent_core.skills.FileAccess import file_access_skill as file_access_module
-from agent_core.skills.FileAccess.file_access_skill import write_file
-from agent_core.skills.FileAccess.file_access_skill import read_file
-from agent_core.skills.FileAccess.file_access_skill import create_folder
+from agent_core.skills.FileAccess.file_access_skill import file_write
+from agent_core.skills.FileAccess.file_access_skill import file_read
+from agent_core.skills.FileAccess.file_access_skill import folder_create
 from agent_core.skills.WebFetch.web_fetch_skill import fetch_page_text
 from agent_core.skills.WebSearch.web_search_skill import search_web
 from agent_core.skills.WebResearch.web_research_skill import research_traverse
@@ -56,7 +56,7 @@ class RegressionTests(unittest.TestCase):
             output_path.unlink()
 
         try:
-            result = write_file("test_systemstats_regression.csv", get_system_info_string())
+            result = file_write("test_systemstats_regression.csv", get_system_info_string())
             self.assertEqual(result, f"Wrote {expected_label}")
             self.assertTrue(output_path.exists())
 
@@ -77,7 +77,7 @@ class RegressionTests(unittest.TestCase):
 
             with patch.object(file_access_module, "WORKSPACE_ROOT", tmp_root):
                 with patch.object(file_access_module, "DEFAULT_DATA_DIR", data_dir):
-                    result = read_file("data/ai-sites.json")
+                    result = file_read("data/ai-sites.json")
 
         self.assertEqual(result, '{"ok": true}')
 
@@ -89,7 +89,7 @@ class RegressionTests(unittest.TestCase):
 
             with patch.object(file_access_module, "WORKSPACE_ROOT", tmp_root):
                 with patch.object(file_access_module, "DEFAULT_DATA_DIR", data_dir):
-                    result = create_folder("data/2026-04-05")
+                    result = folder_create("data/2026-04-05")
 
             created = data_dir / "2026-04-05"
             self.assertTrue(created.exists())

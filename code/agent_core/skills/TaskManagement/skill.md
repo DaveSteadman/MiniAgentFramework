@@ -8,52 +8,52 @@ Create, query, update, enable, disable, and delete scheduled tasks stored as JSO
 ## Interface
 - Module: `code/agent_core/skills/TaskManagement/task_management_skill.py`
 - Functions:
-  - `list_tasks()`
-  - `get_task(name: str)`
-  - `create_task(name: str, schedule: str, prompt: str)`
-  - `set_task_enabled(name: str, enabled: bool)`
-  - `set_task_schedule(name: str, schedule: str)`
-  - `set_task_prompt(name: str, prompt: str)`
-  - `delete_task(name: str)`
+  - `task_list()`
+  - `task_get(name: str)`
+  - `task_create(name: str, schedule: str, prompt: str)`
+  - `task_set_enabled(name: str, enabled: bool)`
+  - `task_set_schedule(name: str, schedule: str)`
+  - `task_set_prompt(name: str, prompt: str)`
+  - `task_delete(name: str)`
 
 ## Parameters
 
-### `list_tasks()`
+### `task_list()`
 No parameters.
 
-### `get_task(name)`
+### `task_get(name)`
 - `name` *(required)* - exact task name (case-insensitive).
 
-### `create_task(name, schedule, prompt)`
+### `task_create(name, schedule, prompt)`
 - `name` *(required)* - unique task name; alphanumeric, hyphens, underscores only.
 - `schedule` *(required)* - interval as a plain integer string, e.g. `"60"` = every 60 minutes; OR a daily wall-clock time as `"HH:MM"`, e.g. `"08:30"` = every day at 08:30.
 - `prompt` *(required)* - the natural-language instruction the scheduler will run on each firing.
 
-### `set_task_enabled(name, enabled)`
+### `task_set_enabled(name, enabled)`
 - `name` *(required)* - task name.
 - `enabled` *(required)* - `true` to enable, `false` to disable.
 
-### `set_task_schedule(name, schedule)`
+### `task_set_schedule(name, schedule)`
 - `name` *(required)* - task name.
-- `schedule` *(required)* - same format as `create_task`: integer minutes or `"HH:MM"`.
+- `schedule` *(required)* - same format as `task_create`: integer minutes or `"HH:MM"`.
 
-### `set_task_prompt(name, prompt)`
+### `task_set_prompt(name, prompt)`
 - `name` *(required)* - task name.
 - `prompt` *(required)* - replacement prompt text.
 
-### `delete_task(name)`
+### `task_delete(name)`
 - `name` *(required)* - name of the task to permanently remove.
 
 ## Output
 All functions return a plain-text status string confirming the operation or describing any error.
-- `list_tasks()` - returns one line per task: `[on/off]  name  schedule  prompt-preview`.
-- `get_task(...)` - returns a formatted block with all fields of the named task.
+- `task_list()` - returns one line per task: `[on/off]  name  schedule  prompt-preview`.
+- `task_get(...)` - returns a formatted block with all fields of the named task.
 - All other functions return a confirmation or error string.
 
 ## Tool Selection Guidance
-- For natural-language requests that ask to list, show, review, or summarise scheduled tasks, prefer `list_tasks()` immediately.
-- Treat phrases like `list all my scheduled tasks`, `show my tasks`, `what tasks do I have`, `what scheduled tasks are active`, and `what automation is configured` as direct matches for `list_tasks()`.
-- If the user names a specific task and asks for its details, use `get_task(name)` instead of `list_tasks()`.
+- For natural-language requests that ask to list, show, review, or summarise scheduled tasks, prefer `task_list()` immediately.
+- Treat phrases like `list all my scheduled tasks`, `show my tasks`, `what tasks do I have`, `what scheduled tasks are active`, and `what automation is configured` as direct matches for `task_list()`.
+- If the user names a specific task and asks for its details, use `task_get(name)` instead of `task_list()`.
 - If the user types the literal slash command `/tasks`, that is handled by the slash-command layer; otherwise, natural-language task-listing requests should use this skill.
 
 ## Triggers
@@ -72,15 +72,15 @@ scheduled prompt will not survive to a subsequent one.  Scratchpad can be used n
 when TaskManagement is invoked as one step within an interactive session plan.
 
 ## Examples
-- `list_tasks()` - show all scheduled tasks
-- User prompt: `list all my scheduled tasks` -> call `list_tasks()`
-- User prompt: `show my scheduled tasks` -> call `list_tasks()`
-- User prompt: `what tasks do I have configured` -> call `list_tasks()`
-- `get_task("PerformanceHeadroom")` - show full details of the named task
-- `create_task("DailyWeather", "08:00", "Check the weather forecast for today.")` - create a daily task
+- `task_list()` - show all scheduled tasks
+- User prompt: `list all my scheduled tasks` -> call `task_list()`
+- User prompt: `show my scheduled tasks` -> call `task_list()`
+- User prompt: `what tasks do I have configured` -> call `task_list()`
+- `task_get("PerformanceHeadroom")` - show full details of the named task
+- `task_create("DailyWeather", "08:00", "Check the weather forecast for today.")` - create a daily task
   - Returns: `"Task 'DailyWeather' created."`
-- `create_task("HourlyMemCheck", "60", "Check free RAM and log it to data/memlog.csv.")` - create an interval task
-- `set_task_enabled("PerformanceHeadroom", False)` - disable the task
+- `task_create("HourlyMemCheck", "60", "Check free RAM and log it to data/memlog.csv.")` - create an interval task
+- `task_set_enabled("PerformanceHeadroom", False)` - disable the task
   - Returns: `"Task 'PerformanceHeadroom' updated."`
-- `set_task_schedule("HourlyMemCheck", "30")` - change to every 30 minutes
-- `delete_task("OldTask")` - permanently remove the task
+- `task_set_schedule("HourlyMemCheck", "30")` - change to every 30 minutes
+- `task_delete("OldTask")` - permanently remove the task
