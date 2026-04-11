@@ -119,7 +119,7 @@ http://localhost:8000/
 
 Example - target a different Ollama host:
 ```powershell
-python .\code\main.py --ollamahost http://MONTBLANC:11434
+python .\code\main.py --llmhost http://MONTBLANC:11434
 ```
 
 ---

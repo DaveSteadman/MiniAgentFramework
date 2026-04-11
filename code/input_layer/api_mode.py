@@ -29,7 +29,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import agent_core.ollama_client as ollama_client
+import agent_core.llm_client as llm_client
 from agent_core.run_helpers import run_prompt_batch
 from input_layer.api import app
 from input_layer.api import push_log_line
@@ -104,7 +104,7 @@ def run_api_mode(
         logger.log_file_only(text)
         push_log_line(text)
 
-    ollama_client.register_llm_call_logger(_log_sink)
+    llm_client.register_llm_call_logger(_log_sink)
 
     # Load schedules.
     tasks         = load_schedules_dir(_SCHEDULES_DIR)

@@ -16,7 +16,7 @@ which catches the silent-block pattern for web tests. The gap is everywhere else
 found" response if no assert is supplied.
 
 Option A (done for web prompts, extend to others): audit remaining prompt files and add
-`not_contains|No results were found` to all research, Wikipedia, and Kiwix prompts that lack
+`not_contains|No results were found` to all research and Wikipedia prompts that lack
 an assert.
 
 Option B (systemic): teach `test_wrapper.py` to treat any response starting with

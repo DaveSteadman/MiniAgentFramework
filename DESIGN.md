@@ -164,7 +164,6 @@ The system is divided into two layers with a clean interface between them.
 - `DateTime` - current date/time
 - `Delegate` - isolated child orchestration
 - `FileAccess` - read/write workspace files
-- `Kiwix` - local offline Wikipedia mirror
 - `Memory` - persistent cross-session key-value memory
 - `Scratchpad` - session-scoped named-value store
 - `SystemInfo` - host hardware and OS info
@@ -255,8 +254,7 @@ The system is divided into two layers with a clean interface between them.
 | `/timeout <N>` | set LLM request timeout in seconds |
 | `/stopmodel` | unload the active model from Ollama |
 | `/stoprun` | cancel the current and pending queued runs |
-| `/ollamahost <url>` | switch Ollama host |
-| `/kiwixhost <url>` | switch Kiwix host |
+| `/llmserver <url>` | switch LLM server host and backend |
 | `/newchat` | clear conversation history and session context |
 | `/clearmemory` | delete the persistent memory store |
 | `/reskill` | rebuild the skills catalog |

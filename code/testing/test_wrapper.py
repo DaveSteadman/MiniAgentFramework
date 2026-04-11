@@ -95,14 +95,14 @@ def load_prompts_file(path: Path) -> list:
 def invoke_framework(
     prompt: str,
     model: str | None = None,
-    ollamahost: str | None = None,
+    llmhost: str | None = None,
 ) -> tuple[float, int, str, str]:
     # Single-prompt convenience wrapper - routes through invoke_exchange so output
     # is always in [TURN N] format, consistent with multi-turn exchanges.
     return invoke_exchange(
         [prompt],
         model=model,
-        ollamahost=ollamahost,
+        llmhost=llmhost,
     )
 
 
@@ -110,7 +110,7 @@ def invoke_framework(
 def invoke_exchange(
     turn_prompts: list[str],
     model: str | None = None,
-    ollamahost: str | None = None,
+    llmhost: str | None = None,
 ) -> tuple[float, int, str, str]:
     # Writes prompts to a temp JSON file, passes the path to main.py via the
     # CHAT_SEQUENCE_FILE environment variable, and returns (duration_secs, exit_code, stdout, stderr).
@@ -126,8 +126,8 @@ def invoke_exchange(
         cmd = [sys.executable, str(MAIN_SCRIPT)]
         if model:
             cmd += ["--model", model]
-        if ollamahost:
-            cmd += ["--ollamahost", ollamahost]
+        if llmhost:
+            cmd += ["--llmhost", llmhost]
 
         result = subprocess.run(
             cmd,
@@ -436,12 +436,12 @@ def run_tests(
     prompts: list,
     output_path: Path,
     model: str | None = None,
-    ollamahost: str | None = None,
+    llmhost: str | None = None,
     source_file: str = "",
 ) -> Path:
     initialize_csv(output_path)
     model_label = f" (model: {model})" if model else ""
-    host_label  = f" (host: {ollamahost})" if ollamahost else ""
+    host_label  = f" (host: {llmhost})" if llmhost else ""
     print(f"Results file initialized: {output_path}{model_label}{host_label}")
 
     total_items  = len(prompts)
@@ -455,7 +455,7 @@ def run_tests(
         if isinstance(item, dict):   # exchange
             passed, record = _run_exchange_item(
                 item, index, total_items, output_path,
-                model=model, ollamahost=ollamahost, source_file=source_file,
+                model=model, llmhost=llmhost, source_file=source_file,
             )
             if passed:
                 tests_passed += 1
@@ -463,7 +463,7 @@ def run_tests(
         else:                        # plain string
             interrupted, passed, record = _run_single_item(
                 str(item), index, total_items, output_path,
-                model=model, ollamahost=ollamahost, source_file=source_file,
+                model=model, llmhost=llmhost, source_file=source_file,
             )
             if passed:
                 tests_passed += 1
@@ -485,7 +485,7 @@ def _run_single_item(
     index: int,
     total_items: int,
     output_path: Path,
-    model, ollamahost,
+    model, llmhost,
     source_file: str = "",
 ) -> tuple[bool, bool, dict]:
     """Run a single standalone prompt.  Returns True if the run was interrupted."""
@@ -495,7 +495,7 @@ def _run_single_item(
     row = _base_row(run_timestamp, source_file, prompt)
     try:
         duration, exit_code, stdout, stderr = invoke_framework(
-            prompt, model=model, ollamahost=ollamahost,
+            prompt, model=model, llmhost=llmhost,
         )
         log_file     = extract_log_file(stdout_text=stdout)
         final_output = extract_final_output(stdout_text=stdout)
@@ -545,7 +545,7 @@ def _run_exchange_item(
     index: int,
     total_items: int,
     output_path: Path,
-    model, ollamahost,
+    model, llmhost,
     source_file: str = "",
 ) -> tuple[bool, dict]:
     """Run a multi-turn exchange.  Writes one CSV row per turn."""
@@ -560,7 +560,7 @@ def _run_exchange_item(
 
     try:
         duration, exit_code, stdout, stderr = invoke_exchange(
-            turn_prompts, model=model, ollamahost=ollamahost,
+            turn_prompts, model=model, llmhost=llmhost,
         )
     except subprocess.TimeoutExpired as e:
         duration, exit_code = float(SUBPROCESS_TIMEOUT_SECONDS * n), 124
@@ -637,10 +637,10 @@ def parse_args() -> argparse.Namespace:
         help="Ollama model alias to pass to main.py (overrides its default).",
     )
     parser.add_argument(
-        "--ollamahost",
+        "--llmhost",
         type=str,
         default=None,
-        help="Ollama host URL to pass to main.py (e.g. http://MONTBLANC:11434).",
+        help="LLM server host URL to pass to main.py (e.g. http://MONTBLANC:11434 or http://MONTBLANC:1234).",
     )
     parser.add_argument(
         "--output-file",
@@ -668,6 +668,6 @@ if __name__ == "__main__":
         prompts=load_prompts_file(args.prompts_file),
         output_path=args.output_file,
         model=args.model,
-        ollamahost=args.ollamahost,
+        llmhost=args.llmhost,
         source_file=args.source_file or args.prompts_file.name,
     )

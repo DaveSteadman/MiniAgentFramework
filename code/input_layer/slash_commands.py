@@ -17,10 +17,10 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Callable
 
-from agent_core.ollama_client import get_active_host
-from agent_core.ollama_client import get_llm_timeout
-from agent_core.ollama_client import register_session_config
-from agent_core.ollama_client import set_llm_timeout
+from agent_core.llm_client import get_active_host
+from agent_core.llm_client import get_llm_timeout
+from agent_core.llm_client import register_session_config
+from agent_core.llm_client import set_llm_timeout
 from agent_core.context_manager import get_last_context_map
 from agent_core.context_manager import get_last_messages
 from agent_core.context_manager import compact_context
@@ -367,8 +367,8 @@ def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
     sub = arg.strip().lower()
     if sub == "set":
         existing = _load()
-        new_cfg = {"model": ctx.config.resolved_model, "ctx": ctx.config.num_ctx, "ollamahost": get_active_host()}
-        for key in ("agentport", "kiwixurl", "ControlDataFolder", "UserDataFolder"):
+        new_cfg = {"model": ctx.config.resolved_model, "ctx": ctx.config.num_ctx, "llmhost": get_active_host()}
+        for key in ("agentport", "ControlDataFolder", "UserDataFolder"):
             if key in existing:
                 new_cfg[key] = existing[key]
         try:

@@ -13,7 +13,7 @@
 #   python code/utils/system_check.py --ctx 4096
 #
 # Related modules:
-#   - ollama_client.py  -- provides model listing, resolution, runtime reporting, and call_ollama
+#   - llm_client.py  -- provides model listing, resolution, runtime reporting, and call_ollama
 # ====================================================================================================
 
 
@@ -31,11 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import psutil
 
-from agent_core.ollama_client import call_ollama
-from agent_core.ollama_client import ensure_ollama_running
-from agent_core.ollama_client import format_running_model_report
-from agent_core.ollama_client import list_ollama_models
-from agent_core.ollama_client import resolve_model_name
+from agent_core.llm_client import call_ollama
+from agent_core.llm_client import ensure_ollama_running
+from agent_core.llm_client import format_running_model_report
+from agent_core.llm_client import list_ollama_models
+from agent_core.llm_client import resolve_model_name
 from utils.workspace_utils import trunc
 
 

@@ -20,7 +20,7 @@
 #   python skills_catalog_builder.py --output-summary /path/to/output.md
 #
 # Related modules:
-#   - ollama_client.py    -- used for optional LLM-assisted summarisation
+#   - llm_client.py    -- used for optional LLM-assisted summarisation
 #   - orchestration.py    -- calls build_tool_definitions at runtime; consumes the catalog
 # ====================================================================================================
 
@@ -35,8 +35,8 @@ import re
 import sys
 from pathlib import Path
 
-from agent_core.ollama_client import call_ollama
-from agent_core.ollama_client import ensure_ollama_running
+from agent_core.llm_client import call_ollama
+from agent_core.llm_client import ensure_ollama_running
 from utils.workspace_utils import get_workspace_root
 from utils.workspace_utils import normalize_module_path
 

@@ -2,63 +2,107 @@ import json
 import urllib.request
 from typing import Callable
 
-from agent_core.ollama_client import configure_host
-from agent_core.ollama_client import get_active_host
-from agent_core.ollama_client import get_ollama_ps_rows
-from agent_core.ollama_client import is_explicit_model_name
-from agent_core.ollama_client import list_ollama_models
-from agent_core.ollama_client import register_session_config
-from agent_core.ollama_client import resolve_model_name
-from agent_core.ollama_client import stop_model
+from agent_core.llm_client import configure_host
+from agent_core.llm_client import configure_server
+from agent_core.llm_client import get_active_backend
+from agent_core.llm_client import get_active_host
+from agent_core.llm_client import get_active_num_ctx
+from agent_core.llm_client import get_ollama_ps_rows
+from agent_core.llm_client import is_explicit_model_name
+from agent_core.llm_client import list_ollama_models
+from agent_core.llm_client import register_session_config
+from agent_core.llm_client import resolve_model_name
+from agent_core.llm_client import stop_model
 from input_layer.slash_command_context import SlashCommandContext
 from utils.workspace_utils import get_bootstrap_defaults_file
 
 
-def _cmd_models(arg: str, ctx: SlashCommandContext) -> None:
-    try:
-        available = list_ollama_models()
-        host = get_active_host()
-        ctx.output(f"{len(available)} model(s) installed on: {host}", "info")
-        for model_name in available:
-            marker = "\u25ba" if model_name == ctx.config.resolved_model else " "
-            ctx.output(f"  {marker} {model_name}", "item")
-    except Exception as exc:
-        ctx.output(f"Error listing models: {exc}", "error")
-
-
-def _cmd_model(arg: str, ctx: SlashCommandContext) -> None:
+def _cmd_llmserverconfig(arg: str, ctx: SlashCommandContext) -> None:
+    # /llmserverconfig                  -> show current model + ctx + backend
+    # /llmserverconfig model list       -> list models available on the active server
+    # /llmserverconfig model <name>     -> switch active model; clears history
+    # /llmserverconfig ctx <n>          -> set context window size
     if not arg:
-        ctx.output(f"Usage: /model <name>  |  current: {ctx.config.resolved_model}", "dim")
+        ctx.output(
+            f"Model: {ctx.config.resolved_model}  |  ctx: {ctx.config.num_ctx:,}  |  "
+            f"backend: {get_active_backend()} @ {get_active_host()}",
+            "info",
+        )
+        ctx.output("Usage: /llmserverconfig model list | model <name> | ctx <n>", "dim")
         return
 
-    try:
-        available = list_ollama_models()
-        resolved = resolve_model_name(arg, available) if available else None
-        if resolved is None:
-            if is_explicit_model_name(arg):
-                resolved = arg.strip()
-                ctx.output(
-                    f"Model '{resolved}' is not in the downloaded model list; using it as an explicit override.",
-                    "dim",
-                )
-            else:
-                if not available:
-                    ctx.output("No models installed in Ollama.", "error")
-                    return
-                ctx.output(f"Model '{arg}' not found.  Available: {', '.join(available)}", "error")
-                return
+    parts = arg.strip().split(None, 1)
+    first = parts[0].lower()
+    rest  = parts[1].strip() if len(parts) > 1 else ""
 
-        old = ctx.config.resolved_model
-        ctx.config.resolved_model = resolved
-        register_session_config(resolved, ctx.config.num_ctx)
-        ctx.clear_history()
-        ctx.output(f"Model switched: {old} \u2192 {resolved}", "success")
-        ctx.output("(conversation history cleared)", "dim")
-    except Exception as exc:
-        ctx.output(f"Error: {exc}", "error")
+    if first == "ctx":
+        if not rest or not rest.strip().isdigit():
+            ctx.output(f"Usage: /llmserverconfig ctx <n>  |  current: {ctx.config.num_ctx:,}", "dim")
+            return
+        n = int(rest.strip())
+        ctx.config.num_ctx = n
+        register_session_config(ctx.config.resolved_model, n)
+        ctx.output(f"Context window: {n:,} tokens", "success")
+        return
+
+    if first == "model":
+        if not rest or rest == "list":
+            try:
+                available = list_ollama_models()
+                host      = get_active_host()
+                backend   = get_active_backend()
+                label     = "model(s) installed on"
+                ctx.output(f"{len(available)} {label}: {host}", "info")
+                for model_name in available:
+                    marker = ">" if model_name == ctx.config.resolved_model else " "
+                    ctx.output(f"  {marker} {model_name}", "item")
+            except Exception as exc:
+                ctx.output(f"Error listing models: {exc}", "error")
+            return
+
+        model_arg = rest
+        try:
+            available = list_ollama_models()
+            resolved  = resolve_model_name(model_arg, available) if available else None
+            if resolved is None:
+                if is_explicit_model_name(model_arg):
+                    resolved = model_arg.strip()
+                    ctx.output(
+                        f"Model '{resolved}' not in listed models; using as explicit override.",
+                        "dim",
+                    )
+                elif get_active_backend() == "lmstudio":
+                    # LM Studio model IDs (e.g. openai/gpt-oss-20b) may not contain ':'
+                    # but the server routes to the correct model via the name in the payload.
+                    resolved = model_arg.strip()
+                else:
+                    if not available:
+                        ctx.output("No models available on the inference server.", "error")
+                        return
+                    ctx.output(f"Model '{model_arg}' not found. Available: {', '.join(available)}", "error")
+                    return
+            old = ctx.config.resolved_model
+            ctx.config.resolved_model = resolved
+            register_session_config(resolved, ctx.config.num_ctx)
+            ctx.clear_history()
+            ctx.output(f"Model switched: {old} -> {resolved}", "success")
+            ctx.output("(conversation history cleared)", "dim")
+        except Exception as exc:
+            ctx.output(f"Error: {exc}", "error")
+        return
+
+    ctx.output(
+        f"Unknown subcommand '{first}'. Usage: /llmserverconfig model list | model <name> | ctx <n>",
+        "error",
+    )
 
 
 def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
+    if get_active_backend() == "lmstudio":
+        ctx.output("Model unloading is not supported via LM Studio's API.", "dim")
+        ctx.output("Use the LM Studio UI to change or unload the served model.", "dim")
+        return
+
     target_name = arg.strip() if arg.strip() else ctx.config.resolved_model
     try:
         running_rows = get_ollama_ps_rows()
@@ -68,7 +112,7 @@ def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
 
     running_names = [row.get("name", "") for row in running_rows if row.get("name")]
     if not running_names:
-        ctx.output("No models are currently loaded in Ollama.", "dim")
+        ctx.output("No models are currently loaded.", "dim")
         return
 
     resolved = resolve_model_name(target_name, running_names)
@@ -86,84 +130,61 @@ def _cmd_stopmodel(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output(f"Error stopping model: {exc}", "error")
 
 
-def _cmd_kiwixhost(arg: str, ctx: SlashCommandContext) -> None:
-    defaults_path = get_bootstrap_defaults_file()
-
-    def _load_defaults() -> dict:
-        try:
-            return json.loads(defaults_path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-
+def _cmd_llmserver(arg: str, ctx: SlashCommandContext) -> None:
+    # /llmserver                      -> show current server
+    # /llmserver ollama <host|url>    -> switch to Ollama at the given host/url
+    # /llmserver lmstudio <host|url>  -> switch to LM Studio at the given host/url
     if not arg:
-        current = _load_defaults().get("kiwixurl", "(not set)")
-        ctx.output(f"Usage: /kiwixhost <url>  |  current: {current}", "dim")
+        ctx.output(f"Current server: {get_active_host()} ({get_active_backend()})", "info")
         return
 
-    raw = arg.strip().rstrip("/")
-    if "://" not in raw:
-        raw = f"http://{raw}"
+    parts = arg.strip().split(None, 1)
+    token = parts[0].lower()
 
-    try:
-        req = urllib.request.Request(f"{raw}/", method="HEAD")
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as exc:
-        ctx.output(f"Cannot reach '{raw}': {exc}", "error")
-        ctx.output("Kiwix host not changed.", "dim")
+    if token not in ("ollama", "lmstudio") or len(parts) < 2:
+        ctx.output("Usage: /llmserver <ollama|lmstudio> <host|url>", "error")
+        ctx.output(f"Current: {get_active_host()} ({get_active_backend()})", "dim")
         return
 
-    cfg = _load_defaults()
-    old = cfg.get("kiwixurl", "(not set)")
-    cfg["kiwixurl"] = raw
-    try:
-        defaults_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    except Exception as exc:
-        ctx.output(f"Error saving default.json: {exc}", "error")
-        return
-
-    ctx.output(f"Kiwix host updated: {old} -> {raw}", "success")
-    ctx.output("Takes effect immediately - no restart required.", "dim")
-
-
-def _cmd_ollama_host(arg: str, ctx: SlashCommandContext) -> None:
-    if not arg:
-        ctx.output(f"Usage: /ollamahost <hostname|url|local>  |  current: {get_active_host()}", "dim")
-        return
-
-    raw = arg.strip()
+    host_arg = parts[1].strip()
     old_host = get_active_host()
 
     try:
-        configure_host(raw)
+        configure_server(token, host_arg)
+
         new_host = get_active_host()
-        models = list_ollama_models()
+        models   = list_ollama_models()
+        # Sync the session model to a valid choice on the new server.
+        # If the currently configured model isn't in the new server's list, pick the first available.
+        current_model = ctx.config.resolved_model
+        if models and current_model not in models:
+            ctx.config.resolved_model = models[0]
+        register_session_config(ctx.config.resolved_model, ctx.config.num_ctx)
         ctx.clear_history()
-        ctx.output(f"Host switched: {old_host} \u2192 {new_host}", "success")
+        ctx.output(f"Server: {old_host} -> {new_host} ({get_active_backend()})", "success")
         if models:
             ctx.output(f"  {len(models)} model(s): {', '.join(models)}", "item")
         ctx.output("(conversation history cleared)", "dim")
     except Exception as exc:
+        new_host = get_active_host()
         configure_host(old_host)
-        ctx.output(f"Cannot reach '{raw}': {exc}", "error")
-        ctx.output(f"Still using: {old_host}", "dim")
+        ctx.output(f"Cannot reach '{new_host}': {exc}", "error")
+        ctx.output(f"Still using: {old_host} ({get_active_backend()})", "dim")
 
 
 def register_model_slash_commands(registry: dict[str, Callable], descriptions: dict[str, str]) -> None:
     registry.update(
         {
-            "/models": _cmd_models,
-            "/model": _cmd_model,
-            "/stopmodel": _cmd_stopmodel,
-            "/kiwixhost": _cmd_kiwixhost,
-            "/ollamahost": _cmd_ollama_host,
+            "/llmserver":       _cmd_llmserver,
+            "/llmserverconfig": _cmd_llmserverconfig,
+            "/stopmodel":       _cmd_stopmodel,
         }
     )
     descriptions.update(
         {
-            "/models": "List installed Ollama models",
-            "/model": "<name>  Switch active model for all subsequent runs",
-            "/stopmodel": "[name]  Unload a running model from VRAM (defaults to active model)",
-            "/kiwixhost": "<url>  Set the Kiwix server URL and save to default.json (takes effect immediately)",
-            "/ollamahost": "<hostname|url|local>  Switch active Ollama host (LAN, cloud, or local)",
+            "/llmserver":       "<ollama|lmstudio> [host]  Switch the active model server backend and host",
+            "/llmserverconfig": "model list | model <name> | ctx <n>  Configure the active model and context window",
+            "/stopmodel":       "[name]  Unload a running model from VRAM (Ollama only, defaults to active model)",
         }
     )
+

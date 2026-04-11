@@ -56,7 +56,7 @@ than substituting an answer from memory.
 - `title="Search failed"` with a timeout or URL error in the snippet - this is a connectivity
   failure. The endpoint is unreachable right now. Do NOT retry the same search endpoint with
   alternative query phrasings - it will time out again. Make at most one offline fallback
-  attempt (`kiwix_search` or `lookup_wikipedia`), then immediately report no results.
+  attempt (`lookup_wikipedia`), then immediately report no results.
 
 **Choose between `search_web` and `search_web_text`:**
 - Use `search_web_text` in almost all cases - returns formatted text ready for direct synthesis,

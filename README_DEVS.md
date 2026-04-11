@@ -277,7 +277,7 @@ The context map is the runtime’s internal “what is in context right now?” 
 Key built-in skill families:
 - system and utility: `SystemInfo`, `DateTime`, `Scratchpad`, `CodeExecute`
 - file/task/runtime: `FileAccess`, `TaskManagement`, `Delegate`
-- memory and retrieval: `Memory`, `Wikipedia`, `Kiwix`
+- memory and retrieval: `Memory`, `Wikipedia`
 - web stack: `WebSearch`, `WebFetch`, `WebNavigate`, `WebResearch`
 
 ---
@@ -349,8 +349,7 @@ Key built-in skill families:
   - `/models`
   - `/model`
   - `/stopmodel`
-  - `/ollamahost`
-  - `/kiwixhost`
+  - `/llmserver`
 - `slash_command_handlers_testing.py`
   - `/test`
   - `/testtrend`

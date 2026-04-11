@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from agent_core.ollama_client import get_active_host
+from agent_core.llm_client import get_active_host
 from input_layer.slash_command_context import SlashCommandContext
 from utils.workspace_utils import get_test_prompts_dir
 from utils.workspace_utils import get_test_results_dir
@@ -13,7 +13,7 @@ from utils.workspace_utils import get_test_results_dir
 def _run_one_test_file(candidate, ctx, wrapper, model: str, active_host: str, re_mod, subprocess_mod, sys_mod, output_file=None) -> dict:
     cmd = [sys_mod.executable, str(wrapper), "--prompts-file", str(candidate), "--model", model]
     if "localhost" not in active_host and "127.0.0.1" not in active_host:
-        cmd += ["--ollamahost", active_host]
+        cmd += ["--llmhost", active_host]
     if output_file is not None:
         cmd += ["--output-file", str(output_file)]
     cmd += ["--source-file", candidate.name]

@@ -11,7 +11,7 @@
 # Related modules:
 #   - orchestration.py          -- OrchestratorConfig, orchestrate_prompt
 #   - modes/api_mode.py         -- run_api_mode (FastAPI + uvicorn + scheduler)
-#   - ollama_client.py          -- Ollama server management and LLM calls
+#   - llm_client.py              -- server management and LLM calls
 #   - skills_catalog_builder.py -- load_skills_payload, tool definitions
 #   - utils/runtime_logger.py   -- SessionLogger, create_log_file_path
 # ====================================================================================================
@@ -176,11 +176,11 @@ def _attach_child_to_kill_on_close_job(pid: int):
 
 _maybe_reexec_into_project_venv()
 
-import agent_core.ollama_client as ollama_client
+import agent_core.llm_client as llm_client
 from input_layer.api_mode import run_api_mode
-from agent_core.ollama_client import format_running_model_report
-from agent_core.ollama_client import get_llm_timeout
-from agent_core.ollama_client import register_llm_call_logger
+from agent_core.llm_client import format_running_model_report
+from agent_core.llm_client import get_llm_timeout
+from agent_core.llm_client import register_llm_call_logger
 from agent_core.orchestration import OrchestratorConfig
 from agent_core.orchestration import orchestrate_prompt
 from agent_core.orchestration import resolve_execution_model
@@ -208,7 +208,7 @@ LOG_DIR              = get_logs_dir()
 DEFAULTS_FILE        = get_bootstrap_defaults_file()
 
 # Keys accepted from default.json - must match the argparse dest names exactly.
-_DEFAULTS_KEYS = {"model", "ctx", "agentport", "ollamahost"}
+_DEFAULTS_KEYS = {"model", "ctx", "agentport", "llmhost"}
 
 # All valid keys in default.json - superset of _DEFAULTS_KEYS.
 # Keys here that are not in _DEFAULTS_KEYS are read directly by skills or slash commands
@@ -270,11 +270,12 @@ def parse_main_args() -> argparse.Namespace:
         help="Port for the web UI server (default 8000). Always binds to 0.0.0.0.",
     )
     parser.add_argument(
-        "--ollamahost",
+        "--llmhost",
         type=str,
-        default=os.environ.get("OLLAMAHOST", ollama_client.DEFAULT_OLLAMAHOST),
+        default=os.environ.get("LLMHOST", os.environ.get("OLLAMAHOST", llm_client.DEFAULT_OLLAMAHOST)),
         metavar="URL",
-        help="Ollama host URL. Defaults to http://localhost:11434. Also read from OLLAMAHOST env var.",
+        help="Inference server host URL or alias. Aliases: 'lmstudio' (http://localhost:1234), "
+             "'local' (http://localhost:11434). Also read from LLMHOST env var.",
     )
     # Apply file defaults between factory defaults and CLI; set_defaults() is overridden
     # by any explicit CLI value but overrides argparse's own default= values.
@@ -385,16 +386,16 @@ def _run(args, logger, log_path) -> None:
 
     register_llm_call_logger(logger.log_file_only)
 
-    # Set the active host once; all subsequent Ollama calls use this value.
-    ollama_client.configure_host(args.ollamahost)
+    # Set the active host once; all subsequent LLM calls use this value.
+    llm_client.configure_host(args.llmhost)
 
-    # Ensure Ollama is running before starting the UI. For local hosts, ollama serve is
-    # auto-started if needed. For remote/cloud hosts a warning is printed but startup
-    # continues.
+    # Ensure the inference server is running before starting the UI. For local Ollama,
+    # ollama serve is auto-started if needed. For remote/cloud Ollama and LM Studio a
+    # warning is printed but startup continues.
     try:
-        ollama_client.ensure_ollama_running(verbose=True)
+        llm_client.ensure_ollama_running(verbose=True)
     except RuntimeError as exc:
-        print(f"Warning: {exc}  LLM calls will fail until Ollama is reachable.", flush=True)
+        print(f"Warning: {exc}  LLM calls will fail until the server is reachable.", flush=True)
 
     # Resolve the alias (e.g. "20b") to a concrete installed model name.
     try:
@@ -414,11 +415,11 @@ def _run(args, logger, log_path) -> None:
         catalog_mtime       = catalog_mtime,
     )
 
-    ollama_client.register_session_config(resolved_model, args.ctx)
+    llm_client.register_session_config(resolved_model, args.ctx)
 
-    _host_ok    = ollama_client.is_ollama_running()
+    _host_ok    = llm_client.is_ollama_running() if llm_client.get_active_backend() == "ollama" else True
     try:
-        _known      = ollama_client.list_ollama_models()
+        _known      = llm_client.list_ollama_models()
         _model_ok   = resolved_model in _known
     except Exception:
         _model_ok   = False
@@ -427,8 +428,9 @@ def _run(args, logger, log_path) -> None:
     _tick = chr(0x2713)
     _cross = chr(0x2717)
 
+    _backend_label = "LM Studio host" if llm_client.get_active_backend() == "lmstudio" else "Ollama host"
     logger.log_section("SYSTEM STATUS")
-    logger.log(f"Ollama host:     {ollama_client.get_active_host()} {_tick if _host_ok else _cross}")
+    logger.log(f"{_backend_label}:   {llm_client.get_active_host()} {_tick if _host_ok else _cross}")
     logger.log(f"Requested model: {args.model}")
     logger.log(f"Resolved model:  {resolved_model} {_tick if _model_ok else _cross}")
     print(f"Control data:    {_cd} {_tick if _cd.exists() else _cross}", flush=True)

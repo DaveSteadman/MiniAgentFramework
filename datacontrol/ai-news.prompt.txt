@@ -29,7 +29,7 @@ Step 3 - Write the report:
 - Number sections sequentially (1, 2, 3 ...) with no duplicated numbers.
 
 Notes:
-- Kiwix and Wikipedia are encyclopedia reference sources. They do not contain news headlines and are prohibited for this task.
+- Wikipedia is an encyclopedia reference source. It does not contain news headlines and is prohibited for this task.
 - File paths passed to read_file and write_file must NOT start with "./". Use bare relative paths like "2026-04-05/ai-headlines.md".
 
 Output:

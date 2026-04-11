@@ -34,7 +34,7 @@
 #   - scheduler.py            -- task_queue singleton, load_schedules_dir, is_task_due
 #   - orchestration.py        -- orchestrate_prompt, OrchestratorConfig, ConversationHistory
 #   - runtime_logger.py       -- SessionLogger, create_log_file_path
-#   - ollama_client.py        -- get_ollama_ps_rows, get_active_host
+#   - llm_client.py        -- get_ollama_ps_rows, get_active_host
 #   - slash_commands.py       -- SlashCommandContext, handle; /session commands manage named sessions
 # ====================================================================================================
 
@@ -66,11 +66,12 @@ from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from agent_core.ollama_client import get_active_host
-from agent_core.ollama_client import get_active_model
-from agent_core.ollama_client import get_active_num_ctx
-from agent_core.ollama_client import get_ollama_ps_rows
-from agent_core.ollama_client import list_ollama_models
+from agent_core.llm_client import get_active_backend
+from agent_core.llm_client import get_active_host
+from agent_core.llm_client import get_active_model
+from agent_core.llm_client import get_active_num_ctx
+from agent_core.llm_client import get_ollama_ps_rows
+from agent_core.llm_client import list_ollama_models
 from agent_core.orchestration import ConversationHistory
 from agent_core.orchestration import OrchestratorConfig
 from agent_core.orchestration import SessionContext
@@ -302,6 +303,7 @@ register_status_routes(
     get_active_host=get_active_host,
     get_active_model=get_active_model,
     get_active_num_ctx=get_active_num_ctx,
+    get_active_backend=get_active_backend,
     get_ollama_ps_rows=get_ollama_ps_rows,
     version=__version__,
 )
@@ -529,9 +531,9 @@ def _compact_old_turns(turns: list[dict], summaries: list[dict], batch_size: int
     Returns (remaining_turns, updated_summaries).  Returns inputs unchanged on any error
     (no model loaded, LLM failure) so the session is never corrupted by a failed compaction.
     """
-    from agent_core.ollama_client import call_llm_chat
-    from agent_core.ollama_client import get_active_model
-    from agent_core.ollama_client import get_active_num_ctx
+    from agent_core.llm_client import call_llm_chat
+    from agent_core.llm_client import get_active_model
+    from agent_core.llm_client import get_active_num_ctx
 
     model   = get_active_model()
     num_ctx = get_active_num_ctx()

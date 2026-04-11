@@ -18,7 +18,7 @@
 #   - skills/WebSearch/web_search_skill.py  -- used for initial DuckDuckGo seeding
 #   - skills/WebNavigate/web_navigate_skill.py -- used for extracting hop URLs from pages
 #   - webpage_utils.py                      -- shared HTTP fetch and HTML extraction
-#   - ollama_client.py                      -- used for LLM-backed evidence re-extraction
+#   - llm_client.py                      -- used for LLM-backed evidence re-extraction
 # ====================================================================================================
 
 import html as _html
@@ -27,9 +27,9 @@ import re
 import urllib.parse
 from collections import deque
 
-from agent_core.ollama_client import call_llm_chat as _call_llm_chat
-from agent_core.ollama_client import get_active_model as _get_active_model
-from agent_core.ollama_client import get_active_num_ctx as _get_active_num_ctx
+from agent_core.llm_client import call_llm_chat as _call_llm_chat
+from agent_core.llm_client import get_active_model as _get_active_model
+from agent_core.llm_client import get_active_num_ctx as _get_active_num_ctx
 from agent_core.scratchpad import scratch_save as _scratch_save
 from utils.webpage_utils import extract_content as _extract_content
 from utils.webpage_utils import fetch_html as _fetch_html

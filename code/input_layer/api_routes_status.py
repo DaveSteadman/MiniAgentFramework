@@ -1,7 +1,7 @@
 from datetime import datetime
 
 
-def register_status_routes(app, *, get_active_host, get_active_model, get_active_num_ctx, get_ollama_ps_rows, version: str) -> None:
+def register_status_routes(app, *, get_active_host, get_active_model, get_active_num_ctx, get_active_backend, get_ollama_ps_rows, version: str) -> None:
     @app.get("/version")
     def get_version():
         return {"version": version}
@@ -13,9 +13,10 @@ def register_status_routes(app, *, get_active_host, get_active_model, get_active
         except Exception:
             rows = []
         return {
-            "host": get_active_host(),
-            "model": get_active_model(),
+            "host":    get_active_host(),
+            "model":   get_active_model(),
             "num_ctx": get_active_num_ctx(),
-            "rows": rows,
-            "ts": datetime.now().isoformat(timespec="seconds"),
+            "backend": get_active_backend(),
+            "rows":    rows,
+            "ts":      datetime.now().isoformat(timespec="seconds"),
         }

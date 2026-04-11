@@ -437,7 +437,7 @@ class RegressionTests(unittest.TestCase):
         )
         scratch_save("search_block", search_results)
 
-        with patch("agent_core.ollama_client.call_llm_chat") as llm_call:
+        with patch("agent_core.llm_client.call_llm_chat") as llm_call:
             result = scratch_query("search_block", "list all the Williams F1 team wins at Imola")
 
         self.assertEqual(result, "Not found in content.")
@@ -446,10 +446,10 @@ class RegressionTests(unittest.TestCase):
     def test_scratch_query_prompt_forbids_outside_knowledge(self) -> None:
         scratch_save("race_rows", "1992 Ayrton Senna\n1993 Ayrton Senna")
 
-        with patch("agent_core.ollama_client.get_active_model", return_value="gpt-oss:20b"):
-            with patch("agent_core.ollama_client.get_active_num_ctx", return_value=131072):
+        with patch("agent_core.llm_client.get_active_model", return_value="gpt-oss:20b"):
+            with patch("agent_core.llm_client.get_active_num_ctx", return_value=131072):
                 with patch(
-                    "agent_core.ollama_client.call_llm_chat",
+                    "agent_core.llm_client.call_llm_chat",
                     return_value=SimpleNamespace(response="1992 Ayrton Senna\n1993 Ayrton Senna"),
                 ) as llm_call:
                     result = scratch_query("race_rows", "list all rows")

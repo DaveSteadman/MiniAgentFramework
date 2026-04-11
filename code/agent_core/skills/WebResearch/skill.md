@@ -78,18 +78,16 @@ internal multi-step frontier that can succeed where a single-query search fails.
 This happens when DuckDuckGo rate-limits or blocks the request. Do not report "no results" to the
 user. Instead, fall back through this chain in order, stopping as soon as one succeeds:
 
-1. `kiwix_search(query)` - local offline library, no rate-limiting. If the result begins with
-   "Error" or "not configured", Kiwix is unavailable on this system - skip it and continue.
-2. `lookup_wikipedia(query)` - live Wikipedia lookup.
-3. `search_web` or `search_web_text` with a simplified or rephrased version of the query.
-4. `fetch_page_text` on any promising URLs found in steps 1-3.
+1. `lookup_wikipedia(query)` - live Wikipedia lookup.
+2. `search_web` or `search_web_text` with a simplified or rephrased version of the query.
+3. `fetch_page_text` on any promising URLs found in steps 1-2.
 
 Only report "no results" to the user once all of the above are exhausted.
 
 **Exception - do not retry when the failure is a timeout.**
 If earlier `search_web` calls in this session have already returned `title="Search failed"` with
-a timeout error for this query, the endpoint is unreachable. Skip steps 3-4 above and go
-directly to kiwix_search (step 1) and lookup_wikipedia (step 2) only. Do not issue more
+a timeout error for this query, the endpoint is unreachable. Skip steps 2-3 above and go
+directly to `lookup_wikipedia` (step 1) only. Do not issue more
 `search_web` calls against an endpoint that has already timed out multiple times.
 
 **The manual three-stage chain is often better for structured tasks:**

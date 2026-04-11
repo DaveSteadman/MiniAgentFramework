@@ -15,7 +15,7 @@
 #   - modes/api_mode.py         -- run_api_mode
 #   - skill_executor.py          -- execute_tool_call (executes individual skill calls)
 #   - skills_catalog_builder.py  -- build_tool_definitions (generates JSON Schema tool specs)
-#   - ollama_client.py           -- call_llm_chat (/v1/chat/completions with tools support)
+#   - llm_client.py              -- call_llm_chat (/v1/chat/completions with tools support)
 # ====================================================================================================
 
 
@@ -33,11 +33,12 @@ from agent_core.delegate_runner import get_delegate_runtime_tls
 from agent_core.delegate_runner import pop_delegate_runtime
 from agent_core.delegate_runner import push_delegate_runtime
 from agent_core.delegate_runner import run_delegate_subrun
-from agent_core.ollama_client import call_llm_chat
-from agent_core.ollama_client import is_explicit_model_name
-from agent_core.ollama_client import list_ollama_models
-from agent_core.ollama_client import log_to_session
-from agent_core.ollama_client import resolve_model_name
+from agent_core.llm_client import call_llm_chat
+from agent_core.llm_client import get_active_backend
+from agent_core.llm_client import is_explicit_model_name
+from agent_core.llm_client import list_ollama_models
+from agent_core.llm_client import log_to_session
+from agent_core.llm_client import resolve_model_name
 from agent_core.prompt_tokens import resolve_tokens
 from agent_core.scratchpad import scratch_list as _scratch_list
 from agent_core.prompt_builder import build_system_message as _prompt_builder_build_system_message
@@ -331,31 +332,35 @@ class SessionContext:
 # MARK: MODEL RESOLUTION
 # ====================================================================================================
 def resolve_execution_model(requested_model: str) -> str:
-    """Resolve a short alias or tag to a fully-qualified installed Ollama model name.
+    """Resolve a short alias or tag to a fully-qualified model name available on the active server.
 
-    Falls back to the first available model (with a printed warning) rather than
-    crashing, so a machine with no "20b" model still starts cleanly.
+    For Ollama: matches against all installed models and prints a warning on fallback.
+    For LM Studio: matches against the currently-served model(s). When no alias matches
+    (the common case, since LM Studio uses verbose IDs), silently adopts the served model.
 
     If the requested name is already fully-qualified (contains ':' with no whitespace)
-    it is returned as-is without querying the host.  This means a model resolved once
-    at session startup is forwarded verbatim to subprocesses (e.g. /test against a
-    remote host) without re-resolution against that host's model list.
+    it is returned as-is without querying the host.
     """
-    # Already fully qualified - trust it; no need to hit /api/tags.
+    # Already fully qualified - trust it; no need to query the server.
     if is_explicit_model_name(requested_model):
         return requested_model.strip()
 
     available_models = list_ollama_models()
     if not available_models:
-        raise RuntimeError("No models are installed in Ollama. Pull models first, then rerun.")
+        raise RuntimeError("No models are available on the inference server. Ensure the server is running and models are loaded.")
 
     resolved = resolve_model_name(requested_model, available_models)
     if resolved is None:
         fallback = available_models[0]
-        print(
-            f"[model] '{requested_model}' not found - falling back to '{fallback}'.\n"
-            f"        Available: {', '.join(available_models)}"
-        )
+        if get_active_backend() == "lmstudio":
+            # LM Studio serves whatever is loaded in the UI; alias matching is not meaningful.
+            # Silently adopt the served model so startup is clean.
+            print(f"[model] LM Studio is serving: '{fallback}' - using that.")
+        else:
+            print(
+                f"[model] '{requested_model}' not found - falling back to '{fallback}'.\n"
+                f"        Available: {', '.join(available_models)}"
+            )
         return fallback
 
     return resolved

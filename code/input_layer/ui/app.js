@@ -23,8 +23,8 @@ const CSS_WRAP_ACTIVE = "wrap-active";
 
 // All registered slash commands - used for command-name tab completion.
 const _ALL_COMMANDS = [
-    "/help", "/models", "/model", "/ctx", "/rounds", "/timeout",
-    "/stopmodel", "/stoprun", "/ollamahost", "/kiwixhost",
+    "/help", "/llmserver", "/llmserverconfig", "/ctx", "/rounds", "/timeout",
+    "/stopmodel", "/stoprun",
     "/newchat", "/clearmemory", "/reskill", "/sandbox",
     "/deletelogs", "/test", "/testtrend", "/tasks", "/task",
     "/version", "/defaults", "/session",
@@ -260,14 +260,19 @@ async function refreshOllamaStatus() {
         return;
     }
     // Update text BEFORE dot so the two are never mismatched.
+    const backend   = data.backend || "ollama";
+    const isLMStudio = backend === "lmstudio";
     const rows  = data.rows || [];
     const first = rows[0] || {};
-    // Strip tag suffix from model name for display (e.g. "llama3.1:8b" -> "llama3.1:8b" kept as-is,
-    // but strip size annotation if present like "llama3.1:8b-q4" stays; just trim whitespace).
-    const modelName = (first.name || "").trim();
-    const ctxVal    = data.num_ctx ? data.num_ctx.toLocaleString() + " ctx" : "";
-    dom.ollamaHost().textContent  = data.host  || "";
-    dom.ollamaModel().textContent = modelName  || data.model || "";
+    // For Ollama: prefer the running model name from `ollama ps`.
+    // For LM Studio: `ollama ps` is unavailable; use the configured model name.
+    const modelName = isLMStudio ? (data.model || "") : ((first.name || "").trim() || data.model || "");
+    // For LM Studio the context window is set inside the LM Studio UI and cannot
+    // be read via API, so label it "local ctx" to make the distinction clear.
+    const ctxLabel  = isLMStudio ? "local ctx" : "ctx";
+    const ctxVal    = data.num_ctx ? data.num_ctx.toLocaleString() + " " + ctxLabel : "";
+    dom.ollamaHost().textContent  = (data.host || "") + " (" + backend + ")";
+    dom.ollamaModel().textContent = modelName;
     dom.ollamaCtx().textContent   = ctxVal;
     dom.ollamaDot().className = "on";
     _ollamaReachable = true;

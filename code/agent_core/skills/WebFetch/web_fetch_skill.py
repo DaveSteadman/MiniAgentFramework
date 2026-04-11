@@ -31,14 +31,14 @@ import urllib.error
 import urllib.parse
 from pathlib import Path
 
-# Ensure code/ is on the path so ollama_client is importable when this skill is loaded dynamically.
+# Ensure code/ is on the path so llm_client is importable when this skill is loaded dynamically.
 _code_dir = str(Path(__file__).resolve().parents[3])
 if _code_dir not in sys.path:
     sys.path.insert(0, _code_dir)
 
-from agent_core.ollama_client import call_llm_chat as _call_llm_chat
-from agent_core.ollama_client import get_active_model as _get_active_model
-from agent_core.ollama_client import get_active_num_ctx as _get_active_num_ctx
+from agent_core.llm_client import call_llm_chat as _call_llm_chat
+from agent_core.llm_client import get_active_model as _get_active_model
+from agent_core.llm_client import get_active_num_ctx as _get_active_num_ctx
 from utils.webpage_utils import fetch_html as _fetch_html
 from utils.webpage_utils import extract_content as _extract_content
 from utils.webpage_utils import truncate_to_words as _truncate_to_words

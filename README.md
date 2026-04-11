@@ -1,6 +1,6 @@
 # MiniAgentFramework
 
-Local-first agent framework for Ollama-based LLMs.
+Local-first agent framework for local LLMs.
 
 MiniAgentFramework runs locally, uses local tools, and shows you what it is doing as it goes. You send a prompt; the LLM chooses Python skills, executes them in ordered steps, and returns the result while the orchestration log streams live in the UI.
 
@@ -10,7 +10,7 @@ If you want local agents without cloud dependencies, hidden orchestration, or fr
 
 ## Why this exists
 
-- Local-first: built around [Ollama](https://ollama.com), local Python tools, and local files.
+- Local-first: built around local model servers ([Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai)), local Python tools, and local files.
 - Transparent: tool calls, intermediate steps, and orchestration logs are visible instead of hidden.
 - Practical: scheduled runs, persistent chat sessions, live logs, and file-writing workflows are built in.
 - Lightweight: aimed at real agent workflows without requiring a large abstraction stack.
@@ -79,11 +79,12 @@ This is the core experience of the framework: local LLM, local tools, visible re
 
 ## Running the Framework
 
-Running `main.py` starts the local API server and Web UI. It loads defaults, connects to Ollama, and exposes the REST/SSE endpoints used by the browser UI.
+Running `main.py` starts the local API server and Web UI. It loads defaults, connects to the configured model server, and exposes the REST/SSE endpoints used by the browser UI.
 
 ```powershell
 python .\code\main.py
-python .\code\main.py --ollamahost MONTBLANC
+python .\code\main.py --llmhost MONTBLANC
+python .\code\main.py --llmhost lmstudio
 python .\code\main.py --agentport 8010 --model 20b --ctx 65536
 ```
 
@@ -124,10 +125,10 @@ All options are optional. Unrecognised options are rejected at startup with a us
 
 | Option | Default | Description |
 |---|---|---|
-| `--model ALIAS` | `"20b"` | Ollama model alias or tag. Short aliases like `20b` resolve to the first installed model whose tag contains that string. |
+| `--model ALIAS` | `"20b"` | Model alias or tag. Short aliases like `20b` resolve to the first available model whose tag contains that string. |
 | `--ctx N` | `131072` | Context window size used for LLM calls. |
 | `--agentport PORT` | `8000` | Port for the web UI/API server. Always binds to 0.0.0.0. |
-| `--ollamahost URL` | `http://localhost:11434` | Ollama host to use. Accepts a LAN address such as `http://MONTBLANC:11434` or `https://api.ollama.com`. Falls back to `OLLAMAHOST` env var. |
+| `--llmhost URL` | `http://localhost:11434` | Inference server URL or alias. `lmstudio` resolves to `http://localhost:1234`; `local` resolves to `http://localhost:11434`. Bare hostnames are wrapped as `http://<name>:11434`. Also read from `LLMHOST` env var. |
 
 ### Default overrides file
 
@@ -138,11 +139,13 @@ All options are optional. Unrecognised options are rejected at startup with a us
   "model":       "20b",
   "ctx":         131072,
   "agentport":   8000,
-  "ollamahost":  "http://localhost:11434"
+  "llmhost":  "http://localhost:11434"
 }
 ```
 
-Only the keys shown above are recognised. Unknown keys are silently ignored. The file is optional - if absent, factory defaults apply as usual.
+To target LM Studio instead of Ollama, set `"llmhost": "lmstudio"`. The `lmstudio` alias resolves to `http://localhost:1234` and routes all model listing and chat calls to LM Studio's OpenAI-compatible API.
+
+Only the recognised keys are accepted. Unknown keys print a warning at startup and are ignored. The file is optional - if absent, factory defaults apply as usual.
 
 ---
 
@@ -155,9 +158,11 @@ Type `/help` at any prompt to see the full list. Tab completion is available in 
 | Command | Description |
 |---|---|
 | `/help` | List all available slash commands |
-| `/models` | List installed Ollama models; the active model is marked with `►` |
-| `/model <name>` | Switch the active model for all subsequent runs (e.g. `/model 8b`). Accepts the same short aliases as `--model`. Clears conversation history. |
-| `/ollamahost <target>` | Switch the active Ollama host without restarting. Clears conversation history. See [Host targeting](#host-targeting) below. |
+| `/llmserver <backend> <host>` | Switch the active model server. `backend` is `ollama` or `lmstudio`; `host` is the URL or bare `hostname:port`. With no arguments, shows the current server. Examples: `/llmserver ollama MONTBLANC:11434`, `/llmserver lmstudio 192.168.1.1:1234`. Clears conversation history. See [Model server targeting](#model-server-targeting) below. |
+| `/llmserverconfig` | Show the current model, context window, and backend. |
+| `/llmserverconfig model list` | List models available on the active server (all installed models for both Ollama and LM Studio). |
+| `/llmserverconfig model <name>` | Switch the active model. Accepts short aliases (e.g. `8b`) for Ollama; use the exact model ID for LM Studio (e.g. `openai/gpt-oss-20b`). LM Studio can host multiple models simultaneously - this selects which one the next chat targets. Clears conversation history. |
+| `/llmserverconfig ctx <n>` | Set the context window size for all subsequent runs (e.g. `/llmserverconfig ctx 32768`). |
 | `/ctx` | Show the context map for the last run - index, round, label, char count, and compaction state - plus the current window size. |
 | `/ctx size` | Show the current context window size only. |
 | `/ctx size <n>` | Set the context window size for all subsequent runs (e.g. `/ctx size 32768`). Accepts integers with optional commas or underscores. |
@@ -166,7 +171,7 @@ Type `/help` at any prompt to see the full list. Tab completion is available in 
 | `/rounds <n>` | Set the max tool-call rounds per prompt (e.g. `/rounds 6`). |
 | `/timeout <seconds>` | Set the LLM generation timeout (e.g. `/timeout 1800` for heavy analysis tasks). |
 | `/stoprun` | Cancel the active LLM run (after its current round finishes) and clear all pending queued prompts. Executes immediately - does not wait in the queue. Pending prompts receive a `Cancelled by /stoprun.` response. |
-| `/stopmodel [name]` | Unload a running model from VRAM. Defaults to the active model if no name given. |
+| `/stopmodel [name]` | **Ollama only.** Unload a running model from VRAM. Defaults to the active model if no name given. Not supported in LM Studio mode - use the LM Studio UI instead. |
 | `/clearmemory` | Delete the memory store file (`memory_store.json`), starting the next session with a blank memory. |
 | `/newchat` | Clear conversation history and session context, starting a fresh chat without restarting. |
 | `/reskill [min\|max]` | Rebuild the skills catalog and set system prompt guidance mode. Defaults to `min` if omitted. |
@@ -190,23 +195,41 @@ Type `/help` at any prompt to see the full list. Tab completion is available in 
 | `/task delete <name>` | Permanently delete a task and remove its JSON file if it becomes empty. |
 | `/task run <name>` | Execute a task immediately, outside its normal schedule. Runs the same pipeline as the scheduler - useful for testing a task definition or triggering a one-off run. |
 | `/version` | Show the framework version. |
-| `/kiwixhost <url>` | Set the Kiwix server URL and save it to `default.json` (e.g. `/kiwixhost http://192.168.1.33:8080`). The URL is verified before saving. Takes effect immediately - no restart required. |
 
-### Host targeting
+### Model server targeting
 
-`/ollamahost` accepts several forms, all equivalent in meaning:
+`/llmserver` switches the active model server and backend at runtime. Both arguments are required:
 
-| Input | Resolves to |
-|---|---|
-| `/ollamahost local` | `http://localhost:11434` |
-| `/ollamahost MONTBLANC` | `http://MONTBLANC:11434` |
-| `/ollamahost 192.168.1.169` | `http://192.168.1.169:11434` |
-| `/ollamahost http://192.168.1.169:11434` | `http://192.168.1.169:11434` (unchanged) |
-| `/ollamahost https://api.ollama.com` | `https://api.ollama.com` (unchanged) |
+| Input | Resolves to | Backend |
+|---|---|---|
+| `/llmserver ollama localhost:11434` | `http://localhost:11434` | Ollama (local) |
+| `/llmserver ollama MONTBLANC:11434` | `http://MONTBLANC:11434` | Ollama (remote) |
+| `/llmserver ollama http://192.168.1.169:11434` | `http://192.168.1.169:11434` (unchanged) | Ollama (remote) |
+| `/llmserver ollama https://api.ollama.com` | `https://api.ollama.com` (unchanged) | Ollama Cloud |
+| `/llmserver lmstudio localhost:1234` | `http://localhost:1234` | LM Studio (local) |
+| `/llmserver lmstudio MONTBLANC:1234` | `http://MONTBLANC:1234` | LM Studio (remote) |
+| `/llmserver lmstudio http://192.168.1.1:1234` | `http://192.168.1.1:1234` (unchanged) | LM Studio (remote) |
 
-Any bare hostname or IP address (no `://`) is automatically wrapped as `http://<name>:11434` - the standard Ollama default port. Full URLs are passed through unchanged, so custom ports and HTTPS cloud endpoints work too.
+Bare `hostname:port` values (no `://`) are expanded to `http://hostname:port`. Full URLs are passed through unchanged.
+
+`/llmserver` with no arguments shows the current host and backend without making any changes.
 
 Connectivity to the host is checked at switch time. If the target cannot be reached, the host change is rejected and the previous host remains active.
+
+#### Ollama vs LM Studio - what's different
+
+The LLM call itself (`/v1/chat/completions` with tool definitions) is identical for both servers. The difference is in model management:
+
+| Feature | Ollama | LM Studio |
+|---|---|---|
+| Model listing | All installed models | All installed models (via `/v1/models`) |
+| Model switching | `/llmserverconfig model <name>` unloads the previous model and loads the new one | `/llmserverconfig model <name>` selects which loaded model the next chat targets; does not unload others |
+| Context window | `ctx` config passed to model; `/llmserverconfig ctx <n>` to change | `ctx` config is ignored - LM Studio uses the context length set when the model was loaded in the UI |
+| Session startup | Alias (e.g. `20b`) resolved against installed list | Automatically adopts whatever LM Studio is serving |
+| Model unloading | `/stopmodel` flushes VRAM | Not supported via API |
+| Server auto-start | Local Ollama started automatically if needed | Must be started manually |
+
+When using LM Studio (`/llmserver lmstudio <host>`), `/llmserverconfig model <name>` sets which model the next chat targets. LM Studio can hold multiple models in memory simultaneously - this command does not unload any of them; it only controls which model ID is sent in the chat payload.
 
 New slash commands can be added in [code/input_layer/slash_commands.py](code/input_layer/slash_commands.py) by adding a handler function and registering it in `_REGISTRY` and `_DESCRIPTIONS`.
 
@@ -315,8 +338,8 @@ python .\code\agent_core\inspect_tools.py --output tool_definitions.json
 | `--skills-summary PATH` | `code/agent_core/skills/skills_summary.md` | Path to the skills catalog file. |
 | `--output PATH` | *(stdout)* | Optional path to write the JSON Schema tool definitions. Omit to print to stdout. |
 
-### Monitor Ollama memory usage
-Samples Ollama process RSS before and during model inference to characterise memory requirements:
+### Monitor model server memory usage
+Samples process RSS before and during model inference to characterise memory requirements. Currently supports Ollama only:
 ```powershell
 python .\code\utils\system_check.py
 python .\code\utils\system_check.py --ctx 4096
