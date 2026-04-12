@@ -9,6 +9,8 @@
 #   GET  /status/ollama                current 'ollama ps' model status
 #   GET  /settings/sandbox             return current sandbox enabled state
 #   POST /settings/sandbox?enabled=    set sandbox enabled state
+#   GET  /settings/webskills           return current web skills enabled state
+#   POST /settings/webskills?enabled=  set web skills enabled state
 #   GET  /completions                  tab-completion candidates (sessions, test files, tasks, models)
 #   GET  /tasks                        enabled scheduled tasks with last-run and next-fire times
 #   GET  /timeline                     minute-resolution task timeline centred on now
@@ -76,9 +78,11 @@ from agent_core.orchestration import ConversationHistory
 from agent_core.orchestration import OrchestratorConfig
 from agent_core.orchestration import SessionContext
 from agent_core.orchestration import get_sandbox_enabled
+from agent_core.orchestration import get_web_skills_enabled
 from agent_core.orchestration import orchestrate_prompt
 from agent_core.orchestration import request_stop
 from agent_core.orchestration import set_sandbox_enabled
+from agent_core.orchestration import set_web_skills_enabled
 from agent_core.scratchpad import get_store as get_scratch_store
 from agent_core.scratchpad import scratch_clear
 from agent_core.scratchpad import scratch_save as scratch_restore_key
@@ -363,6 +367,19 @@ def settings_sandbox_post(enabled: bool):
     """Set the Python execution sandbox state."""
     set_sandbox_enabled(enabled)
     return {"sandbox": get_sandbox_enabled()}
+
+
+@app.get("/settings/webskills")
+def settings_webskills_get():
+    """Return the current web skills enabled state."""
+    return {"webskills": get_web_skills_enabled()}
+
+
+@app.post("/settings/webskills")
+def settings_webskills_post(enabled: bool):
+    """Set the web skills enabled state."""
+    set_web_skills_enabled(enabled)
+    return {"webskills": get_web_skills_enabled()}
 
 
 register_task_routes(

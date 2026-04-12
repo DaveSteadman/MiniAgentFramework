@@ -25,7 +25,7 @@ const CSS_WRAP_ACTIVE = "wrap-active";
 const _ALL_COMMANDS = [
     "/help", "/llmserver", "/llmserverconfig", "/ctx", "/rounds", "/timeout",
     "/stopmodel", "/stoprun",
-    "/newchat", "/clearmemory", "/reskill", "/sandbox",
+    "/newchat", "/clearmemory", "/reskill", "/sandbox", "/tools",
     "/deletelogs", "/test", "/testtrend", "/tasks", "/task",
     "/version", "/defaults", "/session",
 ];
@@ -797,6 +797,35 @@ async function _initSandboxBtn() {
 
 // ----------------------------------------------------------------------------------------------------
 
+function _updateWebSkillsBtn(webOn) {
+    const btn = $('webskills-btn');
+    if (!btn) return;
+    if (webOn) {
+        btn.textContent = "web on";
+        btn.classList.remove("webskills-off");
+        btn.classList.add("webskills-on");
+    } else {
+        btn.textContent = "web off";
+        btn.classList.remove("webskills-on");
+        btn.classList.add("webskills-off");
+    }
+}
+
+async function toggleWebSkills() {
+    const current = await apiFetch("/settings/webskills");
+    if (!current) return;
+    const next = !current.webskills;
+    const result = await apiFetch("/settings/webskills?enabled=" + next, { method: "POST" });
+    if (result) _updateWebSkillsBtn(result.webskills);
+}
+
+async function _initWebSkillsBtn() {
+    const data = await apiFetch("/settings/webskills");
+    if (data) _updateWebSkillsBtn(data.webskills);
+}
+
+// ----------------------------------------------------------------------------------------------------
+
 async function logNavStep(delta) {
     // delta: -1 = older (up), +1 = newer (down).
     const data = await apiFetch("/logs");
@@ -1334,6 +1363,9 @@ function init() {
 
     // Read sandbox state from server and reflect it in the button.
     _initSandboxBtn();
+
+    // Read web skills state from server and reflect it in the button.
+    _initWebSkillsBtn();
 
     // Wire up input events.
     dom.input().addEventListener("keydown", onInputKeydown);

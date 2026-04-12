@@ -26,6 +26,7 @@ from agent_core.context_manager import get_last_messages
 from agent_core.context_manager import compact_context
 from agent_core.context_manager import format_context_map
 from agent_core.orchestration import get_skill_guidance_enabled
+from agent_core.orchestration import get_web_skills_enabled
 from agent_core.orchestration import request_stop
 from agent_core.orchestration import get_sandbox_enabled
 from agent_core.orchestration import set_sandbox_enabled
@@ -355,6 +356,32 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output(f"Error deleting {err}", "error")
 
 
+def _cmd_tools(arg: str, ctx: SlashCommandContext) -> None:
+    from agent_core.orchestration import _filter_web_skills
+    from agent_core.skills_catalog_builder import build_tool_definitions
+
+    payload = ctx.config.skills_payload
+    if not get_web_skills_enabled():
+        payload = _filter_web_skills(payload)
+
+    tool_defs = build_tool_definitions(payload)
+    if not tool_defs:
+        ctx.output("No tools available.", "dim")
+        return
+
+    web_off = not get_web_skills_enabled()
+    ctx.output(f"{len(tool_defs)} tool(s) active{' (web skills off)' if web_off else ''}:", "info")
+    for tool in tool_defs:
+        fn   = tool["function"]
+        name = fn["name"]
+        desc = fn.get("description", "").split("\n")[0][:80]
+        params = list(fn.get("parameters", {}).get("properties", {}).keys())
+        sig = f"{name}({', '.join(params)})"
+        ctx.output(f"  {sig}", "item")
+        if desc:
+            ctx.output(f"    {desc}", "dim")
+
+
 def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
     defaults_path = get_bootstrap_defaults_file()
 
@@ -368,7 +395,7 @@ def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
     if sub == "set":
         existing = _load()
         new_cfg = {"model": ctx.config.resolved_model, "ctx": ctx.config.num_ctx, "llmhost": get_active_host()}
-        for key in ("agentport", "ControlDataFolder", "UserDataFolder"):
+        for key in ("agentport", "ControlDataFolder", "UserDataFolder", "koredataurl"):
             if key in existing:
                 new_cfg[key] = existing[key]
         try:
@@ -406,6 +433,7 @@ _REGISTRY: dict[str, Callable] = {
     "/reskill": _cmd_reskills,
     "/version": _cmd_version,
     "/sandbox": _cmd_sandbox,
+    "/tools": _cmd_tools,
     "/deletelogs": _cmd_deletelogs,
     "/defaults": _cmd_defaults,
 }
@@ -421,6 +449,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/reskill": "[min|max]  Rebuild skills catalog and set system prompt guidance mode (default: min)",
     "/version": "Show framework version, active model, and context size",
     "/sandbox": "<on|off>  Enable/disable Python code execution sandbox (import whitelist + blocked builtins)",
+    "/tools": "List all tools currently exposed to the model (respects web skills toggle)",
     "/deletelogs": "<days>  Delete log, chatsession, and test_results date-folders older than N days (e.g. /deletelogs 10)",
     "/defaults": "Show current default.json settings and file path; /defaults set saves current model/ctx/host to the file",
 }

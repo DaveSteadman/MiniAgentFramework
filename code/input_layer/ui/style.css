@@ -262,6 +262,8 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
 .wrap-btn.wrap-active   { border-color: var(--border-hi); color: var(--text-hi); background: var(--bg-wrap-btn-active); }
 .wrap-btn.sandbox-on    { border-color: #2a6a3a; color: #70c080; background: rgba(40, 140, 70, 0.18); }
 .wrap-btn.sandbox-off   { border-color: #7a2a2a; color: #e08080; background: rgba(160, 40, 40, 0.18); }
+.wrap-btn.webskills-on  { border-color: #1a7a8a; color: #40d0e8; background: rgba(20, 160, 190, 0.15); font-weight: bold; }
+.wrap-btn.webskills-off { border-color: #444;    color: #666;    background: transparent; }
 
 .panel-body {
     flex: 1;

@@ -11,12 +11,14 @@
 #   KoreFeeds     - repackaged RSS feed archive            (proxied at /feeds/*)
 #   KoreReference - local encyclopedia (Wikipedia clone)   (proxied at /reference/*)
 #   KoreLibrary   - local book repository                  (proxied at /library/*)
+#   KoreRAG       - FTS5-indexed internal user documents   (proxied at /rag/*)
 #
-# Five public functions:
+# Six public functions:
 #   koredata_search(query, domains, since, until, limit) -- unified search across services
 #   koredata_get_article(title)                          -- full KoreReference article by title
 #   koredata_get_entry(domain, entry_id)                 -- full KoreFeed entry by domain + ID
 #   koredata_get_book(book_id)                           -- full KoreLibrary book by ID
+#   koredata_get_chunk(chunk_id)                         -- full KoreRAG chunk by ID
 #   koredata_status()                                    -- gateway and child service health check
 #
 # Configuration:
@@ -241,6 +243,27 @@ def koredata_get_book(book_id: int) -> dict | str:
         data = _get_json(url)
         if not data:
             return f'Book {book_id} not found.'
+        return data
+    except RuntimeError as exc:
+        return str(exc)
+
+
+# ----------------------------------------------------------------------------------------------------
+def koredata_get_chunk(chunk_id: int) -> dict | str:
+    """Fetch a full KoreRAG chunk by its numeric ID.
+
+    Pass the 'id' field from a koredata_search rag result.
+    Returns the full chunk dict including decompressed content, title, source, and tags.
+    Returns an error string on failure.
+    """
+    base = _get_base_url()
+    if not base:
+        return f'KoreDataGateway not configured. Add "{_CONFIG_KEY}" to default.json.'
+    url = f"{base}/rag/{int(chunk_id)}"
+    try:
+        data = _get_json(url)
+        if not data:
+            return f'RAG chunk {chunk_id} not found.'
         return data
     except RuntimeError as exc:
         return str(exc)

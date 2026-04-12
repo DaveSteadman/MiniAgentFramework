@@ -87,6 +87,29 @@ def set_sandbox_enabled(enabled: bool) -> None:
 
 
 # ====================================================================================================
+# MARK: WEB SKILLS FLAG
+# ====================================================================================================
+# When False, any skill whose skill_name starts with "Web" is stripped from the active payload
+# before tool definitions, the system prompt, and the catalog gate index are built.
+# The underlying skill modules remain loaded - only their exposure to the model is suppressed.
+_WEB_SKILLS_ENABLED: bool = True
+
+
+def get_web_skills_enabled() -> bool:
+    return _WEB_SKILLS_ENABLED
+
+
+def set_web_skills_enabled(enabled: bool) -> None:
+    global _WEB_SKILLS_ENABLED
+    _WEB_SKILLS_ENABLED = enabled
+
+
+def _filter_web_skills(payload: dict) -> dict:
+    filtered = [s for s in payload.get("skills", []) if not s.get("skill_name", "").startswith("Web")]
+    return {**payload, "skills": filtered}
+
+
+# ====================================================================================================
 # MARK: RUN STATE
 # ====================================================================================================
 _delegate_tls = get_delegate_runtime_tls()
@@ -448,13 +471,15 @@ def orchestrate_prompt(
         _log_section("AMBIENT SYSTEM INFO")
         _log(ambient_system_info)
 
-        tool_defs = build_tool_definitions(config.skills_payload)
+        active_payload = config.skills_payload if _WEB_SKILLS_ENABLED else _filter_web_skills(config.skills_payload)
+
+        tool_defs = build_tool_definitions(active_payload)
         _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
 
         system_message = _prompt_builder_build_system_message(
             ambient_system_info,
             session_context,
-            config.skills_payload,
+            active_payload,
             skill_guidance_enabled=_SKILL_GUIDANCE_ENABLED,
             sandbox_enabled=_SANDBOX_ENABLED,
             scratchpad_visible_keys=scratchpad_visible_keys,
@@ -474,7 +499,7 @@ def orchestrate_prompt(
         _context_map.append({"round": 0, "role": "user", "label": trunc(user_prompt, 50), "chars": len(user_prompt), "auto_key": None, "msg_idx": len(messages) - 1})
 
         _prev_delegate_runtime = push_delegate_runtime(logger=logger, delegate_depth=delegate_depth, config=config)
-        catalog_gates = build_catalog_gates(config.skills_payload)
+        catalog_gates = build_catalog_gates(active_payload)
 
         try:
             final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs = _tool_loop_run_tool_loop(
