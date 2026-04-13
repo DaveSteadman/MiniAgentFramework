@@ -49,6 +49,7 @@ from agent_core.skills.Memory.memory_skill import store_prompt_memories
 from agent_core.skills.SystemInfo.system_info_skill import get_static_system_info_string
 from agent_core.skills_catalog_builder import build_tool_definitions
 from agent_core.tool_loop import extract_result_fields as _tool_loop_extract_result_fields
+import agent_core.mcp_client as _mcp_client
 from agent_core.tool_loop import format_tool_outputs as _tool_loop_format_tool_outputs
 from agent_core.tool_loop import run_tool_loop as _tool_loop_run_tool_loop
 from agent_core.tool_loop import write_file_blocks as _tool_loop_write_file_blocks
@@ -474,6 +475,9 @@ def orchestrate_prompt(
         active_payload = config.skills_payload if _WEB_SKILLS_ENABLED else _filter_web_skills(config.skills_payload)
 
         tool_defs = build_tool_definitions(active_payload)
+        mcp_defs  = _mcp_client.get_mcp_tool_definitions()
+        if mcp_defs:
+            tool_defs = tool_defs + mcp_defs
         _log_file_only(f"[progress] Tool definitions built: {len(tool_defs)} tools available.")
 
         system_message = _prompt_builder_build_system_message(

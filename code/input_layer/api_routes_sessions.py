@@ -157,6 +157,23 @@ def register_session_routes(
         history, _summaries = load_session(session_id)
         return {"session_id": session_id, "turns": history.as_list()}
 
+    @app.delete("/sessions/{session_id}")
+    def delete_session(session_id: str):
+        """Delete all persisted state for a session: history file + in-memory scratch."""
+        validate_session_id(session_id)
+        clear_session_scratch(session_id)
+        deleted_path = None
+        for candidate in [
+            *list(get_chatsessions_day_dir().parent.glob(f"*/{session_id}.json")),
+            get_chatsessions_day_dir().parent / "named" / f"{session_id}.json",
+            get_chatsessions_day_dir().parent / f"{session_id}.json",
+        ]:
+            if candidate.exists():
+                candidate.unlink()
+                deleted_path = str(candidate)
+                break
+        return {"ok": True, "session_id": session_id, "deleted_file": deleted_path}
+
     @app.get("/runs/{run_id}/stream")
     def stream_run(run_id: str):
         with run_queues_lock:

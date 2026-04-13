@@ -22,6 +22,7 @@
 import importlib.util
 import sys
 
+import agent_core.mcp_client as _mcp_client
 from agent_core.prompt_tokens import resolve_tokens
 from agent_core.tool_result import ToolCallResult
 from utils.workspace_utils import get_workspace_root
@@ -141,6 +142,24 @@ def execute_tool_call(
     Pass a pre-built catalog_gates dict (from build_catalog_gates) to avoid rebuilding
     the index on every call when executing multiple tools in one round.
     """
+    # MCP tools are dispatched to the remote server; they bypass the local allow-list.
+    if _mcp_client.is_mcp_tool(tool_name):
+        resolved_args = {
+            k: (resolve_tokens(v) if isinstance(v, str) else v)
+            for k, v in arguments.items()
+            if k != ""
+        }
+        result = _mcp_client.call_mcp_tool(tool_name, resolved_args)
+        return ToolCallResult(
+            tool      = tool_name,
+            function  = tool_name,
+            module    = "mcp",
+            arguments = resolved_args,
+            result    = result,
+            status    = "error" if is_skill_error(result) else "ok",
+            error     = str(result) if is_skill_error(result) else "",
+        )
+
     # Use pre-built index when provided; otherwise build it from the payload.
     tool_index = catalog_gates if catalog_gates is not None else build_catalog_gates(skills_payload)
 

@@ -34,6 +34,9 @@ from agent_core.run_helpers import run_prompt_batch
 from input_layer.api import app
 from input_layer.api import push_log_line
 from input_layer.api import setup as api_setup
+from input_layer.api import _load_session
+from input_layer.api import _save_session
+from input_layer.korecomms_input import start_korecomms_loop
 from agent_core.orchestration import OrchestratorConfig
 from utils.runtime_logger import SessionLogger
 from utils.runtime_logger import create_log_file_path
@@ -176,6 +179,18 @@ def run_api_mode(
 
     sched_thread = threading.Thread(target=_scheduler_loop, daemon=True, name="api-scheduler")
     sched_thread.start()
+
+    start_korecomms_loop(
+        config               = config,
+        push_log_line        = push_log_line,
+        task_queue           = task_queue,
+        create_log_file_path = create_log_file_path,
+        log_dir              = _LOG_DIR,
+        load_session         = _load_session,
+        save_session         = _save_session,
+        session_logger_cls   = SessionLogger,
+        shutdown             = shutdown,
+    )
 
     push_log_line(f"[API] Server starting on http://{host}:{port}")
     print(f"\nAPI mode - http://{host}:{port}  (send interrupt to stop)", flush=True)

@@ -1,9 +1,12 @@
 {
-  "model": "gpt-oss:20b",
+  "model": "nemotron-cascade-2:latest",
   "ctx": 16000,
-  "llmhost": "http://localhost:1234",
+  "llmhost": "http://MONTBLANC:11434",
   "agentport": 8000,
   "ControlDataFolder": "datacontrol",
+  "UserDataFolder": "datauser",
   "koredataurl": "http://localhost:8800",
-  "UserDataFolder": "datauser"
+  "korecommsurl": "http://localhost:8900",
+  "korecomms_poll_secs": 15,
+  "mcp_servers": []
 }

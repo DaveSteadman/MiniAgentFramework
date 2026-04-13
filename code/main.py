@@ -187,6 +187,7 @@ from agent_core.orchestration import resolve_execution_model
 from agent_core.run_helpers import make_task_session
 from agent_core.scratchpad import scratch_clear
 from agent_core.skills_catalog_builder import load_skills_payload
+import agent_core.mcp_client as _mcp_client
 from utils.runtime_logger import create_log_file_path
 from utils.runtime_logger import SessionLogger
 from input_layer.slash_commands import SlashCommandContext
@@ -213,7 +214,7 @@ _DEFAULTS_KEYS = {"model", "ctx", "agentport", "llmhost"}
 # All valid keys in default.json - superset of _DEFAULTS_KEYS.
 # Keys here that are not in _DEFAULTS_KEYS are read directly by skills or slash commands
 # and are not passed through argparse.
-_KNOWN_KEYS = _DEFAULTS_KEYS | {"koredataurl", "ControlDataFolder", "UserDataFolder"}
+_KNOWN_KEYS = _DEFAULTS_KEYS | {"koredataurl", "korecommsurl", "korecomms_poll_secs", "ControlDataFolder", "UserDataFolder", "mcp_servers"}
 
 
 # ====================================================================================================
@@ -435,6 +436,34 @@ def _run(args, logger, log_path) -> None:
     logger.log(f"Resolved model:  {resolved_model} {_tick if _model_ok else _cross}")
     print(f"Control data:    {_cd} {_tick if _cd.exists() else _cross}", flush=True)
     print(f"User data:       {_ud} {_tick if _ud.exists() else _cross}", flush=True)
+
+    try:
+        _raw_defaults  = json.loads(DEFAULTS_FILE.read_text(encoding="utf-8")) if DEFAULTS_FILE.exists() else {}
+    except Exception:
+        _raw_defaults  = {}
+    _koredata_url  = str(_raw_defaults.get("koredataurl", "")).strip().rstrip("/")
+    _korecomms_url = str(_raw_defaults.get("korecommsurl", "")).strip().rstrip("/")
+    _kc_poll       = _raw_defaults.get("korecomms_poll_secs", 15)
+
+    def _service_reachable(base_url: str) -> bool:
+        try:
+            import urllib.request as _ur
+            _ur.urlopen(f"{base_url}/status", timeout=3)
+            return True
+        except Exception:
+            return False
+
+    if _koredata_url:
+        _kd_ok = _service_reachable(_koredata_url)
+        logger.log(f"KoreData:        {_koredata_url} {_tick if _kd_ok else _cross}")
+    else:
+        logger.log("KoreData:        (not configured)")
+
+    if _korecomms_url:
+        _kc_ok = _service_reachable(_korecomms_url)
+        logger.log(f"KoreComms:       {_korecomms_url}  poll={_kc_poll}s {_tick if _kc_ok else _cross}")
+    else:
+        logger.log("KoreComms:       (not configured)")
     sequence_file_path = Path(os.environ["CHAT_SEQUENCE_FILE"]) if os.environ.get("CHAT_SEQUENCE_FILE") else None
     mode_label = (
         f"chat-sequence:{sequence_file_path.name}" if sequence_file_path else
@@ -454,7 +483,11 @@ def _run(args, logger, log_path) -> None:
         run_chat_sequence_mode(sequence_file=sequence_file_path, config=config, logger=logger, log_path=log_path)
         return
 
-    run_api_mode(config=config, logger=logger, log_path=log_path, host="0.0.0.0", port=args.agentport)
+    _mcp_client.start(DEFAULTS_FILE)
+    try:
+        run_api_mode(config=config, logger=logger, log_path=log_path, host="0.0.0.0", port=args.agentport)
+    finally:
+        _mcp_client.stop()
 
 
 # ----------------------------------------------------------------------------------------------------

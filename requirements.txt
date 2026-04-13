@@ -29,3 +29,7 @@ certifi>=2024.0
 # fastapi pulls in starlette and pydantic automatically.
 fastapi>=0.110
 uvicorn>=0.29
+
+# MCP client for connecting to external MCP servers (optional - omit if not using MCP).
+# When absent, mcp_client.py degrades gracefully and MCP integration is disabled.
+mcp>=1.6.0

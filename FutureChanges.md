@@ -2,13 +2,20 @@
 
 Ideas requiring design thought before implementation. Not committed to, not prioritised.
 
-Done items are removed; see ChangeLog.md for what shipped. Last reviewed: 2026-04-04.
+Done items are removed; see ChangeLog.md for what shipped. Last reviewed: 2026-04-13.
 
 ---
 
 ## Improvements
 
-### 1. Test assert auto-detection of no-results responses
+### 1. System maturity
+
+Continue to review and polish the code, running the test prompts and controllably measure and
+improve capability and performance.
+Develop three READ_USECASE_XXXX files to discuss real world usage.
+
+
+### 2. Test assert auto-detection of no-results responses
 
 `test_web_prompts.json` already annotates research prompts with `not_contains|no results`,
 which catches the silent-block pattern for web tests. The gap is everywhere else: prompts in
@@ -28,7 +35,7 @@ that legitimately test the no-results path.
 
 ---
 
-### 2. Scratchpad eviction / size limit
+### 3. Scratchpad eviction / size limit
 
 The in-process scratchpad (`scratchpad.py`) grows without bound. A WebResearch run saves
 multiple `research_page_*` entries that are never cleaned unless the session is reset.
@@ -44,7 +51,7 @@ auto-generated ones?
 
 ---
 
-### 3. Delegate transparency - sub-task timing
+### 4. Delegate transparency - sub-task timing
 
 Delegate tasks are the slowest category (19-64s in practice) with no visibility into which
 sub-prompts ran or how long each took. The only way to diagnose a slow delegate run is to
@@ -61,7 +68,7 @@ under `/logs` without any scratchpad overhead.
 
 ## New Capabilities
 
-### 4. Self-performance skill (PerfInsight)
+### 5. Self-performance skill (PerfInsight)
 
 The agent cannot reason about its own effectiveness. It has all the data - structured CSV test
 results under `controldata/test_results/` - but no skill to read them.
@@ -77,24 +84,32 @@ would complement this - surfacing recent run stats without starting a chat sessi
 
 ---
 
-### 5. Search result disk cache
+### 6. Search result disk cache
 
 DuckDuckGo results fetched during one test run are thrown away and re-fetched in the next.
 Repeated test runs on identical prompts hammer the same queries and contribute to rate-limiting.
 Note: `webpage_utils.py` has an in-process URL LRU cache, but that does not survive across
 runs and does not cover search query results.
 
-Option: a file-based cache in `controldata/search_cache/` keyed by
+Step 1 - measure waste before caching: instrument `web_search_skill.py` and `webpage_utils.py`
+to log how many URLs are returned per query versus how many are actually fetched by a subsequent
+WebFetch or WebResearch call in the same session. The ratio of fetched-to-returned is a concrete
+"unused result" metric - a complement to pass/fail that shows how much network work was
+discarded. Aggregate this across a standard test run to establish a baseline waste figure before
+any cache is built.
+
+Step 2 - cache: a file-based cache in `controldata/search_cache/` keyed by
 `sha256(query_normalised + date)`, stored as JSON, with a configurable TTL (default 24h).
 Cache hits skip the network entirely - preventing rate-limit accumulation and making research
-reproducible across runs on the same day.
+reproducible across runs on the same day. The waste metric from Step 1 becomes the before/after
+measure of cache effectiveness.
 
 Questions: share cache across scheduler and interactive sessions? Invalidate earlier for
 time-sensitive queries (prompts containing "today", "latest", "current")?
 
 ---
 
-### 6. Per-skill retry configuration in skill.md
+### 7. Per-skill retry configuration in skill.md
 
 Network-bound skills (WebSearch, WebFetch, WebResearch, Wikipedia) fail transiently but the
 framework never retries them automatically - the LLM has to re-invoke the tool. The
@@ -107,4 +122,28 @@ and declares retries, `execute_tool_call` re-calls the function after the delay 
 surfacing the failure to the LLM.
 
 This makes retry policy per-skill rather than baked into individual skill files, and combines
-naturally with item 1 (consistent error sentinel detection).
+naturally with item 2 (consistent error sentinel detection).
+
+---
+
+### 8. MCP server integration
+
+The agent has no way to consume tools exposed by an external MCP (Model Context Protocol)
+server. All tools must currently be written as local Python skill modules with a `skill.md`
+descriptor.
+
+Design: additive, not a replacement for the existing skill system. MCP tools would be a
+second source alongside local skills, with the same tool definitions merged before being sent
+to the LLM.
+
+Changes required:
+- New `mcp_client.py` module - connects to a configured MCP server and queries its tool list
+  at startup; dispatches tool calls and returns results as `ToolCallResult` objects.
+- `skills_catalog_builder.py` - add a step that fetches MCP tool definitions and merges them
+  into the catalog sent to the LLM.
+- `skill_executor.py` / `tool_loop.py` - when a tool call is returned by the LLM, check
+  whether the tool name belongs to an MCP server; if yes, dispatch via `mcp_client.py`;
+  if no, continue with the existing `importlib` Python dispatch path.
+
+MCP servers are configured in `default.json`. Local Python skills are completely unchanged.
+The existing allow-list security model is extended to cover MCP tool names.

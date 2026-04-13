@@ -1,0 +1,217 @@
+# ====================================================================================================
+# MARK: OVERVIEW
+# ====================================================================================================
+# Bridges the synchronous MiniAgentFramework skill pipeline to async MCP servers.
+#
+# Maintains a dedicated asyncio event loop in a background daemon thread.
+# All async MCP operations are dispatched from the sync orchestration thread via
+# asyncio.run_coroutine_threadsafe(...).result(), which blocks the calling thread
+# until the result arrives - exactly like any other blocking I/O in the pipeline.
+# No changes to orchestration, skill_executor, or any existing skill module are required
+# beyond the two call sites that extend tool_defs and route tool calls.
+#
+# MCP servers are declared in default.json under "mcp_servers":
+#   [{"name": "KoreDataGateway", "url": "http://localhost:8800/mcp"}]
+#
+# At start() the client connects to each server, calls list_tools(), and builds:
+#   - _mcp_tool_defs:  OpenAI-format tool definitions merged into the LLM tool list
+#   - _mcp_tool_index: tool_name -> {url, server} routing table for dispatch
+#
+# Related modules:
+#   - skill_executor.py  -- calls is_mcp_tool() and call_mcp_tool() per invocation
+#   - orchestration.py   -- calls get_mcp_tool_definitions() to extend tool_defs
+#   - main.py            -- calls start() at application startup and stop() on exit
+# ====================================================================================================
+
+
+# ====================================================================================================
+# MARK: IMPORTS
+# ====================================================================================================
+import asyncio
+import json
+import threading
+
+from pathlib import Path
+
+try:
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+    _MCP_AVAILABLE = True
+except ImportError:
+    _MCP_AVAILABLE = False
+
+
+# ====================================================================================================
+# MARK: STATE
+# ====================================================================================================
+_loop:        asyncio.AbstractEventLoop | None = None
+_loop_thread: threading.Thread | None          = None
+
+_mcp_tool_defs:  list[dict] = []
+_mcp_tool_index: dict[str, dict] = {}   # tool_name -> {"url": str, "server": str}
+
+_CALL_TIMEOUT = 30.0   # seconds applied to list_tools and call_tool
+
+
+# ====================================================================================================
+# MARK: LIFECYCLE
+# ====================================================================================================
+def _run_loop(loop: asyncio.AbstractEventLoop) -> None:
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+
+# ----------------------------------------------------------------------------------------------------
+def start(config_path: Path) -> None:
+    """Start the MCP event loop thread and enumerate tools from all configured servers.
+
+    No-op when the mcp package is not installed or no servers are configured.
+    """
+    global _loop, _loop_thread, _mcp_tool_defs, _mcp_tool_index
+
+    if not _MCP_AVAILABLE:
+        return
+
+    servers = _load_server_config(config_path)
+    if not servers:
+        return
+
+    _loop        = asyncio.new_event_loop()
+    _loop_thread = threading.Thread(
+        target = _run_loop,
+        args   = (_loop,),
+        daemon = True,
+        name   = "mcp-event-loop",
+    )
+    _loop_thread.start()
+
+    future          = asyncio.run_coroutine_threadsafe(_enumerate_all_servers(servers), _loop)
+    defs, index     = future.result(timeout=_CALL_TIMEOUT)
+    _mcp_tool_defs  = defs
+    _mcp_tool_index = index
+
+    count       = len(defs)
+    server_list = ", ".join(s.get("name") or s["url"] for s in servers)
+    print(f"[mcp] {count} tool(s) registered from: {server_list}", flush=True)
+
+
+# ----------------------------------------------------------------------------------------------------
+def stop() -> None:
+    """Stop the MCP event loop thread. Called on application shutdown."""
+    global _loop, _loop_thread
+
+    if _loop is not None:
+        _loop.call_soon_threadsafe(_loop.stop)
+        _loop        = None
+        _loop_thread = None
+
+
+# ====================================================================================================
+# MARK: PUBLIC API
+# ====================================================================================================
+def is_mcp_tool(tool_name: str) -> bool:
+    return tool_name in _mcp_tool_index
+
+
+# ----------------------------------------------------------------------------------------------------
+def get_mcp_tool_definitions() -> list[dict]:
+    return list(_mcp_tool_defs)
+
+
+# ----------------------------------------------------------------------------------------------------
+def call_mcp_tool(tool_name: str, arguments: dict) -> object:
+    """Call an MCP tool synchronously from the orchestration thread.
+
+    Blocks until the remote call completes or _CALL_TIMEOUT seconds elapses.
+    Returns a string for text results, a list of dicts for mixed content,
+    or an "Error: ..." string when the server signals isError.
+    """
+    if _loop is None:
+        raise RuntimeError("MCP client is not running - call mcp_client.start() at startup")
+
+    entry = _mcp_tool_index.get(tool_name)
+    if entry is None:
+        raise RuntimeError(f"MCP tool '{tool_name}' is not registered")
+
+    future = asyncio.run_coroutine_threadsafe(
+        _call_tool_async(entry["url"], tool_name, arguments),
+        _loop,
+    )
+    return future.result(timeout=_CALL_TIMEOUT)
+
+
+# ====================================================================================================
+# MARK: INTERNAL - CONFIG
+# ====================================================================================================
+def _load_server_config(config_path: Path) -> list[dict]:
+    try:
+        data    = json.loads(config_path.read_text(encoding="utf-8"))
+        servers = data.get("mcp_servers", [])
+        return [s for s in servers if isinstance(s, dict) and s.get("url")]
+    except Exception:
+        return []
+
+
+# ====================================================================================================
+# MARK: INTERNAL - ASYNC OPERATIONS
+# ====================================================================================================
+async def _enumerate_all_servers(servers: list[dict]) -> tuple[list[dict], dict]:
+    defs:  list[dict] = []
+    index: dict       = {}
+
+    for server in servers:
+        name = server.get("name") or server["url"]
+        url  = server["url"]
+        try:
+            server_defs, server_index = await _list_tools_async(url, name)
+            defs.extend(server_defs)
+            index.update(server_index)
+        except Exception as exc:
+            print(f"[mcp] Warning: could not connect to '{name}' at {url}: {exc}", flush=True)
+
+    return defs, index
+
+
+# ----------------------------------------------------------------------------------------------------
+async def _list_tools_async(url: str, server_name: str) -> tuple[list[dict], dict]:
+    defs:  list[dict] = []
+    index: dict       = {}
+
+    async with streamablehttp_client(url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.list_tools()
+
+            for tool in result.tools:
+                schema   = tool.inputSchema if tool.inputSchema else {"type": "object", "properties": {}}
+                tool_def = {
+                    "type": "function",
+                    "function": {
+                        "name":        tool.name,
+                        "description": tool.description or "",
+                        "parameters":  schema,
+                    },
+                }
+                defs.append(tool_def)
+                index[tool.name] = {"url": url, "server": server_name}
+
+    return defs, index
+
+
+# ----------------------------------------------------------------------------------------------------
+async def _call_tool_async(url: str, tool_name: str, arguments: dict) -> object:
+    async with streamablehttp_client(url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments)
+
+    if result.isError:
+        text_parts = [c.text for c in result.content if hasattr(c, "text") and c.text]
+        error_msg  = " ".join(text_parts) if text_parts else "MCP tool returned an error"
+        return f"Error: {error_msg}"
+
+    text_parts = [c.text for c in result.content if hasattr(c, "text") and c.text]
+    if text_parts:
+        return "\n".join(text_parts) if len(text_parts) > 1 else text_parts[0]
+
+    return [c.__dict__ for c in result.content]
