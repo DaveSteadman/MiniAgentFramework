@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KoreConversation - Debug View</title>
+    <link rel="stylesheet" href="/ui/conversations.css">
+</head>
+<body>
+<div id="layout">
+
+    <!-- ================================================
+         HEADER
+         ================================================ -->
+    <header id="header">
+        <div class="brand">
+            <span class="brand-pre">KORE</span><span class="brand-accent">CONVERSATION</span><span class="brand-post"> DEBUG</span>
+        </div>
+        <nav class="nav-pills">
+            <a class="nav-btn" href="http://localhost:8000/">Agent</a>
+            <a class="nav-btn nav-btn-active" href="/ui">Conversations</a>
+        </nav>
+        <div id="status-dot" class="dot off" title="API status"></div>
+        <span id="status-label" class="info-chip">connecting...</span>
+        <span class="info-sep">|</span>
+        <span id="version-chip" class="info-chip"></span>
+        <div class="flex-gap"></div>
+        <div class="filter-row">
+            <label>status</label>
+            <select id="filter-status">
+                <option value="">all</option>
+                <option value="active">active</option>
+                <option value="waiting_agent">waiting_agent</option>
+                <option value="agent_processing">agent_processing</option>
+                <option value="archived">archived</option>
+                <option value="deleted">deleted</option>
+            </select>
+            <label>channel</label>
+            <select id="filter-channel">
+                <option value="">all</option>
+                <option value="webchat">webchat</option>
+                <option value="gmail">gmail</option>
+                <option value="sms">sms</option>
+                <option value="whatsapp">whatsapp</option>
+                <option value="manual">manual</option>
+            </select>
+        </div>
+        <button class="hdr-btn" id="btn-refresh" onclick="refreshAll()">refresh</button>
+        <label class="hdr-btn auto-label">
+            <input type="checkbox" id="chk-auto" onchange="toggleAuto()"> auto
+        </label>
+    </header>
+
+    <!-- ================================================
+         MAIN GRID  (sidebar | detail)
+         ================================================ -->
+    <div id="main-grid">
+
+        <!-- Conversation list -->
+        <div id="sidebar">
+            <div class="panel-header">
+                <div class="dot"></div>
+                Conversations
+                <span class="count-badge" id="conv-count">0</span>
+            </div>
+            <div id="conv-list"></div>
+        </div>
+
+        <div id="splitter"></div>
+
+        <!-- Detail pane -->
+        <div id="detail-wrap">
+
+            <!-- Placeholder shown when nothing is selected -->
+            <div id="detail-empty">
+                <span>Select a conversation to inspect it.</span>
+            </div>
+
+            <!-- Conversation detail (hidden until selection) -->
+            <div id="detail" hidden>
+
+                <!-- Conversation metadata -->
+                <section class="section" id="sec-meta">
+                    <div class="section-header">
+                        <span class="section-icon">i</span> Metadata
+                    </div>
+                    <table id="meta-table" class="kv-table"></table>
+                </section>
+
+                <!-- Background context -->
+                <section class="section" id="sec-bg">
+                    <div class="section-header">
+                        <span class="section-icon">B</span> Background Context
+                        <span class="empty-badge" id="bg-empty">(empty)</span>
+                    </div>
+                    <pre class="text-block" id="bg-text"></pre>
+                </section>
+
+                <!-- Thread summary -->
+                <section class="section" id="sec-summary">
+                    <div class="section-header">
+                        <span class="section-icon">S</span> Thread Summary
+                        <span class="empty-badge" id="summary-empty">(empty)</span>
+                    </div>
+                    <pre class="text-block" id="summary-text"></pre>
+                </section>
+
+                <!-- Scratchpad -->
+                <section class="section" id="sec-scratchpad">
+                    <div class="section-header">
+                        <span class="section-icon">P</span> Scratchpad
+                        <span class="empty-badge" id="scratchpad-empty">(empty)</span>
+                    </div>
+                    <table id="scratchpad-table" class="kv-table"></table>
+                </section>
+
+                <!-- Messages -->
+                <section class="section" id="sec-messages">
+                    <div class="section-header">
+                        <span class="section-icon">M</span> Messages
+                        <span class="count-badge" id="msg-count">0</span>
+                        <div class="flex-gap"></div>
+                        <label class="small-label">show summarised</label>
+                        <input type="checkbox" id="chk-summarised" onchange="reloadMessages()">
+                    </div>
+                    <div id="messages-body"></div>
+                </section>
+
+                <!-- Events -->
+                <section class="section" id="sec-events">
+                    <div class="section-header">
+                        <span class="section-icon">E</span> Events
+                        <span class="count-badge" id="evt-count">0</span>
+                    </div>
+                    <div id="events-body"></div>
+                </section>
+
+            </div><!-- #detail -->
+        </div><!-- #detail-wrap -->
+    </div><!-- #main-grid -->
+</div><!-- #layout -->
+
+<script src="/ui/conversations.js"></script>
+</body>
+</html>

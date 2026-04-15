@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # Slash-command processor shared across all input modes.
@@ -17,22 +17,22 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Callable
 
-from agent_core.llm_client import get_active_host
-from agent_core.llm_client import get_llm_timeout
-from agent_core.llm_client import register_session_config
-from agent_core.llm_client import set_llm_timeout
-from agent_core.context_manager import get_last_context_map
-from agent_core.context_manager import get_last_messages
-from agent_core.context_manager import compact_context
-from agent_core.context_manager import format_context_map
-from agent_core.orchestration import get_skill_guidance_enabled
-from agent_core.orchestration import get_web_skills_enabled
-from agent_core.orchestration import request_stop
-from agent_core.orchestration import get_sandbox_enabled
-from agent_core.orchestration import set_sandbox_enabled
-from agent_core.orchestration import set_skill_guidance_enabled
-from agent_core.skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
-from agent_core.skills.Memory.memory_skill import MEMORY_STORE_PATH
+from KoreAgent.llm_client import get_active_host
+from KoreAgent.llm_client import get_llm_timeout
+from KoreAgent.llm_client import register_session_config
+from KoreAgent.llm_client import set_llm_timeout
+from KoreAgent.context_manager import get_last_context_map
+from KoreAgent.context_manager import get_last_messages
+from KoreAgent.context_manager import compact_context
+from KoreAgent.context_manager import format_context_map
+from KoreAgent.orchestration import get_skill_guidance_enabled
+from KoreAgent.orchestration import get_web_skills_enabled
+from KoreAgent.orchestration import request_stop
+from KoreAgent.orchestration import get_sandbox_enabled
+from KoreAgent.orchestration import set_sandbox_enabled
+from KoreAgent.orchestration import set_skill_guidance_enabled
+from KoreAgent.skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
+from KoreAgent.skills.Memory.memory_skill import MEMORY_STORE_PATH
 from input_layer.slash_command_context import SlashCommandContext
 from input_layer.slash_command_handlers_models import register_model_slash_commands
 from input_layer.slash_command_handlers_sessions import register_session_slash_commands
@@ -246,14 +246,14 @@ def _cmd_reskills(arg: str, ctx: SlashCommandContext) -> None:
     current_mode = "max" if get_skill_guidance_enabled() else "min"
     ctx.output(f"Rebuilding skills catalog (local extraction, no LLM) - mode: {current_mode}...", "dim")
     try:
-        from agent_core.skills_catalog_builder import DEFAULT_OUTPUT_FILE
-        from agent_core.skills_catalog_builder import DEFAULT_SKILLS_ROOT
-        from agent_core.skills_catalog_builder import DEFAULT_SUMMARY_FILE
-        from agent_core.skills_catalog_builder import build_skills_payload
-        from agent_core.skills_catalog_builder import find_skill_files
-        from agent_core.skills_catalog_builder import load_skills_payload
-        from agent_core.skills_catalog_builder import write_skills_catalog
-        from agent_core.skills_catalog_builder import write_skills_summary
+        from KoreAgent.skills_catalog_builder import DEFAULT_OUTPUT_FILE
+        from KoreAgent.skills_catalog_builder import DEFAULT_SKILLS_ROOT
+        from KoreAgent.skills_catalog_builder import DEFAULT_SUMMARY_FILE
+        from KoreAgent.skills_catalog_builder import build_skills_payload
+        from KoreAgent.skills_catalog_builder import find_skill_files
+        from KoreAgent.skills_catalog_builder import load_skills_payload
+        from KoreAgent.skills_catalog_builder import write_skills_catalog
+        from KoreAgent.skills_catalog_builder import write_skills_summary
 
         skill_files = find_skill_files(skills_root=DEFAULT_SKILLS_ROOT)
         if not skill_files:
@@ -357,8 +357,8 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
 
 
 def _cmd_tools(arg: str, ctx: SlashCommandContext) -> None:
-    from agent_core.orchestration import _filter_web_skills
-    from agent_core.skills_catalog_builder import build_tool_definitions
+    from KoreAgent.orchestration import _filter_web_skills
+    from KoreAgent.skills_catalog_builder import build_tool_definitions
 
     payload = ctx.config.skills_payload
     if not get_web_skills_enabled():

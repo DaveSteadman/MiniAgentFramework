@@ -1,0 +1,635 @@
+2026-04-15 21:08:01,021 [INFO] uvicorn.error: Started server process [9008]
+2026-04-15 21:08:01,021 [INFO] uvicorn.error: Waiting for application startup.
+2026-04-15 21:08:01,041 [INFO] uvicorn.error: Application startup complete.
+2026-04-15 21:08:01,042 [INFO] uvicorn.error: Uvicorn running on http://0.0.0.0:8700 (Press CTRL+C to quit)
+2026-04-15 21:08:02,467 [INFO] uvicorn.access: 127.0.0.1:62353 - "GET /status HTTP/1.1" 200
+2026-04-15 21:33:47,075 [INFO] uvicorn.error: Started server process [22064]
+2026-04-15 21:33:47,076 [INFO] uvicorn.error: Waiting for application startup.
+2026-04-15 21:33:47,106 [ERROR] uvicorn.error: Traceback (most recent call last):
+  File "C:\Util\GithubRepos\MiniAgentFramework\.venv\Lib\site-packages\starlette\routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\daves\AppData\Local\Python\pythoncore-3.14-64\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Util\GithubRepos\MiniAgentFramework\code\KoreConversation\app\api.py", line 58, in lifespan
+    db.init_db()
+    ~~~~~~~~~~^^
+  File "C:\Util\GithubRepos\MiniAgentFramework\code\KoreConversation\app\database.py", line 140, in init_db
+    c.executescript(_SCHEMA)
+    ~~~~~~~~~~~~~~~^^^^^^^^^
+sqlite3.OperationalError: no such column: external_id
+
+2026-04-15 21:33:47,106 [ERROR] uvicorn.error: Application startup failed. Exiting.
+2026-04-15 21:34:29,851 [INFO] uvicorn.error: Started server process [8608]
+2026-04-15 21:34:29,852 [INFO] uvicorn.error: Waiting for application startup.
+2026-04-15 21:34:29,857 [ERROR] uvicorn.error: Traceback (most recent call last):
+  File "C:\Util\GithubRepos\MiniAgentFramework\.venv\Lib\site-packages\starlette\routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\daves\AppData\Local\Python\pythoncore-3.14-64\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Util\GithubRepos\MiniAgentFramework\code\KoreConversation\app\api.py", line 58, in lifespan
+    db.init_db()
+    ~~~~~~~~~~^^
+  File "C:\Util\GithubRepos\MiniAgentFramework\code\KoreConversation\app\database.py", line 140, in init_db
+    c.executescript(_SCHEMA)
+    ~~~~~~~~~~~~~~~^^^^^^^^^
+sqlite3.OperationalError: no such column: external_id
+
+2026-04-15 21:34:29,857 [ERROR] uvicorn.error: Application startup failed. Exiting.
+2026-04-15 21:35:04,678 [INFO] uvicorn.error: Started server process [25060]
+2026-04-15 21:35:04,678 [INFO] uvicorn.error: Waiting for application startup.
+2026-04-15 21:35:04,682 [ERROR] uvicorn.error: Traceback (most recent call last):
+  File "C:\Util\Python310\lib\site-packages\starlette\routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Util\Python310\lib\contextlib.py", line 199, in __aenter__
+    return await anext(self.gen)
+  File "C:\Util\GithubRepos\MiniAgentFramework\code\KoreConversation\app\api.py", line 58, in lifespan
+    db.init_db()
+  File "C:\Util\GithubRepos\MiniAgentFramework\code\KoreConversation\app\database.py", line 140, in init_db
+    c.executescript(_SCHEMA)
+sqlite3.OperationalError: no such column: external_id
+
+2026-04-15 21:35:04,682 [ERROR] uvicorn.error: Application startup failed. Exiting.
+2026-04-15 21:35:31,995 [INFO] uvicorn.error: Started server process [23604]
+2026-04-15 21:35:31,995 [INFO] uvicorn.error: Waiting for application startup.
+2026-04-15 21:35:32,014 [INFO] uvicorn.error: Application startup complete.
+2026-04-15 21:35:32,015 [INFO] uvicorn.error: Uvicorn running on http://0.0.0.0:8700 (Press CTRL+C to quit)
+2026-04-15 21:35:33,106 [INFO] uvicorn.access: 127.0.0.1:64794 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:35:33,106 [ERROR] uvicorn.error: Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Util\Python310\lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 416, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "C:\Util\Python310\lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\fastapi\applications.py", line 1159, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Util\Python310\lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Util\Python310\lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Util\Python310\lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\fastapi\routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Util\Python310\lib\site-packages\fastapi\routing.py", line 121, in app
+    await response(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\responses.py", line 167, in __call__
+    await send({"type": "http.response.body", "body": self.body})
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 39, in sender
+    await send(message)
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 39, in sender
+    await send(message)
+  File "C:\Util\Python310\lib\site-packages\starlette\middleware\errors.py", line 161, in _send
+    await send(message)
+  File "C:\Util\Python310\lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 543, in send
+    raise RuntimeError("Response content longer than Content-Length")
+RuntimeError: Response content longer than Content-Length
+2026-04-15 21:35:38,212 [INFO] uvicorn.error: Started server process [27820]
+2026-04-15 21:35:38,213 [INFO] uvicorn.error: Waiting for application startup.
+2026-04-15 21:35:38,216 [INFO] uvicorn.error: Application startup complete.
+2026-04-15 21:35:38,216 [INFO] uvicorn.error: Uvicorn running on http://0.0.0.0:8700 (Press CTRL+C to quit)
+2026-04-15 21:35:38,649 [INFO] uvicorn.access: 127.0.0.1:49396 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:35:38,650 [ERROR] uvicorn.error: Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Util\Python310\lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 416, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "C:\Util\Python310\lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\fastapi\applications.py", line 1159, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Util\Python310\lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Util\Python310\lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Util\Python310\lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\fastapi\routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Util\Python310\lib\site-packages\fastapi\routing.py", line 121, in app
+    await response(scope, receive, send)
+  File "C:\Util\Python310\lib\site-packages\starlette\responses.py", line 167, in __call__
+    await send({"type": "http.response.body", "body": self.body})
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 39, in sender
+    await send(message)
+  File "C:\Util\Python310\lib\site-packages\starlette\_exception_handler.py", line 39, in sender
+    await send(message)
+  File "C:\Util\Python310\lib\site-packages\starlette\middleware\errors.py", line 161, in _send
+    await send(message)
+  File "C:\Util\Python310\lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 543, in send
+    raise RuntimeError("Response content longer than Content-Length")
+RuntimeError: Response content longer than Content-Length
+2026-04-15 21:36:18,152 [INFO] uvicorn.error: Started server process [4140]
+2026-04-15 21:36:18,152 [INFO] uvicorn.error: Waiting for application startup.
+2026-04-15 21:36:18,156 [INFO] uvicorn.error: Application startup complete.
+2026-04-15 21:36:18,157 [INFO] uvicorn.error: Uvicorn running on http://0.0.0.0:8700 (Press CTRL+C to quit)
+2026-04-15 21:36:19,006 [INFO] uvicorn.access: 127.0.0.1:62937 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:36:24,074 [INFO] uvicorn.access: 127.0.0.1:62940 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:36:29,123 [INFO] uvicorn.access: 127.0.0.1:62943 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:36:34,195 [INFO] uvicorn.access: 127.0.0.1:54206 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:36:39,223 [INFO] uvicorn.access: 127.0.0.1:54208 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:36:44,260 [INFO] uvicorn.access: 127.0.0.1:54210 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:38:14,881 [INFO] uvicorn.error: Started server process [22532]
+2026-04-15 21:38:14,882 [INFO] uvicorn.error: Waiting for application startup.
+2026-04-15 21:38:14,885 [INFO] uvicorn.error: Application startup complete.
+2026-04-15 21:38:14,886 [INFO] uvicorn.error: Uvicorn running on http://0.0.0.0:8700 (Press CTRL+C to quit)
+2026-04-15 21:38:16,370 [INFO] uvicorn.access: 127.0.0.1:61679 - "GET /status HTTP/1.1" 200
+2026-04-15 21:38:22,504 [INFO] uvicorn.access: 127.0.0.1:61683 - "GET /status HTTP/1.1" 200
+2026-04-15 21:38:24,639 [INFO] uvicorn.access: 127.0.0.1:61688 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:38:29,696 [INFO] uvicorn.access: 127.0.0.1:61690 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:38:34,749 [INFO] uvicorn.access: 127.0.0.1:56876 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:38:39,809 [INFO] uvicorn.access: 127.0.0.1:63082 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:38:44,861 [INFO] uvicorn.access: 127.0.0.1:54007 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:38:49,921 [INFO] uvicorn.access: 127.0.0.1:54010 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:38:54,973 [INFO] uvicorn.access: 127.0.0.1:59560 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:38:57,716 [INFO] uvicorn.access: 127.0.0.1:52303 - "GET / HTTP/1.1" 404
+2026-04-15 21:38:57,749 [INFO] uvicorn.access: 127.0.0.1:52303 - "GET /favicon.ico HTTP/1.1" 404
+2026-04-15 21:39:00,027 [INFO] uvicorn.access: 127.0.0.1:64165 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:05,070 [INFO] uvicorn.access: 127.0.0.1:52982 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:10,114 [INFO] uvicorn.access: 127.0.0.1:62415 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:15,162 [INFO] uvicorn.access: 127.0.0.1:59437 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:20,225 [INFO] uvicorn.access: 127.0.0.1:59439 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:25,287 [INFO] uvicorn.access: 127.0.0.1:64832 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:30,315 [INFO] uvicorn.access: 127.0.0.1:61247 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:35,359 [INFO] uvicorn.access: 127.0.0.1:61249 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:40,412 [INFO] uvicorn.access: 127.0.0.1:61251 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:45,468 [INFO] uvicorn.access: 127.0.0.1:55486 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:50,513 [INFO] uvicorn.access: 127.0.0.1:55488 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:39:55,577 [INFO] uvicorn.access: 127.0.0.1:55490 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:00,626 [INFO] uvicorn.access: 127.0.0.1:63164 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:05,669 [INFO] uvicorn.access: 127.0.0.1:49344 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:10,718 [INFO] uvicorn.access: 127.0.0.1:49346 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:15,773 [INFO] uvicorn.access: 127.0.0.1:49349 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:20,819 [INFO] uvicorn.access: 127.0.0.1:49351 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:25,869 [INFO] uvicorn.access: 127.0.0.1:49355 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:30,910 [INFO] uvicorn.access: 127.0.0.1:49357 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:35,970 [INFO] uvicorn.access: 127.0.0.1:49359 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:41,020 [INFO] uvicorn.access: 127.0.0.1:49361 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:46,079 [INFO] uvicorn.access: 127.0.0.1:56728 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:51,127 [INFO] uvicorn.access: 127.0.0.1:53668 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:40:56,154 [INFO] uvicorn.access: 127.0.0.1:50062 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:01,203 [INFO] uvicorn.access: 127.0.0.1:50064 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:06,236 [INFO] uvicorn.access: 127.0.0.1:49735 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:11,287 [INFO] uvicorn.access: 127.0.0.1:49737 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:16,342 [INFO] uvicorn.access: 127.0.0.1:49739 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:21,393 [INFO] uvicorn.access: 127.0.0.1:49741 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:26,453 [INFO] uvicorn.access: 127.0.0.1:49743 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:31,495 [INFO] uvicorn.access: 127.0.0.1:49746 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:36,541 [INFO] uvicorn.access: 127.0.0.1:49748 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:41,592 [INFO] uvicorn.access: 127.0.0.1:49750 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:46,642 [INFO] uvicorn.access: 127.0.0.1:49753 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:51,671 [INFO] uvicorn.access: 127.0.0.1:53063 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:41:56,734 [INFO] uvicorn.access: 127.0.0.1:53065 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:01,795 [INFO] uvicorn.access: 127.0.0.1:53067 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:06,850 [INFO] uvicorn.access: 127.0.0.1:53069 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:11,914 [INFO] uvicorn.access: 127.0.0.1:53071 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:16,965 [INFO] uvicorn.access: 127.0.0.1:53073 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:22,018 [INFO] uvicorn.access: 127.0.0.1:53075 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:27,083 [INFO] uvicorn.access: 127.0.0.1:53079 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:32,112 [INFO] uvicorn.access: 127.0.0.1:53081 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:37,149 [INFO] uvicorn.access: 127.0.0.1:53083 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:42,207 [INFO] uvicorn.access: 127.0.0.1:53085 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:47,259 [INFO] uvicorn.access: 127.0.0.1:50121 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:52,304 [INFO] uvicorn.access: 127.0.0.1:53537 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:42:57,344 [INFO] uvicorn.access: 127.0.0.1:53401 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:43:08,797 [INFO] uvicorn.error: Started server process [28512]
+2026-04-15 21:43:08,797 [INFO] uvicorn.error: Waiting for application startup.
+2026-04-15 21:43:08,801 [INFO] uvicorn.error: Application startup complete.
+2026-04-15 21:43:08,801 [INFO] uvicorn.error: Uvicorn running on http://0.0.0.0:8700 (Press CTRL+C to quit)
+2026-04-15 21:43:10,284 [INFO] uvicorn.access: 127.0.0.1:53410 - "GET /status HTTP/1.1" 200
+2026-04-15 21:43:16,388 [INFO] uvicorn.access: 127.0.0.1:53414 - "GET /status HTTP/1.1" 200
+2026-04-15 21:43:18,482 [INFO] uvicorn.access: 127.0.0.1:53430 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:43:23,549 [INFO] uvicorn.access: 127.0.0.1:53448 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:43:28,615 [INFO] uvicorn.access: 127.0.0.1:53452 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:43:32,736 [INFO] uvicorn.access: 127.0.0.1:56212 - "GET / HTTP/1.1" 307
+2026-04-15 21:43:32,779 [INFO] uvicorn.access: 127.0.0.1:56212 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:43:32,790 [INFO] uvicorn.access: 127.0.0.1:58982 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:43:32,791 [INFO] uvicorn.access: 127.0.0.1:56212 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:43:32,828 [INFO] uvicorn.access: 127.0.0.1:58982 - "GET /status HTTP/1.1" 200
+2026-04-15 21:43:32,830 [INFO] uvicorn.access: 127.0.0.1:56212 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:43:33,648 [INFO] uvicorn.access: 127.0.0.1:53096 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:43:38,683 [INFO] uvicorn.access: 127.0.0.1:53098 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:43:43,751 [INFO] uvicorn.access: 127.0.0.1:53100 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:43:48,786 [INFO] uvicorn.access: 127.0.0.1:50401 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:43:53,832 [INFO] uvicorn.access: 127.0.0.1:60734 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:43:53,941 [INFO] uvicorn.access: 127.0.0.1:60735 - "GET /conversations/by-external-id/webchat_web_1776285827004 HTTP/1.1" 404
+2026-04-15 21:43:56,010 [INFO] uvicorn.access: 127.0.0.1:59954 - "POST /conversations HTTP/1.1" 201
+2026-04-15 21:43:58,084 [INFO] uvicorn.access: 127.0.0.1:59958 - "POST /conversations/1/messages HTTP/1.1" 201
+2026-04-15 21:43:58,878 [INFO] uvicorn.access: 127.0.0.1:59960 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:00,134 [INFO] uvicorn.access: 127.0.0.1:59961 - "POST /events HTTP/1.1" 201
+2026-04-15 21:44:03,173 [INFO] uvicorn.access: 127.0.0.1:59964 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:44:03,943 [INFO] uvicorn.access: 127.0.0.1:59965 - "GET /events/next?claimed_by=agent HTTP/1.1" 200
+2026-04-15 21:44:06,234 [INFO] uvicorn.access: 127.0.0.1:59969 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:44:08,999 [INFO] uvicorn.access: 127.0.0.1:59973 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:09,270 [INFO] uvicorn.access: 127.0.0.1:59974 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:44:11,051 [INFO] uvicorn.access: 127.0.0.1:53095 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:44:11,062 [INFO] uvicorn.access: 127.0.0.1:53095 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:44:11,064 [INFO] uvicorn.access: 127.0.0.1:53095 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:44:11,077 [INFO] uvicorn.access: 127.0.0.1:53095 - "GET /status HTTP/1.1" 200
+2026-04-15 21:44:11,082 [INFO] uvicorn.access: 127.0.0.1:53095 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:44:12,825 [INFO] uvicorn.access: 127.0.0.1:51010 - "GET /events?conversation_id=1&limit=200 HTTP/1.1" 200
+2026-04-15 21:44:12,827 [INFO] uvicorn.access: 127.0.0.1:53095 - "GET /conversations/1 HTTP/1.1" 200
+2026-04-15 21:44:12,832 [INFO] uvicorn.access: 127.0.0.1:60256 - "GET /conversations/1/messages?limit=1000 HTTP/1.1" 200
+2026-04-15 21:44:13,043 [INFO] uvicorn.access: 127.0.0.1:51012 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:44:14,030 [INFO] uvicorn.access: 127.0.0.1:51013 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:17,037 [INFO] uvicorn.access: 127.0.0.1:51015 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:44:19,061 [INFO] uvicorn.access: 127.0.0.1:63210 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:21,042 [INFO] uvicorn.access: 127.0.0.1:63211 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:44:24,107 [INFO] uvicorn.access: 127.0.0.1:63215 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:24,658 [INFO] uvicorn.access: 127.0.0.1:63216 - "POST /conversations/1/messages HTTP/1.1" 201
+2026-04-15 21:44:25,049 [INFO] uvicorn.access: 127.0.0.1:63218 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:44:26,693 [INFO] uvicorn.access: 127.0.0.1:58255 - "PATCH /conversations/1 HTTP/1.1" 200
+2026-04-15 21:44:27,426 [INFO] uvicorn.access: 127.0.0.1:61351 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:44:27,437 [INFO] uvicorn.access: 127.0.0.1:57797 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:44:27,437 [INFO] uvicorn.access: 127.0.0.1:61351 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:44:27,449 [INFO] uvicorn.access: 127.0.0.1:61351 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:44:27,454 [INFO] uvicorn.access: 127.0.0.1:57797 - "GET /status HTTP/1.1" 200
+2026-04-15 21:44:28,736 [INFO] uvicorn.access: 127.0.0.1:56749 - "POST /events/1/complete HTTP/1.1" 200
+2026-04-15 21:44:29,171 [INFO] uvicorn.access: 127.0.0.1:56750 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:29,207 [INFO] uvicorn.access: 127.0.0.1:56747 - "GET /events?conversation_id=1&limit=200 HTTP/1.1" 200
+2026-04-15 21:44:29,215 [INFO] uvicorn.access: 127.0.0.1:61351 - "GET /conversations/1/messages?limit=1000 HTTP/1.1" 200
+2026-04-15 21:44:29,223 [INFO] uvicorn.access: 127.0.0.1:57797 - "GET /conversations/1 HTTP/1.1" 200
+2026-04-15 21:44:31,292 [INFO] uvicorn.access: 127.0.0.1:57797 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:44:31,304 [INFO] uvicorn.access: 127.0.0.1:61351 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:44:31,304 [INFO] uvicorn.access: 127.0.0.1:57797 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:44:31,311 [INFO] uvicorn.access: 127.0.0.1:57797 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:44:31,330 [INFO] uvicorn.access: 127.0.0.1:61351 - "GET /status HTTP/1.1" 200
+2026-04-15 21:44:32,376 [INFO] uvicorn.access: 127.0.0.1:56747 - "GET /events?conversation_id=1&limit=200 HTTP/1.1" 200
+2026-04-15 21:44:32,401 [INFO] uvicorn.access: 127.0.0.1:61351 - "GET /conversations/1 HTTP/1.1" 200
+2026-04-15 21:44:32,402 [INFO] uvicorn.access: 127.0.0.1:57797 - "GET /conversations/1/messages?limit=1000 HTTP/1.1" 200
+2026-04-15 21:44:34,224 [INFO] uvicorn.access: 127.0.0.1:54973 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:39,265 [INFO] uvicorn.access: 127.0.0.1:54976 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:44,319 [INFO] uvicorn.access: 127.0.0.1:58411 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:46,806 [INFO] uvicorn.access: 127.0.0.1:63699 - "GET /conversations/1/messages?limit=1000 HTTP/1.1" 200
+2026-04-15 21:44:46,806 [INFO] uvicorn.access: 127.0.0.1:52454 - "GET /events?conversation_id=1&limit=200 HTTP/1.1" 200
+2026-04-15 21:44:46,810 [INFO] uvicorn.access: 127.0.0.1:52586 - "GET /conversations/1 HTTP/1.1" 200
+2026-04-15 21:44:47,601 [INFO] uvicorn.access: 127.0.0.1:52586 - "GET /conversations/1 HTTP/1.1" 200
+2026-04-15 21:44:47,603 [INFO] uvicorn.access: 127.0.0.1:63699 - "GET /events?conversation_id=1&limit=200 HTTP/1.1" 200
+2026-04-15 21:44:47,605 [INFO] uvicorn.access: 127.0.0.1:52454 - "GET /conversations/1/messages?limit=1000 HTTP/1.1" 200
+2026-04-15 21:44:49,381 [INFO] uvicorn.access: 127.0.0.1:57838 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:54,424 [INFO] uvicorn.access: 127.0.0.1:62415 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:44:59,467 [INFO] uvicorn.access: 127.0.0.1:62418 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:04,523 [INFO] uvicorn.access: 127.0.0.1:62420 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:09,595 [INFO] uvicorn.access: 127.0.0.1:62423 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:14,631 [INFO] uvicorn.access: 127.0.0.1:62425 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:19,661 [INFO] uvicorn.access: 127.0.0.1:53824 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:23,920 [INFO] uvicorn.access: 127.0.0.1:53827 - "GET /conversations/by-external-id/webchat_web_1776285827004 HTTP/1.1" 200
+2026-04-15 21:45:24,706 [INFO] uvicorn.access: 127.0.0.1:53829 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:25,964 [INFO] uvicorn.access: 127.0.0.1:62628 - "POST /conversations/1/messages HTTP/1.1" 201
+2026-04-15 21:45:26,207 [INFO] uvicorn.access: 127.0.0.1:53967 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:45:26,218 [INFO] uvicorn.access: 127.0.0.1:53967 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:45:26,220 [INFO] uvicorn.access: 127.0.0.1:53967 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:45:26,229 [INFO] uvicorn.access: 127.0.0.1:53967 - "GET /status HTTP/1.1" 200
+2026-04-15 21:45:26,233 [INFO] uvicorn.access: 127.0.0.1:53967 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:45:27,133 [INFO] uvicorn.access: 127.0.0.1:56964 - "GET /events?conversation_id=1&limit=200 HTTP/1.1" 200
+2026-04-15 21:45:27,140 [INFO] uvicorn.access: 127.0.0.1:64852 - "GET /conversations/1/messages?limit=1000 HTTP/1.1" 200
+2026-04-15 21:45:27,149 [INFO] uvicorn.access: 127.0.0.1:53967 - "GET /conversations/1 HTTP/1.1" 200
+2026-04-15 21:45:27,995 [INFO] uvicorn.access: 127.0.0.1:56966 - "POST /events HTTP/1.1" 201
+2026-04-15 21:45:29,772 [INFO] uvicorn.access: 127.0.0.1:61517 - "GET /events/next?claimed_by=agent HTTP/1.1" 200
+2026-04-15 21:45:32,043 [INFO] uvicorn.access: 127.0.0.1:61521 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:45:34,852 [INFO] uvicorn.access: 127.0.0.1:55229 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:36,012 [INFO] uvicorn.access: 127.0.0.1:60870 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:45:36,021 [INFO] uvicorn.access: 127.0.0.1:60870 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:45:36,022 [INFO] uvicorn.access: 127.0.0.1:59501 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:45:36,039 [INFO] uvicorn.access: 127.0.0.1:59502 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:45:36,041 [INFO] uvicorn.access: 127.0.0.1:60870 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:45:36,044 [INFO] uvicorn.access: 127.0.0.1:59501 - "GET /status HTTP/1.1" 200
+2026-04-15 21:45:39,800 [INFO] uvicorn.access: 127.0.0.1:62905 - "POST /conversations/1/messages HTTP/1.1" 201
+2026-04-15 21:45:39,897 [INFO] uvicorn.access: 127.0.0.1:62907 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:40,040 [INFO] uvicorn.access: 127.0.0.1:55131 - "GET /conversations/1/messages?limit=100 HTTP/1.1" 200
+2026-04-15 21:45:41,876 [INFO] uvicorn.access: 127.0.0.1:55132 - "PATCH /conversations/1 HTTP/1.1" 200
+2026-04-15 21:45:43,939 [INFO] uvicorn.access: 127.0.0.1:55135 - "POST /events/2/complete HTTP/1.1" 200
+2026-04-15 21:45:44,941 [INFO] uvicorn.access: 127.0.0.1:55137 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:50,001 [INFO] uvicorn.access: 127.0.0.1:51581 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:45:55,060 [INFO] uvicorn.access: 127.0.0.1:51267 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:00,089 [INFO] uvicorn.access: 127.0.0.1:51270 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:05,127 [INFO] uvicorn.access: 127.0.0.1:51272 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:10,201 [INFO] uvicorn.access: 127.0.0.1:51275 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:15,244 [INFO] uvicorn.access: 127.0.0.1:51277 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:20,292 [INFO] uvicorn.access: 127.0.0.1:51281 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:25,350 [INFO] uvicorn.access: 127.0.0.1:54730 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:30,395 [INFO] uvicorn.access: 127.0.0.1:55248 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:35,435 [INFO] uvicorn.access: 127.0.0.1:55251 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:40,488 [INFO] uvicorn.access: 127.0.0.1:55254 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:45,539 [INFO] uvicorn.access: 127.0.0.1:57199 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:50,578 [INFO] uvicorn.access: 127.0.0.1:55476 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:46:55,609 [INFO] uvicorn.access: 127.0.0.1:65283 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:00,644 [INFO] uvicorn.access: 127.0.0.1:49272 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:05,690 [INFO] uvicorn.access: 127.0.0.1:49274 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:10,721 [INFO] uvicorn.access: 127.0.0.1:49276 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:15,765 [INFO] uvicorn.access: 127.0.0.1:49278 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:20,808 [INFO] uvicorn.access: 127.0.0.1:54655 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:25,857 [INFO] uvicorn.access: 127.0.0.1:54657 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:30,921 [INFO] uvicorn.access: 127.0.0.1:54659 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:35,964 [INFO] uvicorn.access: 127.0.0.1:58191 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:41,007 [INFO] uvicorn.access: 127.0.0.1:58193 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:46,041 [INFO] uvicorn.access: 127.0.0.1:57761 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:51,091 [INFO] uvicorn.access: 127.0.0.1:52759 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:47:56,146 [INFO] uvicorn.access: 127.0.0.1:57509 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:01,194 [INFO] uvicorn.access: 127.0.0.1:64673 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:06,244 [INFO] uvicorn.access: 127.0.0.1:64675 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:11,301 [INFO] uvicorn.access: 127.0.0.1:64677 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:16,335 [INFO] uvicorn.access: 127.0.0.1:64681 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:21,383 [INFO] uvicorn.access: 127.0.0.1:64683 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:26,431 [INFO] uvicorn.access: 127.0.0.1:64685 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:31,477 [INFO] uvicorn.access: 127.0.0.1:64688 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:36,534 [INFO] uvicorn.access: 127.0.0.1:64691 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:41,601 [INFO] uvicorn.access: 127.0.0.1:64693 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:46,648 [INFO] uvicorn.access: 127.0.0.1:50425 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:51,688 [INFO] uvicorn.access: 127.0.0.1:53947 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:48:56,724 [INFO] uvicorn.access: 127.0.0.1:56620 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:01,779 [INFO] uvicorn.access: 127.0.0.1:56623 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:06,831 [INFO] uvicorn.access: 127.0.0.1:56627 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:11,863 [INFO] uvicorn.access: 127.0.0.1:56629 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:16,909 [INFO] uvicorn.access: 127.0.0.1:56632 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:21,966 [INFO] uvicorn.access: 127.0.0.1:56634 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:27,001 [INFO] uvicorn.access: 127.0.0.1:56636 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:32,052 [INFO] uvicorn.access: 127.0.0.1:56638 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:37,113 [INFO] uvicorn.access: 127.0.0.1:56640 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:42,167 [INFO] uvicorn.access: 127.0.0.1:56642 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:47,190 [INFO] uvicorn.access: 127.0.0.1:56645 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:52,225 [INFO] uvicorn.access: 127.0.0.1:64965 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:49:57,271 [INFO] uvicorn.access: 127.0.0.1:63136 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:02,058 [INFO] uvicorn.access: 127.0.0.1:59034 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:50:02,068 [INFO] uvicorn.access: 127.0.0.1:51525 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:50:02,069 [INFO] uvicorn.access: 127.0.0.1:59034 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:50:02,105 [INFO] uvicorn.access: 127.0.0.1:59034 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:02,110 [INFO] uvicorn.access: 127.0.0.1:51525 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:02,298 [INFO] uvicorn.access: 127.0.0.1:51526 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:07,359 [INFO] uvicorn.access: 127.0.0.1:62825 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:11,638 [INFO] uvicorn.access: 127.0.0.1:62500 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:11,643 [INFO] uvicorn.access: 127.0.0.1:62500 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:12,105 [INFO] uvicorn.access: 127.0.0.1:62500 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:12,111 [INFO] uvicorn.access: 127.0.0.1:62500 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:12,420 [INFO] uvicorn.access: 127.0.0.1:53577 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:13,077 [INFO] uvicorn.access: 127.0.0.1:62500 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:50:13,087 [INFO] uvicorn.access: 127.0.0.1:62500 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:50:13,089 [INFO] uvicorn.access: 127.0.0.1:62500 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:50:13,097 [INFO] uvicorn.access: 127.0.0.1:62500 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:13,101 [INFO] uvicorn.access: 127.0.0.1:62500 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:17,450 [INFO] uvicorn.access: 127.0.0.1:55563 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:18,989 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:18,994 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:22,503 [INFO] uvicorn.access: 127.0.0.1:55566 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:23,994 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:24,000 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:27,554 [INFO] uvicorn.access: 127.0.0.1:55568 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:28,991 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:28,997 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:32,602 [INFO] uvicorn.access: 127.0.0.1:55572 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:33,995 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:34,001 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:37,667 [INFO] uvicorn.access: 127.0.0.1:55574 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:38,991 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:38,997 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:42,746 [INFO] uvicorn.access: 127.0.0.1:60609 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:44,002 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:44,008 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:47,769 [INFO] uvicorn.access: 127.0.0.1:58963 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:48,995 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:49,001 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:52,847 [INFO] uvicorn.access: 127.0.0.1:50682 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:53,996 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:54,002 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:50:57,896 [INFO] uvicorn.access: 127.0.0.1:51426 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:50:59,001 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:50:59,007 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:51:02,942 [INFO] uvicorn.access: 127.0.0.1:51429 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:03,997 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:51:04,003 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:51:07,961 [INFO] uvicorn.access: 127.0.0.1:62649 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:09,000 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:51:09,006 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:51:12,992 [INFO] uvicorn.access: 127.0.0.1:57800 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:14,002 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /status HTTP/1.1" 200
+2026-04-15 21:51:14,007 [INFO] uvicorn.access: 127.0.0.1:54740 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:51:18,068 [INFO] uvicorn.access: 127.0.0.1:56021 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:23,106 [INFO] uvicorn.access: 127.0.0.1:56024 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:28,147 [INFO] uvicorn.access: 127.0.0.1:56027 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:33,204 [INFO] uvicorn.access: 127.0.0.1:56029 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:38,258 [INFO] uvicorn.access: 127.0.0.1:56031 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:43,321 [INFO] uvicorn.access: 127.0.0.1:64004 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:44,295 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:51:44,302 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:51:48,364 [INFO] uvicorn.access: 127.0.0.1:50497 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:48,991 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:51:48,997 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:51:53,403 [INFO] uvicorn.access: 127.0.0.1:55657 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:54,003 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:51:54,008 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:51:58,437 [INFO] uvicorn.access: 127.0.0.1:55659 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:51:59,001 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:51:59,007 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:03,508 [INFO] uvicorn.access: 127.0.0.1:55661 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:03,990 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:03,996 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:08,564 [INFO] uvicorn.access: 127.0.0.1:55663 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:09,002 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:09,007 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:13,604 [INFO] uvicorn.access: 127.0.0.1:62365 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:13,999 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:14,002 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:18,668 [INFO] uvicorn.access: 127.0.0.1:62367 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:19,000 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:19,006 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:23,725 [INFO] uvicorn.access: 127.0.0.1:50803 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:23,993 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:23,997 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:28,766 [INFO] uvicorn.access: 127.0.0.1:63337 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:28,987 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:28,990 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:33,816 [INFO] uvicorn.access: 127.0.0.1:63339 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:33,992 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:33,998 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:38,847 [INFO] uvicorn.access: 127.0.0.1:63341 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:38,991 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:38,996 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:43,893 [INFO] uvicorn.access: 127.0.0.1:59419 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:43,992 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:43,996 [INFO] uvicorn.access: 127.0.0.1:65448 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:48,957 [INFO] uvicorn.access: 127.0.0.1:49397 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:51,314 [INFO] uvicorn.access: 127.0.0.1:52088 - "GET /status HTTP/1.1" 200
+2026-04-15 21:52:51,320 [INFO] uvicorn.access: 127.0.0.1:52088 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:52:54,003 [INFO] uvicorn.access: 127.0.0.1:59400 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:52:59,046 [INFO] uvicorn.access: 127.0.0.1:56739 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:04,115 [INFO] uvicorn.access: 127.0.0.1:49992 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:09,163 [INFO] uvicorn.access: 127.0.0.1:59594 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:14,211 [INFO] uvicorn.access: 127.0.0.1:50608 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:19,253 [INFO] uvicorn.access: 127.0.0.1:64596 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:24,307 [INFO] uvicorn.access: 127.0.0.1:49782 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:29,348 [INFO] uvicorn.access: 127.0.0.1:49785 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:34,373 [INFO] uvicorn.access: 127.0.0.1:58108 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:39,429 [INFO] uvicorn.access: 127.0.0.1:61572 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:44,445 [INFO] uvicorn.access: 127.0.0.1:61574 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:49,474 [INFO] uvicorn.access: 127.0.0.1:61576 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:50,997 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /status HTTP/1.1" 200
+2026-04-15 21:53:51,002 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:53:53,376 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /status HTTP/1.1" 200
+2026-04-15 21:53:53,381 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:53:54,531 [INFO] uvicorn.access: 127.0.0.1:60698 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:53:54,702 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:53:54,711 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:53:54,727 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:53:54,736 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /status HTTP/1.1" 200
+2026-04-15 21:53:54,740 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:53:57,212 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:53:57,222 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:53:57,222 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:53:57,237 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /status HTTP/1.1" 200
+2026-04-15 21:53:57,239 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:53:59,577 [INFO] uvicorn.access: 127.0.0.1:51875 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:00,861 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:54:00,870 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:54:00,870 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:54:00,886 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:00,894 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:01,800 [INFO] uvicorn.access: 127.0.0.1:56476 - "GET /events?conversation_id=1&limit=200 HTTP/1.1" 200
+2026-04-15 21:54:01,812 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /conversations/1/messages?limit=1000 HTTP/1.1" 200
+2026-04-15 21:54:01,813 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /conversations/1 HTTP/1.1" 200
+2026-04-15 21:54:03,427 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:54:03,438 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:54:03,438 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:54:03,451 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:03,455 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:04,622 [INFO] uvicorn.access: 127.0.0.1:51880 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:04,955 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:54:04,965 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:54:04,966 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:54:04,972 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:04,980 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:05,607 [INFO] uvicorn.access: 127.0.0.1:56476 - "GET /events?conversation_id=1&limit=200 HTTP/1.1" 200
+2026-04-15 21:54:05,630 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /conversations/1 HTTP/1.1" 200
+2026-04-15 21:54:05,636 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /conversations/1/messages?limit=1000 HTTP/1.1" 200
+2026-04-15 21:54:07,788 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /ui HTTP/1.1" 200
+2026-04-15 21:54:07,799 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /ui/conversations.css HTTP/1.1" 200
+2026-04-15 21:54:07,799 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /ui/conversations.js HTTP/1.1" 200
+2026-04-15 21:54:07,806 [INFO] uvicorn.access: 127.0.0.1:59307 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:07,813 [INFO] uvicorn.access: 127.0.0.1:60161 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:09,661 [INFO] uvicorn.access: 127.0.0.1:62336 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:13,302 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:13,308 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:14,724 [INFO] uvicorn.access: 127.0.0.1:55567 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:17,994 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:18,001 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:19,779 [INFO] uvicorn.access: 127.0.0.1:55569 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:22,991 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:22,996 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:24,833 [INFO] uvicorn.access: 127.0.0.1:55571 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:28,002 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:28,008 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:29,879 [INFO] uvicorn.access: 127.0.0.1:55573 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:32,993 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:32,999 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:34,920 [INFO] uvicorn.access: 127.0.0.1:55575 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:37,988 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:37,995 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:39,981 [INFO] uvicorn.access: 127.0.0.1:55577 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:43,009 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:43,015 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:45,021 [INFO] uvicorn.access: 127.0.0.1:50988 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:47,993 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:47,999 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:50,079 [INFO] uvicorn.access: 127.0.0.1:59497 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:52,999 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:53,005 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:54:55,165 [INFO] uvicorn.access: 127.0.0.1:58940 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:54:57,995 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:54:58,002 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:55:00,224 [INFO] uvicorn.access: 127.0.0.1:60951 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:02,991 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:55:02,997 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:55:05,274 [INFO] uvicorn.access: 127.0.0.1:60955 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:07,989 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /status HTTP/1.1" 200
+2026-04-15 21:55:07,994 [INFO] uvicorn.access: 127.0.0.1:63923 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:55:10,343 [INFO] uvicorn.access: 127.0.0.1:63255 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:15,376 [INFO] uvicorn.access: 127.0.0.1:63257 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:20,424 [INFO] uvicorn.access: 127.0.0.1:63262 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:25,472 [INFO] uvicorn.access: 127.0.0.1:63264 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:30,522 [INFO] uvicorn.access: 127.0.0.1:58926 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:35,573 [INFO] uvicorn.access: 127.0.0.1:58928 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:40,642 [INFO] uvicorn.access: 127.0.0.1:58930 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:45,670 [INFO] uvicorn.access: 127.0.0.1:54098 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:50,720 [INFO] uvicorn.access: 127.0.0.1:54101 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:55:51,299 [INFO] uvicorn.access: 127.0.0.1:49223 - "GET /status HTTP/1.1" 200
+2026-04-15 21:55:51,306 [INFO] uvicorn.access: 127.0.0.1:49223 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:55:55,765 [INFO] uvicorn.access: 127.0.0.1:61205 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:00,827 [INFO] uvicorn.access: 127.0.0.1:59216 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:05,866 [INFO] uvicorn.access: 127.0.0.1:59218 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:10,916 [INFO] uvicorn.access: 127.0.0.1:59220 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:15,976 [INFO] uvicorn.access: 127.0.0.1:59222 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:21,028 [INFO] uvicorn.access: 127.0.0.1:59224 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:26,080 [INFO] uvicorn.access: 127.0.0.1:59226 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:31,125 [INFO] uvicorn.access: 127.0.0.1:59228 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:36,194 [INFO] uvicorn.access: 127.0.0.1:59230 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:41,249 [INFO] uvicorn.access: 127.0.0.1:59233 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:46,271 [INFO] uvicorn.access: 127.0.0.1:59235 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:51,001 [INFO] uvicorn.access: 127.0.0.1:61203 - "GET /status HTTP/1.1" 200
+2026-04-15 21:56:51,007 [INFO] uvicorn.access: 127.0.0.1:61203 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:56:51,296 [INFO] uvicorn.access: 127.0.0.1:54435 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:56:56,343 [INFO] uvicorn.access: 127.0.0.1:62963 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:01,371 [INFO] uvicorn.access: 127.0.0.1:62969 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:06,447 [INFO] uvicorn.access: 127.0.0.1:62973 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:11,517 [INFO] uvicorn.access: 127.0.0.1:62977 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:16,568 [INFO] uvicorn.access: 127.0.0.1:62980 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:21,618 [INFO] uvicorn.access: 127.0.0.1:62983 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:26,669 [INFO] uvicorn.access: 127.0.0.1:62987 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:31,732 [INFO] uvicorn.access: 127.0.0.1:62990 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:36,782 [INFO] uvicorn.access: 127.0.0.1:62992 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:41,832 [INFO] uvicorn.access: 127.0.0.1:62996 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:46,888 [INFO] uvicorn.access: 127.0.0.1:62998 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:51,315 [INFO] uvicorn.access: 127.0.0.1:61520 - "GET /status HTTP/1.1" 200
+2026-04-15 21:57:51,322 [INFO] uvicorn.access: 127.0.0.1:61520 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:57:51,934 [INFO] uvicorn.access: 127.0.0.1:54270 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:57:57,014 [INFO] uvicorn.access: 127.0.0.1:54272 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:02,066 [INFO] uvicorn.access: 127.0.0.1:54275 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:07,107 [INFO] uvicorn.access: 127.0.0.1:54277 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:12,162 [INFO] uvicorn.access: 127.0.0.1:54279 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:17,212 [INFO] uvicorn.access: 127.0.0.1:54283 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:22,249 [INFO] uvicorn.access: 127.0.0.1:54286 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:27,287 [INFO] uvicorn.access: 127.0.0.1:54288 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:32,347 [INFO] uvicorn.access: 127.0.0.1:61338 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:37,391 [INFO] uvicorn.access: 127.0.0.1:61341 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:42,434 [INFO] uvicorn.access: 127.0.0.1:61343 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:47,507 [INFO] uvicorn.access: 127.0.0.1:61345 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:50,994 [INFO] uvicorn.access: 127.0.0.1:54268 - "GET /status HTTP/1.1" 200
+2026-04-15 21:58:51,001 [INFO] uvicorn.access: 127.0.0.1:54268 - "GET /conversations?limit=500 HTTP/1.1" 200
+2026-04-15 21:58:52,560 [INFO] uvicorn.access: 127.0.0.1:53172 - "GET /events/next?claimed_by=agent HTTP/1.1" 204
+2026-04-15 21:58:57,615 [INFO] uvicorn.access: 127.0.0.1:57169 - "GET /events/next?claimed_by=agent HTTP/1.1" 204

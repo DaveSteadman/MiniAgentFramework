@@ -1,4 +1,4 @@
-# MiniAgentFramework - Design and Requirements
+﻿# MiniAgentFramework - Design and Requirements
 
 ## Purpose
 The is a requirements document, of defining statements around the functionality of MiniAgentFramework.
@@ -45,21 +45,21 @@ A list of the headline functional areas that define the project:
 
 The system is divided into two layers with a clean interface between them.
 
-- `agent_core/` is stateless with respect to sessions, users, and file I/O (except the scratchpad store, which is process-lifetime).
+- `KoreAgent/` is stateless with respect to sessions, users, and file I/O (except the scratchpad store, which is process-lifetime).
 - `input_layer/` owns session identity, file persistence, and request routing.
-- `agent_core/orchestration.py` is the single entry point: it accepts parameters and returns results; it never reads from files or knows what session it is in.
+- `KoreAgent/orchestration.py` is the single entry point: it accepts parameters and returns results; it never reads from files or knows what session it is in.
 
 **Claims:**
 - `orchestrate_prompt` accepts `conversation_history` as a parameter; it does not fetch it internally.
 - `orchestrate_prompt` accepts `session_context` as a parameter; it does not create or persist one internally.
-- No file I/O for session state occurs inside `agent_core/` (scratchpad dump is opt-in and explicitly controlled).
+- No file I/O for session state occurs inside `KoreAgent/` (scratchpad dump is opt-in and explicitly controlled).
 - The scratchpad store is a module-level dict shared across all calls within a process lifetime, including delegate children.
 
 ---
 
 ## Server - LLM client
 
-**File:** `code/agent_core/ollama_client.py`
+**File:** `code/KoreAgent/ollama_client.py`
 
 **Intent:** Thin HTTP wrapper over Ollama's REST API. Manages host configuration, model resolution, health checking, and raw LLM calls. All other modules call through here; none make direct HTTP requests to Ollama.
 
@@ -75,7 +75,7 @@ The system is divided into two layers with a clean interface between them.
 
 ## Server - Orchestration pipeline
 
-**File:** `code/agent_core/orchestration.py`
+**File:** `code/KoreAgent/orchestration.py`
 
 **Intent:** Stateless tool-calling pipeline. Accepts a prompt, config, and optional history; runs a tool loop until the model produces a plain-text final answer; returns the answer and token metrics.
 
@@ -96,7 +96,7 @@ The system is divided into two layers with a clean interface between them.
 
 ## Server - Context control
 
-**Files:** `code/agent_core/scratchpad.py`, `code/agent_core/skills/Delegate/`, `code/agent_core/prompt_tokens.py`
+**Files:** `code/KoreAgent/scratchpad.py`, `code/KoreAgent/skills/Delegate/`, `code/KoreAgent/prompt_tokens.py`
 
 **Intent:** Three complementary mechanisms for keeping large data out of the LLM context window and for isolating sub-task reasoning.
 
@@ -137,14 +137,14 @@ The system is divided into two layers with a clean interface between them.
 
 ## Server - Skill system
 
-**Files:** `code/agent_core/skills/`, `code/agent_core/skill_executor.py`, `code/agent_core/skills_catalog_builder.py`
+**Files:** `code/KoreAgent/skills/`, `code/KoreAgent/skill_executor.py`, `code/KoreAgent/skills_catalog_builder.py`
 
 **Intent:** Each skill is a self-contained directory with a `skill.md` definition and a Python module. The catalog builder parses all `skill.md` files into a JSON schema used by orchestration. The executor loads and calls skill functions dynamically.
 
 ### Skill catalog
 
 **Claims:**
-- `skills_catalog_builder.py` scans `code/agent_core/skills/` recursively for `skill.md` files.
+- `skills_catalog_builder.py` scans `code/KoreAgent/skills/` recursively for `skill.md` files.
 - The catalog is written to `skills_summary.md` in the skills root.
 - Catalog building can be LLM-assisted or local (deterministic regex fallback via `--no-llm`).
 - The orchestration layer hot-reloads the catalog automatically when `skills_summary.md` is modified on disk.

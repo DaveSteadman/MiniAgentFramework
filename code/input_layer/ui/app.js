@@ -1071,25 +1071,67 @@ function submitPrompt() {
 }
 
 async function _dispatchPrompt(text) {
-    const data = await apiFetch("/sessions/" + encodeURIComponent(_sessionId) + "/prompt", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ prompt: text }),
-    });
-
-    // Persist history without blocking prompt submission into the Python queue.
-    _pushHistory(text);
-
-    // Refresh queue immediately so new entry appears without waiting for the poll interval.
-    refreshQueue();
-
-    if (!data) {
-        appendChatMessage("user", text);
-        appendChatMessage("agent", "[Error: could not reach API]");
+    // Slash commands bypass KoreConversation - they run on the direct session endpoint.
+    if (text.startsWith("/")) {
+        const data = await apiFetch("/sessions/" + encodeURIComponent(_sessionId) + "/prompt", {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ prompt: text }),
+        });
+        _pushHistory(text);
+        refreshQueue();
+        if (!data) {
+            appendChatMessage("user", text);
+            appendChatMessage("agent", "[Error: could not reach API]");
+            return;
+        }
+        listenRun(data.run_id);
         return;
     }
 
-    listenRun(data.run_id);
+    // Regular chat messages are routed through KoreConversation.
+    // Show the user message immediately, then poll KC for the outbound reply.
+    appendChatMessage("user", text);
+    _pushHistory(text);
+
+    const thinkKey = "kc_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+    appendThinking(thinkKey);
+
+    const data = await apiFetch("/kc/send", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ session_id: _sessionId, content: text }),
+    });
+
+    refreshQueue();
+
+    if (!data) {
+        removeThinking(thinkKey);
+        appendChatMessage("agent", "[Error: could not reach KoreConversation]");
+        return;
+    }
+
+    _pollKcReply(thinkKey, data.conv_id, data.msg_id);
+}
+
+async function _pollKcReply(thinkKey, convId, afterMsgId) {
+    const MAX_POLLS   = 120;  // 2 minutes at 1-second intervals
+    const POLL_MS     = 1000;
+    for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise(r => setTimeout(r, POLL_MS));
+        const messages = await apiFetch("/kc/conversations/" + convId + "/messages");
+        if (!Array.isArray(messages)) continue;
+        const replies = messages.filter(m => m.direction === "outbound" && m.id > afterMsgId);
+        if (replies.length > 0) {
+            removeThinking(thinkKey);
+            for (const m of replies) {
+                appendChatMessage("agent", m.content);
+            }
+            return;
+        }
+    }
+    removeThinking(thinkKey);
+    appendChatMessage("agent", "[No response received within timeout]");
 }
 
 // ====================================================================================================

@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # Unit tests for strip_cot_preamble() in tool_loop.py.
@@ -15,7 +15,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "code"))
 
-from agent_core.tool_loop import strip_cot_preamble
+from KoreAgent.tool_loop import strip_cot_preamble
 
 # Case 1: multi-paragraph CoT, clean last para -> return last para only.
 deliberation = (

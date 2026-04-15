@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # FastAPI application exposing the MiniAgentFramework engine as a REST + SSE service.
@@ -57,6 +57,9 @@ import queue
 import re
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 from datetime import datetime
 from datetime import timedelta
@@ -68,24 +71,24 @@ from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from agent_core.llm_client import get_active_backend
-from agent_core.llm_client import get_active_host
-from agent_core.llm_client import get_active_model
-from agent_core.llm_client import get_active_num_ctx
-from agent_core.llm_client import get_ollama_ps_rows
-from agent_core.llm_client import list_ollama_models
-from agent_core.orchestration import ConversationHistory
-from agent_core.orchestration import OrchestratorConfig
-from agent_core.orchestration import SessionContext
-from agent_core.orchestration import get_sandbox_enabled
-from agent_core.orchestration import get_web_skills_enabled
-from agent_core.orchestration import orchestrate_prompt
-from agent_core.orchestration import request_stop
-from agent_core.orchestration import set_sandbox_enabled
-from agent_core.orchestration import set_web_skills_enabled
-from agent_core.scratchpad import get_store as get_scratch_store
-from agent_core.scratchpad import scratch_clear
-from agent_core.scratchpad import scratch_save as scratch_restore_key
+from KoreAgent.llm_client import get_active_backend
+from KoreAgent.llm_client import get_active_host
+from KoreAgent.llm_client import get_active_model
+from KoreAgent.llm_client import get_active_num_ctx
+from KoreAgent.llm_client import get_ollama_ps_rows
+from KoreAgent.llm_client import list_ollama_models
+from KoreAgent.orchestration import ConversationHistory
+from KoreAgent.orchestration import OrchestratorConfig
+from KoreAgent.orchestration import SessionContext
+from KoreAgent.orchestration import get_sandbox_enabled
+from KoreAgent.orchestration import get_web_skills_enabled
+from KoreAgent.orchestration import orchestrate_prompt
+from KoreAgent.orchestration import request_stop
+from KoreAgent.orchestration import set_sandbox_enabled
+from KoreAgent.orchestration import set_web_skills_enabled
+from KoreAgent.scratchpad import get_store as get_scratch_store
+from KoreAgent.scratchpad import scratch_clear
+from KoreAgent.scratchpad import scratch_save as scratch_restore_key
 from input_layer.api_routes_logs import register_log_routes
 from input_layer.api_routes_sessions import register_session_routes
 from input_layer.api_routes_status import register_status_routes
@@ -104,6 +107,7 @@ from utils.workspace_utils import get_chatsessions_named_dir
 from utils.workspace_utils import get_logs_dir
 from utils.workspace_utils import get_test_prompts_dir
 from utils.version import __version__
+import KoreAgent.koreconv_client as _kc_client
 
 
 # ====================================================================================================
@@ -548,9 +552,9 @@ def _compact_old_turns(turns: list[dict], summaries: list[dict], batch_size: int
     Returns (remaining_turns, updated_summaries).  Returns inputs unchanged on any error
     (no model loaded, LLM failure) so the session is never corrupted by a failed compaction.
     """
-    from agent_core.llm_client import call_llm_chat
-    from agent_core.llm_client import get_active_model
-    from agent_core.llm_client import get_active_num_ctx
+    from KoreAgent.llm_client import call_llm_chat
+    from KoreAgent.llm_client import get_active_model
+    from KoreAgent.llm_client import get_active_num_ctx
 
     model   = get_active_model()
     num_ctx = get_active_num_ctx()
@@ -781,3 +785,134 @@ register_log_routes(
     log_subscribers=_log_subscribers,
     log_subscribers_lock=_log_subscribers_lock,
 )
+
+
+# ====================================================================================================
+# MARK: KORECONVERSATION PROXY ENDPOINTS
+# ====================================================================================================
+# These endpoints expose the KoreConversation service to the web UI so the browser
+# always talks to a single origin (port 8000). They proxy create/send/read operations
+# to the KC service at its own port.
+#
+# POST /kc/send   - create or find the KC conversation for a session, append an inbound
+#                   message, create a response_needed event.  Returns {conv_id, msg_id}.
+#                   The koreconv_input.py poll loop will then pick up the event.
+# GET  /kc/conversations/{conv_id}/messages - proxy the KC message list to the browser.
+
+_KC_TIMEOUT = 8
+
+
+def _kc_get(path: str) -> dict | list | None:
+    """Proxy a GET request to the KoreConversation service."""
+    base = _kc_client.get_base_url()
+    if not base:
+        raise HTTPException(status_code=503, detail="KoreConversation not configured")
+    url = f"{base}{path}"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=_KC_TIMEOUT) as resp:
+            if resp.status == 204:
+                return None
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=exc.code, detail=exc.read().decode("utf-8", errors="replace")[:200]) from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=503, detail=f"KoreConversation unreachable: {exc.reason}") from exc
+
+
+def _kc_post(path: str, payload: dict) -> dict | None:
+    """Proxy a POST request to the KoreConversation service."""
+    base = _kc_client.get_base_url()
+    if not base:
+        raise HTTPException(status_code=503, detail="KoreConversation not configured")
+    url  = f"{base}{path}"
+    body = json.dumps(payload).encode("utf-8")
+    req  = urllib.request.Request(
+        url,
+        data    = body,
+        headers = {"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_KC_TIMEOUT) as resp:
+            raw = resp.read().decode("utf-8").strip()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=exc.code, detail=exc.read().decode("utf-8", errors="replace")[:200]) from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=503, detail=f"KoreConversation unreachable: {exc.reason}") from exc
+
+
+class KcSendRequest(BaseModel):
+    session_id: str
+    content:    str
+
+
+@app.post("/kc/send", status_code=201)
+def kc_send(body: KcSendRequest):
+    """Append an inbound chat message to KoreConversation and create a response_needed event.
+
+    Finds or creates the KC conversation for the given session_id (mapped via external_id).
+    Returns {conv_id, msg_id} so the browser can poll for the outbound reply.
+    """
+    _validate_session_id(body.session_id)
+    content = (body.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content cannot be empty")
+
+    external_id = f"webchat_{body.session_id}"
+
+    # Find existing conversation by external_id; create if absent.
+    conv_id: int | None = None
+    try:
+        existing = _kc_get(f"/conversations/by-external-id/{urllib.parse.quote(external_id, safe='')}")
+        if isinstance(existing, dict) and existing.get("id"):
+            conv_id = int(existing["id"])
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+
+    if conv_id is None:
+        # Create a new webchat conversation tied to this session.
+        new_conv = _kc_post("/conversations", {
+            "channel_type": "webchat",
+            "subject":      f"Webchat {body.session_id}",
+            "external_id":  external_id,
+        })
+        if not new_conv:
+            raise HTTPException(status_code=502, detail="Failed to create KC conversation")
+        conv_id = new_conv["id"]
+
+    # Append inbound message.
+    msg = _kc_post(f"/conversations/{conv_id}/messages", {
+        "direction":      "inbound",
+        "content":        content,
+        "sender_display": body.session_id,
+        "status":         "received",
+    })
+    if not msg:
+        raise HTTPException(status_code=502, detail="Failed to append message to KC conversation")
+
+    # Create response_needed event.
+    _kc_post("/events", {
+        "conversation_id": conv_id,
+        "event_type":      "response_needed",
+        "priority":        0,
+        "payload":         {},
+    })
+
+    return {"conv_id": conv_id, "msg_id": msg.get("id")}
+
+
+@app.get("/kc/conversations/{conv_id}/messages")
+def kc_get_messages(conv_id: int, limit: int = 100):
+    """Proxy the message list for a KC conversation to the browser."""
+    return _kc_get(f"/conversations/{conv_id}/messages?limit={limit}") or []
+
+
+@app.get("/kc/conversations/{conv_id}")
+def kc_get_conversation(conv_id: int):
+    """Proxy a KC conversation record to the browser."""
+    result = _kc_get(f"/conversations/{conv_id}")
+    if result is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return result

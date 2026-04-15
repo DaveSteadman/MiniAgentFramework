@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # KoreComms input source for MiniAgentFramework.
@@ -46,9 +46,9 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from agent_core.orchestration import OrchestratorConfig
-from agent_core.orchestration import orchestrate_prompt
-from agent_core.run_helpers import make_task_session
+from KoreAgent.orchestration import OrchestratorConfig
+from KoreAgent.orchestration import orchestrate_prompt
+from KoreAgent.run_helpers import make_task_session
 from utils.runtime_logger import SessionLogger
 from utils.workspace_utils import get_workspace_root
 

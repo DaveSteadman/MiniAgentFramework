@@ -241,6 +241,12 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
 
 .header-spacer { flex: 1; }
 
+.nav-group {
+    display:    flex;
+    gap:        4px;
+    flex-shrink: 0;
+}
+
 .wrap-btn {
     background:      var(--bg-wrap-btn);
     border:          1px solid var(--border);

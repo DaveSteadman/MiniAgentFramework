@@ -1,4 +1,4 @@
-# MiniAgentFramework
+﻿# MiniAgentFramework
 
 Local-first agent framework for local LLMs.
 
@@ -301,7 +301,7 @@ The `TaskManagement` skill exposes the same operations as proper skill functions
 | `"update the DailyWeather prompt to ask about London"` | `task_set_prompt("DailyWeather", "...")` |
 | `"delete the OldTask task"` | `task_delete("OldTask")` |
 
-The skills catalog (`code/agent_core/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` is newer than the summary - so newly added skills are always available to the model without any manual step. Use `/reskill` to force a rebuild during an active session.
+The skills catalog (`code/KoreAgent/skills/skills_summary.md`) is rebuilt automatically at startup whenever any `skill.md` is newer than the summary - so newly added skills are always available to the model without any manual step. Use `/reskill` to force a rebuild during an active session.
 
 ### 3. Direct JSON editing
 
@@ -329,13 +329,13 @@ Each task lives in its own `controldata/schedules/task_<name>.json` file and can
 ### Inspect tool definitions
 Useful for debugging which tools are visible to the model and verifying that skill signatures are parsed correctly:
 ```powershell
-python .\code\agent_core\inspect_tools.py
-python .\code\agent_core\inspect_tools.py --output tool_definitions.json
+python .\code\KoreAgent\inspect_tools.py
+python .\code\KoreAgent\inspect_tools.py --output tool_definitions.json
 ```
 
 | Option | Default | Description |
 |---|---|---|
-| `--skills-summary PATH` | `code/agent_core/skills/skills_summary.md` | Path to the skills catalog file. |
+| `--skills-summary PATH` | `code/KoreAgent/skills/skills_summary.md` | Path to the skills catalog file. |
 | `--output PATH` | *(stdout)* | Optional path to write the JSON Schema tool definitions. Omit to print to stdout. |
 
 ### Monitor model server memory usage

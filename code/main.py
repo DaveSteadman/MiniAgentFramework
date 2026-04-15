@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # CLI entrypoint for MiniAgentFramework.
@@ -176,18 +176,19 @@ def _attach_child_to_kill_on_close_job(pid: int):
 
 _maybe_reexec_into_project_venv()
 
-import agent_core.llm_client as llm_client
+import KoreAgent.llm_client as llm_client
+import KoreAgent.koreconv_client as _koreconv_client
 from input_layer.api_mode import run_api_mode
-from agent_core.llm_client import format_running_model_report
-from agent_core.llm_client import get_llm_timeout
-from agent_core.llm_client import register_llm_call_logger
-from agent_core.orchestration import OrchestratorConfig
-from agent_core.orchestration import orchestrate_prompt
-from agent_core.orchestration import resolve_execution_model
-from agent_core.run_helpers import make_task_session
-from agent_core.scratchpad import scratch_clear
-from agent_core.skills_catalog_builder import load_skills_payload
-import agent_core.mcp_client as _mcp_client
+from KoreAgent.llm_client import format_running_model_report
+from KoreAgent.llm_client import get_llm_timeout
+from KoreAgent.llm_client import register_llm_call_logger
+from KoreAgent.orchestration import OrchestratorConfig
+from KoreAgent.orchestration import orchestrate_prompt
+from KoreAgent.orchestration import resolve_execution_model
+from KoreAgent.run_helpers import make_task_session
+from KoreAgent.scratchpad import scratch_clear
+from KoreAgent.skills_catalog_builder import load_skills_payload
+import KoreAgent.mcp_client as _mcp_client
 from utils.runtime_logger import create_log_file_path
 from utils.runtime_logger import SessionLogger
 from input_layer.slash_commands import SlashCommandContext
@@ -204,7 +205,7 @@ from utils.workspace_utils import get_user_data_dir
 # ====================================================================================================
 DEFAULT_NUM_CTX      = 131072
 MAX_ITERATIONS       = 25   # safety cap; model exits naturally via native tool calling
-SKILLS_CATALOG_PATH  = Path(__file__).resolve().parent / "agent_core" / "skills" / "skills_catalog.json"
+SKILLS_CATALOG_PATH  = Path(__file__).resolve().parent / "KoreAgent" / "skills" / "skills_catalog.json"
 LOG_DIR              = get_logs_dir()
 DEFAULTS_FILE        = get_bootstrap_defaults_file()
 
@@ -214,7 +215,7 @@ _DEFAULTS_KEYS = {"model", "ctx", "agentport", "llmhost"}
 # All valid keys in default.json - superset of _DEFAULTS_KEYS.
 # Keys here that are not in _DEFAULTS_KEYS are read directly by skills or slash commands
 # and are not passed through argparse.
-_KNOWN_KEYS = _DEFAULTS_KEYS | {"koredataurl", "korecommsurl", "korecomms_poll_secs", "ControlDataFolder", "UserDataFolder", "mcp_servers"}
+_KNOWN_KEYS = _DEFAULTS_KEYS | {"koreconvurl", "koredataurl", "korecommsurl", "korecomms_poll_secs", "ControlDataFolder", "UserDataFolder", "mcp_servers"}
 
 
 # ====================================================================================================
@@ -441,9 +442,8 @@ def _run(args, logger, log_path) -> None:
         _raw_defaults  = json.loads(DEFAULTS_FILE.read_text(encoding="utf-8")) if DEFAULTS_FILE.exists() else {}
     except Exception:
         _raw_defaults  = {}
-    _koredata_url  = str(_raw_defaults.get("koredataurl", "")).strip().rstrip("/")
-    _korecomms_url = str(_raw_defaults.get("korecommsurl", "")).strip().rstrip("/")
-    _kc_poll       = _raw_defaults.get("korecomms_poll_secs", 15)
+    _koreconv_url = str(_raw_defaults.get("koreconvurl", "")).strip().rstrip("/")
+    _koredata_url = str(_raw_defaults.get("koredataurl", "")).strip().rstrip("/")
 
     def _service_reachable(base_url: str) -> bool:
         try:
@@ -453,17 +453,22 @@ def _run(args, logger, log_path) -> None:
         except Exception:
             return False
 
+    # Start KoreConversation before status probe so it shows reachable.
+    _mcp_client.start(DEFAULTS_FILE)
+    _koreconv_client.start(DEFAULTS_FILE)
+
     if _koredata_url:
         _kd_ok = _service_reachable(_koredata_url)
         logger.log(f"KoreData:        {_koredata_url} {_tick if _kd_ok else _cross}")
     else:
         logger.log("KoreData:        (not configured)")
 
-    if _korecomms_url:
-        _kc_ok = _service_reachable(_korecomms_url)
-        logger.log(f"KoreComms:       {_korecomms_url}  poll={_kc_poll}s {_tick if _kc_ok else _cross}")
+    if _koreconv_url:
+        _kc_ok = _service_reachable(_koreconv_url)
+        logger.log(f"KoreConversation:{_koreconv_url} {_tick if _kc_ok else _cross}")
     else:
-        logger.log("KoreComms:       (not configured)")
+        logger.log("KoreConversation:(not configured)")
+
     sequence_file_path = Path(os.environ["CHAT_SEQUENCE_FILE"]) if os.environ.get("CHAT_SEQUENCE_FILE") else None
     mode_label = (
         f"chat-sequence:{sequence_file_path.name}" if sequence_file_path else
@@ -480,13 +485,15 @@ def _run(args, logger, log_path) -> None:
     logger.log(f"Log file:        {log_path.as_posix()}")
 
     if sequence_file_path:
+        _koreconv_client.stop()
+        _mcp_client.stop()
         run_chat_sequence_mode(sequence_file=sequence_file_path, config=config, logger=logger, log_path=log_path)
         return
 
-    _mcp_client.start(DEFAULTS_FILE)
     try:
         run_api_mode(config=config, logger=logger, log_path=log_path, host="0.0.0.0", port=args.agentport)
     finally:
+        _koreconv_client.stop()
         _mcp_client.stop()
 
 

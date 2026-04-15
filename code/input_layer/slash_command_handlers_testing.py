@@ -1,10 +1,10 @@
-import csv
+﻿import csv
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from agent_core.llm_client import get_active_host
+from KoreAgent.llm_client import get_active_host
 from input_layer.slash_command_context import SlashCommandContext
 from utils.workspace_utils import get_test_prompts_dir
 from utils.workspace_utils import get_test_results_dir
@@ -39,7 +39,7 @@ def _run_one_test_file(candidate, ctx, wrapper, model: str, active_host: str, re
         watcher_done = [False]
 
         def _watch(_proc=proc) -> None:
-            from agent_core.orchestration import is_stop_requested
+            from KoreAgent.orchestration import is_stop_requested
 
             while not watcher_done[0]:
                 if is_stop_requested():

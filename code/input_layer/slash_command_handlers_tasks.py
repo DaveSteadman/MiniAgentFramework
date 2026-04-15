@@ -1,8 +1,8 @@
-import json
+﻿import json
 import re
 from typing import Callable
 
-from agent_core.run_helpers import run_prompt_batch
+from KoreAgent.run_helpers import run_prompt_batch
 from input_layer.slash_command_context import SlashCommandContext
 from utils.workspace_utils import get_schedules_dir
 from utils.workspace_utils import trunc

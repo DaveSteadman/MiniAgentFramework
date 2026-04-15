@@ -1,4 +1,4 @@
-# MiniAgentFramework - Developer Notes
+﻿# MiniAgentFramework - Developer Notes
 
 ![MiniAgentFramework](progress/readme_dev_header.png)
 
@@ -16,7 +16,7 @@ MiniAgentFramework is a tool-calling Ollama agent with three big layers:
 2. Control plane
    `code/input_layer/` owns the browser UI, FastAPI routes, SSE streams, slash commands, session switching, history, and queue-facing endpoints.
 3. Agent runtime
-   `code/agent_core/` owns orchestration, tool execution, scratchpad, memory, skills catalog loading, and delegation.
+   `code/KoreAgent/` owns orchestration, tool execution, scratchpad, memory, skills catalog loading, and delegation.
 
 The scheduler is parallel to the input layer: it queues background prompts into the same orchestration runtime used by the UI.
 
@@ -125,7 +125,7 @@ Parent tool loop
 ```text
 code/
   main.py
-  agent_core/
+  KoreAgent/
     orchestration.py
     context_manager.py
     prompt_builder.py
@@ -164,11 +164,11 @@ code/
 - Entry point.
 - Loads `default.json` (repo root).
 - Resolves model and host.
-- Loads `code/agent_core/skills/skills_catalog.json`.
+- Loads `code/KoreAgent/skills/skills_catalog.json`.
 - Starts API mode via `input_layer/api_mode.py`.
 - Also supports internal chat-sequence mode used by the test wrapper.
 
-### `code/agent_core/orchestration.py`
+### `code/KoreAgent/orchestration.py`
 
 - Public coordination layer.
 - Still exposes the stable public runtime API:
@@ -179,7 +179,7 @@ code/
   - `delegate_subrun(...)`
 - Delegates most heavy runtime work to the extracted modules below.
 
-### `code/agent_core/prompt_builder.py`
+### `code/KoreAgent/prompt_builder.py`
 
 - Builds the full system prompt.
 - Merges:
@@ -191,7 +191,7 @@ code/
   - scratchpad key visibility
   - sandbox status
 
-### `code/agent_core/tool_loop.py`
+### `code/KoreAgent/tool_loop.py`
 
 - Owns the round-by-round tool-calling loop.
 - Responsibilities:
@@ -203,7 +203,7 @@ code/
   - strip planning preamble from model output
   - optionally write `WRITE_FILE` blocks to disk
 
-### `code/agent_core/context_manager.py`
+### `code/KoreAgent/context_manager.py`
 
 - Owns per-run context-map helpers.
 - Responsibilities:
@@ -221,7 +221,7 @@ The context map is the runtime’s internal “what is in context right now?” 
 - optional `auto_key`
 - optional `compacted`
 
-### `code/agent_core/delegate_runner.py`
+### `code/KoreAgent/delegate_runner.py`
 
 - Owns delegate runtime state and child-run execution.
 - Keeps a thread-local delegate runtime context:
@@ -233,12 +233,12 @@ The context map is the runtime’s internal “what is in context right now?” 
   - child iteration cap
   - optional delegate removal from the child toolset
 
-### `code/agent_core/session_runtime.py`
+### `code/KoreAgent/session_runtime.py`
 
 - Session binding based on `ContextVar`.
 - This is what lets the scratchpad and related runtime pieces know which session is active inside a given orchestration run.
 
-### `code/agent_core/run_helpers.py`
+### `code/KoreAgent/run_helpers.py`
 
 - Shared helpers for multi-prompt runs.
 - Used by scheduled tasks and test-ish batch flows.
@@ -246,7 +246,7 @@ The context map is the runtime’s internal “what is in context right now?” 
   - `make_task_session(...)`
   - `run_prompt_batch(...)`
 
-### `code/agent_core/tool_result.py`
+### `code/KoreAgent/tool_result.py`
 
 - Structured result object for tool execution.
 - This replaced stringly-typed “error result” handling in the runtime and is one of the main pieces that made the orchestration split safer.
@@ -255,21 +255,21 @@ The context map is the runtime’s internal “what is in context right now?” 
 
 ## Tool Execution
 
-### `code/agent_core/skill_executor.py`
+### `code/KoreAgent/skill_executor.py`
 
 - Executes individual tool calls selected by the LLM.
 - Builds catalog gates from the loaded skills payload.
 - Resolves prompt tokens and tool arguments.
 - Dynamically imports the approved skill function and returns a `ToolCallResult`.
 
-### `code/agent_core/skills_catalog_builder.py`
+### `code/KoreAgent/skills_catalog_builder.py`
 
 - Reads skill metadata and produces:
   - `skills_catalog.json` for runtime
   - `skills_summary.md` for human inspection
 - `build_tool_definitions(...)` converts the loaded catalog into JSON Schema tool definitions for Ollama tool-calling.
 
-### `code/agent_core/skills/`
+### `code/KoreAgent/skills/`
 
 - Each skill folder contains a `skill.md` and usually a Python module.
 - Runtime source of truth is now the generated JSON catalog, not `skills_summary.md`.
@@ -284,7 +284,7 @@ Key built-in skill families:
 
 ## Scratchpad and Memory
 
-### `code/agent_core/scratchpad.py`
+### `code/KoreAgent/scratchpad.py`
 
 - Session-scoped in-process store.
 - Important: this is no longer one process-global flat store.
@@ -294,7 +294,7 @@ Key built-in skill families:
   - intermediate state between tools
   - explicit user-controlled scratch storage
 
-### `code/agent_core/skills/Memory/`
+### `code/KoreAgent/skills/Memory/`
 
 - Durable long-lived fact storage.
 - Persists to `controldata/memory_store.json`.
@@ -431,10 +431,10 @@ If you are coming back to the code after a refactor, this order should rebuild t
 2. [code/input_layer/api.py](code/input_layer/api.py)
 3. [code/input_layer/api_routes_sessions.py](code/input_layer/api_routes_sessions.py)
 4. [code/input_layer/slash_commands.py](code/input_layer/slash_commands.py)
-5. [code/agent_core/orchestration.py](code/agent_core/orchestration.py)
-6. [code/agent_core/prompt_builder.py](code/agent_core/prompt_builder.py)
-7. [code/agent_core/tool_loop.py](code/agent_core/tool_loop.py)
-8. [code/agent_core/context_manager.py](code/agent_core/context_manager.py)
-9. [code/agent_core/delegate_runner.py](code/agent_core/delegate_runner.py)
-10. [code/agent_core/skill_executor.py](code/agent_core/skill_executor.py)
+5. [code/KoreAgent/orchestration.py](code/KoreAgent/orchestration.py)
+6. [code/KoreAgent/prompt_builder.py](code/KoreAgent/prompt_builder.py)
+7. [code/KoreAgent/tool_loop.py](code/KoreAgent/tool_loop.py)
+8. [code/KoreAgent/context_manager.py](code/KoreAgent/context_manager.py)
+9. [code/KoreAgent/delegate_runner.py](code/KoreAgent/delegate_runner.py)
+10. [code/KoreAgent/skill_executor.py](code/KoreAgent/skill_executor.py)
 

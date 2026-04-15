@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # Diagnostic utility for monitoring memory usage while running Ollama model prompts.
@@ -31,11 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import psutil
 
-from agent_core.llm_client import call_ollama
-from agent_core.llm_client import ensure_ollama_running
-from agent_core.llm_client import format_running_model_report
-from agent_core.llm_client import list_ollama_models
-from agent_core.llm_client import resolve_model_name
+from KoreAgent.llm_client import call_ollama
+from KoreAgent.llm_client import ensure_ollama_running
+from KoreAgent.llm_client import format_running_model_report
+from KoreAgent.llm_client import list_ollama_models
+from KoreAgent.llm_client import resolve_model_name
 from utils.workspace_utils import trunc
 
 

@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,27 +12,27 @@ CODE_DIR = REPO_ROOT / "code"
 if str(CODE_DIR) not in sys.path:
     sys.path.insert(0, str(CODE_DIR))
 
-from agent_core.skill_executor import execute_tool_call
-from agent_core.orchestration import _delegate_tls
-from agent_core.orchestration import delegate_subrun
-from agent_core.orchestration import OrchestratorConfig
-from agent_core.prompt_builder import build_system_message
-from agent_core.scratchpad import scratch_clear
-from agent_core.scratchpad import scratch_load
-from agent_core.scratchpad import scratch_query
-from agent_core.scratchpad import scratch_save
-from agent_core.session_runtime import bind_session
-from agent_core.skills_catalog_builder import build_tool_definitions
-from agent_core.skills_catalog_builder import load_skills_payload
-from agent_core.skills.FileAccess import file_access_skill as file_access_module
-from agent_core.skills.FileAccess.file_access_skill import file_write
-from agent_core.skills.FileAccess.file_access_skill import file_read
-from agent_core.skills.FileAccess.file_access_skill import folder_create
-from agent_core.skills.WebFetch.web_fetch_skill import fetch_page_text
-from agent_core.skills.WebSearch.web_search_skill import search_web
-from agent_core.skills.WebResearch.web_research_skill import research_traverse
-from agent_core.skills.SystemInfo.system_info_skill import get_system_info_string
-from agent_core.tool_loop import normalize_tool_request
+from KoreAgent.skill_executor import execute_tool_call
+from KoreAgent.orchestration import _delegate_tls
+from KoreAgent.orchestration import delegate_subrun
+from KoreAgent.orchestration import OrchestratorConfig
+from KoreAgent.prompt_builder import build_system_message
+from KoreAgent.scratchpad import scratch_clear
+from KoreAgent.scratchpad import scratch_load
+from KoreAgent.scratchpad import scratch_query
+from KoreAgent.scratchpad import scratch_save
+from KoreAgent.session_runtime import bind_session
+from KoreAgent.skills_catalog_builder import build_tool_definitions
+from KoreAgent.skills_catalog_builder import load_skills_payload
+from KoreAgent.skills.FileAccess import file_access_skill as file_access_module
+from KoreAgent.skills.FileAccess.file_access_skill import file_write
+from KoreAgent.skills.FileAccess.file_access_skill import file_read
+from KoreAgent.skills.FileAccess.file_access_skill import folder_create
+from KoreAgent.skills.WebFetch.web_fetch_skill import fetch_page_text
+from KoreAgent.skills.WebSearch.web_search_skill import search_web
+from KoreAgent.skills.WebResearch.web_research_skill import research_traverse
+from KoreAgent.skills.SystemInfo.system_info_skill import get_system_info_string
+from KoreAgent.tool_loop import normalize_tool_request
 from input_layer import api as api_module
 from testing import test_wrapper as test_wrapper_module
 from utils import workspace_utils as workspace_utils_module
@@ -41,7 +41,7 @@ from utils.workspace_utils import get_user_data_dir
 
 class RegressionTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.skills_payload = load_skills_payload(CODE_DIR / "agent_core" / "skills" / "skills_catalog.json")
+        self.skills_payload = load_skills_payload(CODE_DIR / "KoreAgent" / "skills" / "skills_catalog.json")
         scratch_clear()
 
     def tearDown(self) -> None:
@@ -171,12 +171,12 @@ class RegressionTests(unittest.TestCase):
             "Another paragraph with enough words to survive extraction and keep the page useful."
         )
 
-        with patch("agent_core.skills.WebFetch.web_fetch_skill._fetch_html", return_value=(html_text, "https://www.bbc.co.uk/news")):
-            with patch("agent_core.skills.WebFetch.web_fetch_skill._extract_content", return_value=("BBC News", body_text)):
-                with patch("agent_core.skills.WebFetch.web_fetch_skill._get_active_model", return_value="gpt-oss:20b"):
-                    with patch("agent_core.skills.WebFetch.web_fetch_skill._get_active_num_ctx", return_value=131072):
+        with patch("KoreAgent.skills.WebFetch.web_fetch_skill._fetch_html", return_value=(html_text, "https://www.bbc.co.uk/news")):
+            with patch("KoreAgent.skills.WebFetch.web_fetch_skill._extract_content", return_value=("BBC News", body_text)):
+                with patch("KoreAgent.skills.WebFetch.web_fetch_skill._get_active_model", return_value="gpt-oss:20b"):
+                    with patch("KoreAgent.skills.WebFetch.web_fetch_skill._get_active_num_ctx", return_value=131072):
                         with patch(
-                            "agent_core.skills.WebFetch.web_fetch_skill._call_llm_chat",
+                            "KoreAgent.skills.WebFetch.web_fetch_skill._call_llm_chat",
                             return_value=SimpleNamespace(response="Not found on this page."),
                         ):
                             result = fetch_page_text(
@@ -195,12 +195,12 @@ class RegressionTests(unittest.TestCase):
         html_text = "<html><body>unused</body></html>"
         long_body = " ".join(f"word{i}" for i in range(3000))
 
-        with patch("agent_core.skills.WebFetch.web_fetch_skill._fetch_html", return_value=(html_text, "https://example.com/stats")):
-            with patch("agent_core.skills.WebFetch.web_fetch_skill._extract_content", return_value=("Stats Page", long_body)):
-                with patch("agent_core.skills.WebFetch.web_fetch_skill._get_active_model", return_value="gpt-oss:20b"):
-                    with patch("agent_core.skills.WebFetch.web_fetch_skill._get_active_num_ctx", return_value=131072):
+        with patch("KoreAgent.skills.WebFetch.web_fetch_skill._fetch_html", return_value=(html_text, "https://example.com/stats")):
+            with patch("KoreAgent.skills.WebFetch.web_fetch_skill._extract_content", return_value=("Stats Page", long_body)):
+                with patch("KoreAgent.skills.WebFetch.web_fetch_skill._get_active_model", return_value="gpt-oss:20b"):
+                    with patch("KoreAgent.skills.WebFetch.web_fetch_skill._get_active_num_ctx", return_value=131072):
                         with patch(
-                            "agent_core.skills.WebFetch.web_fetch_skill._call_llm_chat",
+                            "KoreAgent.skills.WebFetch.web_fetch_skill._call_llm_chat",
                             return_value=SimpleNamespace(response="Not found on this page."),
                         ):
                             result = fetch_page_text(
@@ -288,7 +288,7 @@ class RegressionTests(unittest.TestCase):
             return ("ok", 0, 0, True, 0.0)
 
         try:
-            with patch("agent_core.orchestration.orchestrate_prompt", side_effect=fake_orchestrate_prompt):
+            with patch("KoreAgent.orchestration.orchestrate_prompt", side_effect=fake_orchestrate_prompt):
                 first = delegate_subrun("first child")
                 second = delegate_subrun("second child")
         finally:
@@ -326,7 +326,7 @@ class RegressionTests(unittest.TestCase):
 
         try:
             with bind_session("parent_session"):
-                with patch("agent_core.orchestration.orchestrate_prompt", side_effect=fake_orchestrate_prompt):
+                with patch("KoreAgent.orchestration.orchestrate_prompt", side_effect=fake_orchestrate_prompt):
                     result = delegate_subrun("child task", scratchpad_visible_keys=["saved_key"])
         finally:
             _delegate_tls.logger = previous_logger
@@ -344,8 +344,8 @@ class RegressionTests(unittest.TestCase):
             "<td class='result-snippet'>Detailed article page.</td>",
         ])
 
-        with patch("agent_core.skills.WebSearch.web_search_skill._fetch_html", return_value=(html_text, "https://lite.duckduckgo.com/lite/?q=ai")):
-            with patch("agent_core.skills.WebSearch.web_search_skill.time.sleep", return_value=None):
+        with patch("KoreAgent.skills.WebSearch.web_search_skill._fetch_html", return_value=(html_text, "https://lite.duckduckgo.com/lite/?q=ai")):
+            with patch("KoreAgent.skills.WebSearch.web_search_skill.time.sleep", return_value=None):
                 default_results = search_web(query="recent AI news", max_results=2, timeout_seconds=10)
                 article_results = search_web(query="recent AI news", max_results=2, timeout_seconds=10, prefer_article_urls=True)
 
@@ -362,8 +362,8 @@ class RegressionTests(unittest.TestCase):
             '<td class="result-snippet">Hub page for AI coverage.</td>',
         ])
 
-        with patch("agent_core.skills.WebSearch.web_search_skill._fetch_html", return_value=(html_text, "https://lite.duckduckgo.com/lite/?q=ai")):
-            with patch("agent_core.skills.WebSearch.web_search_skill.time.sleep", return_value=None):
+        with patch("KoreAgent.skills.WebSearch.web_search_skill._fetch_html", return_value=(html_text, "https://lite.duckduckgo.com/lite/?q=ai")):
+            with patch("KoreAgent.skills.WebSearch.web_search_skill.time.sleep", return_value=None):
                 results = search_web(query="recent AI news", max_results=2, timeout_seconds=10)
 
         self.assertEqual(len(results), 2)
@@ -384,11 +384,11 @@ class RegressionTests(unittest.TestCase):
         html_text = "<html><body><p>unused</p></body></html>"
         body_text = "Williams won at Imola in 1981 and 1982."
 
-        with patch("agent_core.skills.WebResearch.web_research_skill.search_web", return_value=search_results):
-            with patch("agent_core.skills.WebResearch.web_research_skill._fetch_html", return_value=(html_text, "https://example.com/results")):
-                with patch("agent_core.skills.WebResearch.web_research_skill._extract_content", return_value=("Example Results", body_text)):
-                    with patch("agent_core.skills.WebResearch.web_research_skill._extract_urls_from_html", return_value=[]):
-                        with patch("agent_core.skills.WebResearch.web_research_skill._llm_reextract_evidence", return_value=["Williams won at Imola in 1981 and 1982."]):
+        with patch("KoreAgent.skills.WebResearch.web_research_skill.search_web", return_value=search_results):
+            with patch("KoreAgent.skills.WebResearch.web_research_skill._fetch_html", return_value=(html_text, "https://example.com/results")):
+                with patch("KoreAgent.skills.WebResearch.web_research_skill._extract_content", return_value=("Example Results", body_text)):
+                    with patch("KoreAgent.skills.WebResearch.web_research_skill._extract_urls_from_html", return_value=[]):
+                        with patch("KoreAgent.skills.WebResearch.web_research_skill._llm_reextract_evidence", return_value=["Williams won at Imola in 1981 and 1982."]):
                             result = research_traverse("Williams Imola wins", max_pages=1, max_search_results=1)
 
         self.assertEqual(result["visited_count"], 1)
@@ -437,7 +437,7 @@ class RegressionTests(unittest.TestCase):
         )
         scratch_save("search_block", search_results)
 
-        with patch("agent_core.llm_client.call_llm_chat") as llm_call:
+        with patch("KoreAgent.llm_client.call_llm_chat") as llm_call:
             result = scratch_query("search_block", "list all the Williams F1 team wins at Imola")
 
         self.assertEqual(result, "Not found in content.")
@@ -446,10 +446,10 @@ class RegressionTests(unittest.TestCase):
     def test_scratch_query_prompt_forbids_outside_knowledge(self) -> None:
         scratch_save("race_rows", "1992 Ayrton Senna\n1993 Ayrton Senna")
 
-        with patch("agent_core.llm_client.get_active_model", return_value="gpt-oss:20b"):
-            with patch("agent_core.llm_client.get_active_num_ctx", return_value=131072):
+        with patch("KoreAgent.llm_client.get_active_model", return_value="gpt-oss:20b"):
+            with patch("KoreAgent.llm_client.get_active_num_ctx", return_value=131072):
                 with patch(
-                    "agent_core.llm_client.call_llm_chat",
+                    "KoreAgent.llm_client.call_llm_chat",
                     return_value=SimpleNamespace(response="1992 Ayrton Senna\n1993 Ayrton Senna"),
                 ) as llm_call:
                     result = scratch_query("race_rows", "list all rows")

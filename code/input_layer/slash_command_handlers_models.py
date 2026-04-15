@@ -1,18 +1,18 @@
-import json
+﻿import json
 import urllib.request
 from typing import Callable
 
-from agent_core.llm_client import configure_host
-from agent_core.llm_client import configure_server
-from agent_core.llm_client import get_active_backend
-from agent_core.llm_client import get_active_host
-from agent_core.llm_client import get_active_num_ctx
-from agent_core.llm_client import get_ollama_ps_rows
-from agent_core.llm_client import is_explicit_model_name
-from agent_core.llm_client import list_ollama_models
-from agent_core.llm_client import register_session_config
-from agent_core.llm_client import resolve_model_name
-from agent_core.llm_client import stop_model
+from KoreAgent.llm_client import configure_host
+from KoreAgent.llm_client import configure_server
+from KoreAgent.llm_client import get_active_backend
+from KoreAgent.llm_client import get_active_host
+from KoreAgent.llm_client import get_active_num_ctx
+from KoreAgent.llm_client import get_ollama_ps_rows
+from KoreAgent.llm_client import is_explicit_model_name
+from KoreAgent.llm_client import list_ollama_models
+from KoreAgent.llm_client import register_session_config
+from KoreAgent.llm_client import resolve_model_name
+from KoreAgent.llm_client import stop_model
 from input_layer.slash_command_context import SlashCommandContext
 from utils.workspace_utils import get_bootstrap_defaults_file
 

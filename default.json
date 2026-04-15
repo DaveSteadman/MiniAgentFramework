@@ -5,6 +5,7 @@
   "agentport": 8000,
   "ControlDataFolder": "datacontrol",
   "UserDataFolder": "datauser",
+  "koreconvurl": "http://localhost:8700",
   "koredataurl": "http://localhost:8800",
   "korecommsurl": "http://localhost:8900",
   "korecomms_poll_secs": 15,
