@@ -230,6 +230,85 @@ function renderScratchpad(scratchpad) {
 // ====================================================================================================
 // MESSAGES
 // ====================================================================================================
+// COMPOSE
+// ====================================================================================================
+
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("compose-text").addEventListener("keydown", e => {
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+});
+
+async function sendMessage() {
+    if (_selectedId === null) return;
+    const input  = document.getElementById("compose-text");
+    const dirSel = document.getElementById("compose-direction");
+    const btn    = document.getElementById("compose-btn");
+
+    const text = input.value.trim();
+    if (!text) return;
+
+    input.disabled = true;
+    btn.disabled   = true;
+
+    try {
+        const resp = await fetch(`/conversations/${_selectedId}/messages`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({
+                direction:      dirSel.value,
+                content:        text,
+                sender_display: "debug-ui",
+            }),
+        });
+        if (!resp.ok) {
+            const err = await resp.text();
+            console.error("sendMessage failed:", resp.status, err);
+            return;
+        }
+        input.value = "";
+        await refreshAll();
+    } catch (e) {
+        console.error("sendMessage:", e);
+    } finally {
+        input.disabled = false;
+        btn.disabled   = false;
+        input.focus();
+    }
+}
+
+async function deleteConversation() {
+    if (_selectedId === null) return;
+
+    const id  = _selectedId;
+    const btn = document.getElementById("delete-conv-btn");
+    const ok  = window.confirm(
+        `Delete conversation #${id}?\n\nThis marks the conversation as deleted and keeps its history for inspection.`
+    );
+    if (!ok) return;
+
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/conversations/${id}`, { method: "DELETE" });
+        if (!resp.ok) {
+            const err = await resp.text();
+            throw new Error(`HTTP ${resp.status}: ${err}`);
+        }
+
+        _selectedId = null;
+        localStorage.removeItem("kc_selected_id");
+        document.getElementById("detail").hidden = true;
+        document.getElementById("detail-empty").hidden = false;
+        await loadConversations();
+    } catch (e) {
+        console.error("deleteConversation:", e);
+        window.alert(`Delete failed: ${e.message}`);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// ====================================================================================================
 
 async function reloadMessages() {
     if (_selectedId === null) return;

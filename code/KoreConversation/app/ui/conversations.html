@@ -83,6 +83,8 @@
                 <section class="section" id="sec-meta">
                     <div class="section-header">
                         <span class="section-icon">i</span> Metadata
+                        <div class="flex-gap"></div>
+                        <button id="delete-conv-btn" class="section-btn section-btn-danger" onclick="deleteConversation()">delete</button>
                     </div>
                     <table id="meta-table" class="kv-table"></table>
                 </section>
@@ -112,6 +114,21 @@
                         <span class="empty-badge" id="scratchpad-empty">(empty)</span>
                     </div>
                     <table id="scratchpad-table" class="kv-table"></table>
+                </section>
+
+                <!-- Send message -->
+                <section class="section" id="sec-compose">
+                    <div class="section-header">
+                        <span class="section-icon">+</span> Send Inbound Message
+                    </div>
+                    <div id="compose-row">
+                        <select id="compose-direction">
+                            <option value="inbound">inbound</option>
+                            <option value="outbound">outbound</option>
+                        </select>
+                        <input type="text" id="compose-text" placeholder="Type a message and press Enter or Send..." autocomplete="off">
+                        <button id="compose-btn" onclick="sendMessage()">send</button>
+                    </div>
                 </section>
 
                 <!-- Messages -->

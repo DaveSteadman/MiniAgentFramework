@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # Memory skill module for the MiniAgentFramework.
@@ -28,7 +28,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from utils.workspace_utils import get_controldata_dir
+from KoreAgent.utils.workspace_utils import get_controldata_dir
 
 
 # ====================================================================================================

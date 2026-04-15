@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # Shared state and OpenAI-compatible core for the llm_client_*.py sub-modules.
@@ -30,7 +30,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from utils.workspace_utils import trunc
+from KoreAgent.utils.workspace_utils import trunc
 
 
 # ====================================================================================================

@@ -23,7 +23,6 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Query
 from fastapi.responses import FileResponse
-from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -186,7 +185,7 @@ def delete_conversation(conversation_id: int):
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     db.conversation_delete(conversation_id)
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 # ====================================================================================================
@@ -253,13 +252,21 @@ def append_message(conversation_id: int, req: MessageAppendRequest):
     conv = db.conversation_get(conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return db.message_append(
+    msg = db.message_append(
         conversation_id = conversation_id,
         direction       = req.direction,
         content         = req.content,
         sender_display  = req.sender_display,
         status          = req.status,
     )
+    # Inbound messages need an agent response - create the event so the agent picks it up.
+    if req.direction == "inbound":
+        db.event_create(
+            conversation_id = conversation_id,
+            event_type      = "response_needed",
+            priority        = 0,
+        )
+    return msg
 
 
 # ----------------------------------------------------------------------------------------------------

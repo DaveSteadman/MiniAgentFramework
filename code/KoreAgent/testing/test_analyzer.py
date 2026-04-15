@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # Test results analyzer for MiniAgentFramework.
@@ -36,9 +36,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT / "code"))
-from utils.workspace_utils import trunc  # noqa: E402
+from KoreAgent.utils.workspace_utils import trunc  # noqa: E402
 
 
 # ====================================================================================================

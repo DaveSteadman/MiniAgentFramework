@@ -49,8 +49,8 @@ def get_workspace_root() -> Path:
     Cached after first call so repeated lookups cost nothing - the root cannot change within
     a single process lifetime.
     """
-    # This file lives at <repo_root>/code/utils/workspace_utils.py
-    return Path(__file__).resolve().parents[2]
+    # This file lives at <repo_root>/code/KoreAgent/utils/workspace_utils.py
+    return Path(__file__).resolve().parents[3]
 
 
 # ====================================================================================================

@@ -7,8 +7,8 @@ from KoreAgent.context_manager import assess_compact
 from KoreAgent.scratchpad import scratch_save as scratch_auto_save
 from KoreAgent.skill_executor import execute_tool_call
 from KoreAgent.tool_result import ToolCallResult
-from utils.workspace_utils import get_workspace_root
-from utils.workspace_utils import trunc
+from KoreAgent.utils.workspace_utils import get_workspace_root
+from KoreAgent.utils.workspace_utils import trunc
 
 
 # Cap for tool result content in messages; longer content is auto-saved to scratchpad and truncated in the message with a reference note

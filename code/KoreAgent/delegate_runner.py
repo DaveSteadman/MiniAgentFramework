@@ -3,7 +3,7 @@ import threading
 
 from KoreAgent.scratchpad import scratch_save as scratch_auto_save
 from KoreAgent.session_runtime import get_active_session_id
-from utils.workspace_utils import trunc
+from KoreAgent.utils.workspace_utils import trunc
 
 
 _delegate_tls: threading.local = threading.local()

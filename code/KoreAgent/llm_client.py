@@ -59,7 +59,7 @@ from KoreAgent.llm_client_ollama  import call_ollama_extended
 from KoreAgent.llm_client_ollama  import call_ollama
 from KoreAgent.llm_client_ollama  import get_ollama_ps_rows
 from KoreAgent.llm_client_ollama  import get_running_model_row
-from utils.workspace_utils         import trunc
+from KoreAgent.utils.workspace_utils         import trunc
 
 
 # ====================================================================================================

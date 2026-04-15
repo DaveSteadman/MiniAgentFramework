@@ -13,8 +13,8 @@ from KoreAgent.llm_client import list_ollama_models
 from KoreAgent.llm_client import register_session_config
 from KoreAgent.llm_client import resolve_model_name
 from KoreAgent.llm_client import stop_model
-from input_layer.slash_command_context import SlashCommandContext
-from utils.workspace_utils import get_bootstrap_defaults_file
+from KoreAgent.input_layer.slash_command_context import SlashCommandContext
+from KoreAgent.utils.workspace_utils import get_bootstrap_defaults_file
 
 
 def _cmd_llmserverconfig(arg: str, ctx: SlashCommandContext) -> None:

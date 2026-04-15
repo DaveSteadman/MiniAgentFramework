@@ -174,7 +174,7 @@ class TaskQueue:
     # ----------------------------------------------------------------------------------------------------
     def _delete_state(self) -> None:
         try:
-            from utils.workspace_utils import get_controldata_dir
+            from KoreAgent.utils.workspace_utils import get_controldata_dir
             path = get_controldata_dir() / "task_queue.json"
             path.unlink(missing_ok=True)
         except Exception:
@@ -183,7 +183,7 @@ class TaskQueue:
     # ----------------------------------------------------------------------------------------------------
     def _write_state(self) -> None:
         try:
-            from utils.workspace_utils import get_controldata_dir
+            from KoreAgent.utils.workspace_utils import get_controldata_dir
             path = get_controldata_dir() / "task_queue.json"
             path.write_text(
                 json.dumps(self.get_state(), indent=2),

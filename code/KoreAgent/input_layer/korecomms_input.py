@@ -49,8 +49,8 @@ from pathlib import Path
 from KoreAgent.orchestration import OrchestratorConfig
 from KoreAgent.orchestration import orchestrate_prompt
 from KoreAgent.run_helpers import make_task_session
-from utils.runtime_logger import SessionLogger
-from utils.workspace_utils import get_workspace_root
+from KoreAgent.utils.runtime_logger import SessionLogger
+from KoreAgent.utils.workspace_utils import get_workspace_root
 
 
 # ====================================================================================================
@@ -263,7 +263,7 @@ def _handle_message(
         history, summaries = load_session(session_id)
 
         # Build the context objects for orchestration.
-        from utils.workspace_utils import get_chatsessions_day_dir
+        from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
         persist_path = get_chatsessions_day_dir() / f"{session_id}.json"
         _, session_ctx = make_task_session(
             session_id   = session_id,

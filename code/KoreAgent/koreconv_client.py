@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # Sidecar lifecycle manager for KoreConversation.
@@ -28,7 +28,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from utils.workspace_utils import get_workspace_root
+from KoreAgent.utils.workspace_utils import get_workspace_root
 
 
 # ====================================================================================================

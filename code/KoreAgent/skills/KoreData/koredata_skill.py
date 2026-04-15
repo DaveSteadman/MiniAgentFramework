@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # KoreData skill for the MiniAgentFramework.
@@ -40,7 +40,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from utils.workspace_utils import get_workspace_root
+from KoreAgent.utils.workspace_utils import get_workspace_root
 
 
 # ====================================================================================================

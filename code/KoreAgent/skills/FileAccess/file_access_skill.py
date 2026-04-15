@@ -20,8 +20,8 @@
 import json
 from pathlib import Path
 
-from utils.workspace_utils import get_user_data_dir
-from utils.workspace_utils import get_workspace_root
+from KoreAgent.utils.workspace_utils import get_user_data_dir
+from KoreAgent.utils.workspace_utils import get_workspace_root
 
 
 # ====================================================================================================

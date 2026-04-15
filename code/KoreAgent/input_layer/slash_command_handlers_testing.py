@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Callable
 
 from KoreAgent.llm_client import get_active_host
-from input_layer.slash_command_context import SlashCommandContext
-from utils.workspace_utils import get_test_prompts_dir
-from utils.workspace_utils import get_test_results_dir
+from KoreAgent.input_layer.slash_command_context import SlashCommandContext
+from KoreAgent.utils.workspace_utils import get_test_prompts_dir
+from KoreAgent.utils.workspace_utils import get_test_results_dir
 
 
 def _run_one_test_file(candidate, ctx, wrapper, model: str, active_host: str, re_mod, subprocess_mod, sys_mod, output_file=None) -> dict:

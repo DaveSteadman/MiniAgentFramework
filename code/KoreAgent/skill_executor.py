@@ -25,8 +25,8 @@ import sys
 import KoreAgent.mcp_client as _mcp_client
 from KoreAgent.prompt_tokens import resolve_tokens
 from KoreAgent.tool_result import ToolCallResult
-from utils.workspace_utils import get_workspace_root
-from utils.workspace_utils import normalize_module_path
+from KoreAgent.utils.workspace_utils import get_workspace_root
+from KoreAgent.utils.workspace_utils import normalize_module_path
 
 
 # ====================================================================================================

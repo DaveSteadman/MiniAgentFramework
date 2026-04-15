@@ -37,8 +37,8 @@ from pathlib import Path
 
 from KoreAgent.llm_client import call_ollama
 from KoreAgent.llm_client import ensure_ollama_running
-from utils.workspace_utils import get_workspace_root
-from utils.workspace_utils import normalize_module_path
+from KoreAgent.utils.workspace_utils import get_workspace_root
+from KoreAgent.utils.workspace_utils import normalize_module_path
 
 
 # ====================================================================================================

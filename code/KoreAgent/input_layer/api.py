@@ -89,24 +89,24 @@ from KoreAgent.orchestration import set_web_skills_enabled
 from KoreAgent.scratchpad import get_store as get_scratch_store
 from KoreAgent.scratchpad import scratch_clear
 from KoreAgent.scratchpad import scratch_save as scratch_restore_key
-from input_layer.api_routes_logs import register_log_routes
-from input_layer.api_routes_sessions import register_session_routes
-from input_layer.api_routes_status import register_status_routes
-from input_layer.api_routes_tasks import register_task_routes
-from utils.runtime_logger import SessionLogger
-from utils.runtime_logger import create_log_file_path
-from input_layer.chat_input import append_to_history
-from input_layer.chat_input import load_history
-from scheduler.scheduler import is_task_due
-from scheduler.scheduler import task_queue
-from input_layer.slash_commands import handle as handle_slash
-from input_layer.slash_command_context import SlashCommandContext
-from utils.workspace_utils import get_chatsessions_day_dir
-from utils.workspace_utils import get_chatsessions_dir
-from utils.workspace_utils import get_chatsessions_named_dir
-from utils.workspace_utils import get_logs_dir
-from utils.workspace_utils import get_test_prompts_dir
-from utils.version import __version__
+from KoreAgent.input_layer.api_routes_logs import register_log_routes
+from KoreAgent.input_layer.api_routes_sessions import register_session_routes
+from KoreAgent.input_layer.api_routes_status import register_status_routes
+from KoreAgent.input_layer.api_routes_tasks import register_task_routes
+from KoreAgent.utils.runtime_logger import SessionLogger
+from KoreAgent.utils.runtime_logger import create_log_file_path
+from KoreAgent.input_layer.chat_input import append_to_history
+from KoreAgent.input_layer.chat_input import load_history
+from KoreAgent.scheduler.scheduler import is_task_due
+from KoreAgent.scheduler.scheduler import task_queue
+from KoreAgent.input_layer.slash_commands import handle as handle_slash
+from KoreAgent.input_layer.slash_command_context import SlashCommandContext
+from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
+from KoreAgent.utils.workspace_utils import get_chatsessions_dir
+from KoreAgent.utils.workspace_utils import get_chatsessions_named_dir
+from KoreAgent.utils.workspace_utils import get_logs_dir
+from KoreAgent.utils.workspace_utils import get_test_prompts_dir
+from KoreAgent.utils.version import __version__
 import KoreAgent.koreconv_client as _kc_client
 
 

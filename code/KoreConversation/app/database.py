@@ -303,9 +303,10 @@ def conversation_update(
 
 # ----------------------------------------------------------------------------------------------------
 def conversation_delete(conversation_id: int) -> bool:
-    conversation_update(conversation_id, status="deleted")
-    event_create(conversation_id, "conversation_deleted")
-    return True
+    with _conn() as c:
+        c.execute("DELETE FROM events WHERE conversation_id = ?", (conversation_id,))
+        cur = c.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+    return cur.rowcount > 0
 
 
 # ====================================================================================================

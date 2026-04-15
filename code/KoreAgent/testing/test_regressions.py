@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[3]
 CODE_DIR = REPO_ROOT / "code"
 
 if str(CODE_DIR) not in sys.path:
@@ -33,10 +33,10 @@ from KoreAgent.skills.WebSearch.web_search_skill import search_web
 from KoreAgent.skills.WebResearch.web_research_skill import research_traverse
 from KoreAgent.skills.SystemInfo.system_info_skill import get_system_info_string
 from KoreAgent.tool_loop import normalize_tool_request
-from input_layer import api as api_module
-from testing import test_wrapper as test_wrapper_module
-from utils import workspace_utils as workspace_utils_module
-from utils.workspace_utils import get_user_data_dir
+from KoreAgent.input_layer import api as api_module
+from KoreAgent.testing import test_wrapper as test_wrapper_module
+from KoreAgent.utils import workspace_utils as workspace_utils_module
+from KoreAgent.utils.workspace_utils import get_user_data_dir
 
 
 class RegressionTests(unittest.TestCase):

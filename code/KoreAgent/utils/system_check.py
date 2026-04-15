@@ -36,7 +36,7 @@ from KoreAgent.llm_client import ensure_ollama_running
 from KoreAgent.llm_client import format_running_model_report
 from KoreAgent.llm_client import list_ollama_models
 from KoreAgent.llm_client import resolve_model_name
-from utils.workspace_utils import trunc
+from KoreAgent.utils.workspace_utils import trunc
 
 
 # ====================================================================================================

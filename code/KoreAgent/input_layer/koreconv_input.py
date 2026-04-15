@@ -50,8 +50,11 @@ from pathlib import Path
 from KoreAgent.orchestration import OrchestratorConfig
 from KoreAgent.orchestration import orchestrate_prompt
 from KoreAgent.run_helpers import make_task_session
-from utils.runtime_logger import SessionLogger
-from utils.workspace_utils import get_workspace_root
+from KoreAgent.scratchpad import get_store
+from KoreAgent.scratchpad import scratch_clear
+from KoreAgent.scratchpad import scratch_save
+from KoreAgent.utils.runtime_logger import SessionLogger
+from KoreAgent.utils.workspace_utils import get_workspace_root
 
 
 # ====================================================================================================
@@ -254,15 +257,28 @@ def _handle_event(
                 push_log_line(f"[KORECONV] Conv {conv_id}: could not fetch messages: {exc}")
                 messages = []
 
+        # Restore persisted scratchpad state into the active session before orchestration
+        # so scratchpad tool calls operate on the KC-backed conversation state.
+        conv_scratchpad = conv.get("scratchpad") or {}
+        if isinstance(conv_scratchpad, str):
+            try:
+                conv_scratchpad = json.loads(conv_scratchpad)
+            except Exception:
+                conv_scratchpad = {}
+        scratch_clear(session_id=session_id)
+        for scratch_key, scratch_value in conv_scratchpad.items():
+            try:
+                scratch_save(scratch_key, str(scratch_value), session_id=session_id)
+            except Exception:
+                pass
+
         user_prompt = _build_prompt(conv, messages)
 
-        # Build session context - history is embedded in the KC conversation record itself
-        # so we pass None for conversation_history and rely on the prompt text for context.
-        from utils.workspace_utils import get_chatsessions_day_dir
-        persist_path = get_chatsessions_day_dir() / f"{session_id}.json"
+        # KC owns the persisted conversation state. The agent keeps only transient
+        # per-run session context in memory for this turn.
         _, session_ctx = make_task_session(
             session_id   = session_id,
-            persist_path = persist_path,
+            persist_path = None,
             max_turns    = 10,
         )
 
@@ -281,6 +297,7 @@ def _handle_event(
         )
 
         reply = response.strip()
+        current_scratchpad = get_store(session_id=session_id)
 
         # Write outbound message
         try:
@@ -299,6 +316,7 @@ def _handle_event(
                 "status":         "waiting_agent",
                 "token_estimate": prompt_tokens,
                 "turn_count":     turn_count + 1,
+                "scratchpad":     current_scratchpad,
             })
         except Exception as exc:
             push_log_line(f"[KORECONV] Conv {conv_id}: failed to patch conversation: {exc}")

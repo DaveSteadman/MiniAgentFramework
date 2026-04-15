@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # Persistent prompt-history file I/O for the web UI session.
@@ -19,7 +19,7 @@ import json
 import threading
 from pathlib import Path
 
-from utils.workspace_utils import get_chathistory_file
+from KoreAgent.utils.workspace_utils import get_chathistory_file
 
 
 # ====================================================================================================

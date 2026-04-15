@@ -178,7 +178,7 @@ _maybe_reexec_into_project_venv()
 
 import KoreAgent.llm_client as llm_client
 import KoreAgent.koreconv_client as _koreconv_client
-from input_layer.api_mode import run_api_mode
+from KoreAgent.input_layer.api_mode import run_api_mode
 from KoreAgent.llm_client import format_running_model_report
 from KoreAgent.llm_client import get_llm_timeout
 from KoreAgent.llm_client import register_llm_call_logger
@@ -189,15 +189,15 @@ from KoreAgent.run_helpers import make_task_session
 from KoreAgent.scratchpad import scratch_clear
 from KoreAgent.skills_catalog_builder import load_skills_payload
 import KoreAgent.mcp_client as _mcp_client
-from utils.runtime_logger import create_log_file_path
-from utils.runtime_logger import SessionLogger
-from input_layer.slash_commands import SlashCommandContext
-from input_layer.slash_commands import handle as handle_slash
-from utils.workspace_utils import get_bootstrap_defaults_file
-from utils.workspace_utils import get_chatsessions_day_dir
-from utils.workspace_utils import get_controldata_dir
-from utils.workspace_utils import get_logs_dir
-from utils.workspace_utils import get_user_data_dir
+from KoreAgent.utils.runtime_logger import create_log_file_path
+from KoreAgent.utils.runtime_logger import SessionLogger
+from KoreAgent.input_layer.slash_commands import SlashCommandContext
+from KoreAgent.input_layer.slash_commands import handle as handle_slash
+from KoreAgent.utils.workspace_utils import get_bootstrap_defaults_file
+from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
+from KoreAgent.utils.workspace_utils import get_controldata_dir
+from KoreAgent.utils.workspace_utils import get_logs_dir
+from KoreAgent.utils.workspace_utils import get_user_data_dir
 
 
 # ====================================================================================================

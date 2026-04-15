@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # Test runner for MiniAgentFramework.
@@ -47,10 +47,10 @@ from datetime import datetime
 from pathlib import Path
 
 # sys.path must include the code/ directory before project modules can be imported.
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT / "code"))
 
-from utils.workspace_utils import get_test_results_dir
+from KoreAgent.utils.workspace_utils import get_test_results_dir
 
 
 # ====================================================================================================

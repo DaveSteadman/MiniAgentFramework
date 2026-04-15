@@ -1,6 +1,6 @@
-import threading
+﻿import threading
 
-from utils.workspace_utils import trunc
+from KoreAgent.utils.workspace_utils import trunc
 
 
 _last_context_map: list[dict] = []

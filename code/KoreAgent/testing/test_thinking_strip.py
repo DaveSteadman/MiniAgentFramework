@@ -12,8 +12,9 @@
 # Called automatically by _run_post_test_checks after every /test run.
 # ====================================================================================================
 import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "code"))
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "code"))
 
 from KoreAgent.tool_loop import strip_cot_preamble
 

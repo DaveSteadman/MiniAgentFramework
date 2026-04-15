@@ -53,8 +53,8 @@ import KoreAgent.mcp_client as _mcp_client
 from KoreAgent.tool_loop import format_tool_outputs as _tool_loop_format_tool_outputs
 from KoreAgent.tool_loop import run_tool_loop as _tool_loop_run_tool_loop
 from KoreAgent.tool_loop import write_file_blocks as _tool_loop_write_file_blocks
-from utils.runtime_logger import SessionLogger
-from utils.workspace_utils import trunc
+from KoreAgent.utils.runtime_logger import SessionLogger
+from KoreAgent.utils.workspace_utils import trunc
 
 
 # ====================================================================================================

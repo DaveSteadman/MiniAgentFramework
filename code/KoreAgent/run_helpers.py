@@ -7,7 +7,7 @@ from KoreAgent.orchestration import orchestrate_prompt
 
 def make_task_session(
     session_id: str,
-    persist_path: Path,
+    persist_path: Path | None,
     max_turns: int = 10,
 ) -> tuple[ConversationHistory, SessionContext]:
     history = ConversationHistory(max_turns=max_turns)

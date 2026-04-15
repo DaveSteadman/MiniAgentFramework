@@ -1,12 +1,12 @@
-import json
+﻿import json
 import re
 import time
 from typing import Callable
 
-from input_layer.slash_command_context import SlashCommandContext
-from utils.workspace_utils import get_chatsessions_day_dir
-from utils.workspace_utils import get_chatsessions_dir
-from utils.workspace_utils import get_chatsessions_named_dir
+from KoreAgent.input_layer.slash_command_context import SlashCommandContext
+from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
+from KoreAgent.utils.workspace_utils import get_chatsessions_dir
+from KoreAgent.utils.workspace_utils import get_chatsessions_named_dir
 
 
 def _readable_session_path(session_id: str):

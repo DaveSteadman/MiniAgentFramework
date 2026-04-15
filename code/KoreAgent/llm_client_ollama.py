@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 
 import KoreAgent.llm_client_openai as _core
-from utils.workspace_utils import trunc
+from KoreAgent.utils.workspace_utils import trunc
 
 
 # ====================================================================================================

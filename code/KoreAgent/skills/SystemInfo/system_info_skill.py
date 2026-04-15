@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # SystemInfo skill module for the MiniAgentFramework.
@@ -36,7 +36,7 @@ import sys
 import platform
 from pathlib import Path
 
-from utils.version import __version__ as _FRAMEWORK_VERSION
+from KoreAgent.utils.version import __version__ as _FRAMEWORK_VERSION
 
 if sys.platform.startswith("win"):
     import ctypes

@@ -3,9 +3,9 @@ import re
 from typing import Callable
 
 from KoreAgent.run_helpers import run_prompt_batch
-from input_layer.slash_command_context import SlashCommandContext
-from utils.workspace_utils import get_schedules_dir
-from utils.workspace_utils import trunc
+from KoreAgent.input_layer.slash_command_context import SlashCommandContext
+from KoreAgent.utils.workspace_utils import get_schedules_dir
+from KoreAgent.utils.workspace_utils import trunc
 
 
 def _cmd_tasks(arg: str, ctx: SlashCommandContext) -> None:
@@ -187,10 +187,10 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output(f"Running task '{rest}' ...", "info")
 
         def _run_task(_rest=rest, _prompts=list(prompts), _ctx=ctx) -> None:
-            from utils.runtime_logger import SessionLogger
-            from utils.runtime_logger import create_log_file_path
-            from utils.workspace_utils import get_chatsessions_day_dir
-            from utils.workspace_utils import get_logs_dir
+            from KoreAgent.utils.runtime_logger import SessionLogger
+            from KoreAgent.utils.runtime_logger import create_log_file_path
+            from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
+            from KoreAgent.utils.workspace_utils import get_logs_dir
 
             run_log_path = create_log_file_path(log_dir=get_logs_dir())
             try:
@@ -216,7 +216,7 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
             except Exception as exc:
                 _ctx.output(f"Error running task: {exc}", "error")
 
-        from scheduler.scheduler import task_queue
+        from KoreAgent.scheduler.scheduler import task_queue
 
         queue_name = f"task_run_{rest}"
         if task_queue.enqueue(queue_name, "task_run", _run_task):

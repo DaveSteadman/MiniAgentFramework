@@ -33,17 +33,17 @@ from KoreAgent.orchestration import set_sandbox_enabled
 from KoreAgent.orchestration import set_skill_guidance_enabled
 from KoreAgent.skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
 from KoreAgent.skills.Memory.memory_skill import MEMORY_STORE_PATH
-from input_layer.slash_command_context import SlashCommandContext
-from input_layer.slash_command_handlers_models import register_model_slash_commands
-from input_layer.slash_command_handlers_sessions import register_session_slash_commands
-from input_layer.slash_command_handlers_tasks import register_task_slash_commands
-from input_layer.slash_command_handlers_testing import register_testing_slash_commands
-from utils.workspace_utils import get_bootstrap_defaults_file
-from utils.workspace_utils import get_chatsessions_dir
-from utils.workspace_utils import get_controldata_dir
-from utils.workspace_utils import get_logs_dir
-from utils.workspace_utils import get_test_results_dir
-from utils.version import __version__
+from KoreAgent.input_layer.slash_command_context import SlashCommandContext
+from KoreAgent.input_layer.slash_command_handlers_models import register_model_slash_commands
+from KoreAgent.input_layer.slash_command_handlers_sessions import register_session_slash_commands
+from KoreAgent.input_layer.slash_command_handlers_tasks import register_task_slash_commands
+from KoreAgent.input_layer.slash_command_handlers_testing import register_testing_slash_commands
+from KoreAgent.utils.workspace_utils import get_bootstrap_defaults_file
+from KoreAgent.utils.workspace_utils import get_chatsessions_dir
+from KoreAgent.utils.workspace_utils import get_controldata_dir
+from KoreAgent.utils.workspace_utils import get_logs_dir
+from KoreAgent.utils.workspace_utils import get_test_results_dir
+from KoreAgent.utils.version import __version__
 
 
 def handle(text: str, ctx: SlashCommandContext) -> bool:

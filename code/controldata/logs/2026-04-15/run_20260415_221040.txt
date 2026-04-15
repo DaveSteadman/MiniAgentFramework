@@ -1,0 +1,16 @@
+
+====================================================================================================
+SYSTEM STATUS  [22:10:48]
+====================================================================================================
+
+Ollama host:   http://localhost:11434 ✓
+Requested model: 20b
+Resolved model:  gpt-oss:20b ✓
+KoreData:        (not configured)
+KoreConversation:(not configured)
+Mode:            api
+ctx:             131072
+LLM timeout:     600s
+Max iterations:  25
+Model runtime status: gpt-oss:20b not currently loaded (ollama ps).
+Log file:        C:/Util/GithubRepos/MiniAgentFramework/code/controldata/logs/2026-04-15/run_20260415_221040.txt

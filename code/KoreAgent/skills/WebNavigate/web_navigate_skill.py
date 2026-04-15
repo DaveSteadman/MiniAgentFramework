@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # WebNavigate skill for MiniAgentFramework.
@@ -38,7 +38,7 @@ _code_dir = str(Path(__file__).resolve().parents[3])
 if _code_dir not in sys.path:
     sys.path.insert(0, _code_dir)
 
-from utils.webpage_utils import fetch_html as _fetch_html
+from KoreAgent.utils.webpage_utils import fetch_html as _fetch_html
 
 
 # ====================================================================================================

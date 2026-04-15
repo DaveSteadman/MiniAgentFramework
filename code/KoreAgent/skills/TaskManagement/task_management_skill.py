@@ -1,4 +1,4 @@
-# ====================================================================================================
+﻿# ====================================================================================================
 # MARK: OVERVIEW
 # ====================================================================================================
 # TaskManagement skill for the MiniAgentFramework.
@@ -24,8 +24,8 @@ import json
 import re
 from pathlib import Path
 
-from utils.workspace_utils import get_schedules_dir
-from utils.workspace_utils import trunc
+from KoreAgent.utils.workspace_utils import get_schedules_dir
+from KoreAgent.utils.workspace_utils import trunc
 
 
 # ====================================================================================================

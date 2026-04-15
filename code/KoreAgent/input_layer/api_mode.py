@@ -31,22 +31,22 @@ from pathlib import Path
 
 import KoreAgent.llm_client as llm_client
 from KoreAgent.run_helpers import run_prompt_batch
-from input_layer.api import app
-from input_layer.api import push_log_line
-from input_layer.api import setup as api_setup
-from input_layer.api import _load_session
-from input_layer.api import _save_session
-from input_layer.koreconv_input import start_koreconv_loop
+from KoreAgent.input_layer.api import app
+from KoreAgent.input_layer.api import push_log_line
+from KoreAgent.input_layer.api import setup as api_setup
+from KoreAgent.input_layer.api import _load_session
+from KoreAgent.input_layer.api import _save_session
+from KoreAgent.input_layer.koreconv_input import start_koreconv_loop
 from KoreAgent.orchestration import OrchestratorConfig
-from utils.runtime_logger import SessionLogger
-from utils.runtime_logger import create_log_file_path
-from scheduler.scheduler import initial_last_run
-from scheduler.scheduler import is_task_due
-from scheduler.scheduler import load_schedules_dir
-from scheduler.scheduler import task_queue
-from utils.workspace_utils import get_chatsessions_day_dir
-from utils.workspace_utils import get_logs_dir
-from utils.workspace_utils import get_schedules_dir
+from KoreAgent.utils.runtime_logger import SessionLogger
+from KoreAgent.utils.runtime_logger import create_log_file_path
+from KoreAgent.scheduler.scheduler import initial_last_run
+from KoreAgent.scheduler.scheduler import is_task_due
+from KoreAgent.scheduler.scheduler import load_schedules_dir
+from KoreAgent.scheduler.scheduler import task_queue
+from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
+from KoreAgent.utils.workspace_utils import get_logs_dir
+from KoreAgent.utils.workspace_utils import get_schedules_dir
 
 
 # ====================================================================================================

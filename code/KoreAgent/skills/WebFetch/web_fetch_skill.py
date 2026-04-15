@@ -39,9 +39,9 @@ if _code_dir not in sys.path:
 from KoreAgent.llm_client import call_llm_chat as _call_llm_chat
 from KoreAgent.llm_client import get_active_model as _get_active_model
 from KoreAgent.llm_client import get_active_num_ctx as _get_active_num_ctx
-from utils.webpage_utils import fetch_html as _fetch_html
-from utils.webpage_utils import extract_content as _extract_content
-from utils.webpage_utils import truncate_to_words as _truncate_to_words
+from KoreAgent.utils.webpage_utils import fetch_html as _fetch_html
+from KoreAgent.utils.webpage_utils import extract_content as _extract_content
+from KoreAgent.utils.webpage_utils import truncate_to_words as _truncate_to_words
 
 
 # ====================================================================================================
