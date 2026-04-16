@@ -12,7 +12,7 @@ If you want local agents without cloud dependencies, hidden orchestration, or fr
 
 - Local-first: built around local model servers ([Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai)), local Python tools, and local files.
 - Transparent: tool calls, intermediate steps, and orchestration logs are visible instead of hidden.
-- Practical: scheduled runs, persistent chat sessions, live logs, and file-writing workflows are built in.
+- Practical: scheduled runs, persistent chat sessions backed by KoreConversation, live logs, and file-writing workflows are built in.
 - Lightweight: aimed at real agent workflows without requiring a large abstraction stack.
 
 ## Get Running Fast
@@ -48,7 +48,7 @@ What you should see:
 
 - the live log stream showing tool choices and execution steps
 - the final answer in the chat panel
-- a dated log file written under `controldata/logs/`
+- a dated log file written under `datacontrol/logs/`
 
 This is the core experience of the framework: local LLM, local tools, visible reasoning pipeline.
 
@@ -151,6 +151,8 @@ Only the recognised keys are accepted. Unknown keys print a warning at startup a
 
 ## Slash Commands
 
+This checkout resolves `ControlDataFolder` to `datacontrol/` via `default.json`, so the runtime paths below use `datacontrol/` rather than the older `controldata/` examples still found in some historical notes.
+
 Slash commands are available in the **Web UI** chat input and inside **scheduled task prompt lists**. They bypass the orchestration pipeline and take effect immediately.
 
 Type `/help` at any prompt to see the full list. Tab completion is available in the Web UI: pressing Tab after a `/` character opens a dropdown of matching commands and sub-commands.
@@ -176,15 +178,15 @@ Type `/help` at any prompt to see the full list. Tab completion is available in 
 | `/newchat` | Clear conversation history and session context, starting a fresh chat without restarting. |
 | `/reskill [min\|max]` | Rebuild the skills catalog and set system prompt guidance mode. Defaults to `min` if omitted. |
 | `/sandbox <on\|off>` | Toggle the Python sandbox for `CodeExecute` skill. `on` (default) enforces the built-in allow-list; `off` removes restrictions (use with care). |
-| `/deletelogs <days>` | Delete date-folders older than N days under `controldata/logs/`, `controldata/chatsessions/`, and `controldata/test_results/`. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
+| `/deletelogs <days>` | Delete date-folders older than N days under `datacontrol/logs/` and `datacontrol/test_results/`. Useful as a scheduled task prompt (e.g. `/deletelogs 10`). |
 | `/defaults` | Show the active `default.json` settings and file path. `/defaults set` overwrites the file with the current model, ctx, and host values. |
-| `/session name <alias>` | Give the current session a persistent name. The session is saved to `controldata/chatsessions/named/` and can be resumed after a restart. |
-| `/session list` | List all named sessions with their creation time and message count. |
-| `/session resume <name>` | Switch to a named session and replay its chat history into the UI. |
-| `/session resumecopy <source> <new>` | Copy an existing named session to a new name and switch into it - useful as a jumping-off point without overwriting the original. |
-| `/session park` | Save the current chat under its existing name (or prompt you to name it first) and open a fresh unnamed chat. |
-| `/session delete <name\|all>` | Delete a named session by exact name, or `all` to delete every named session. If the active session is deleted, a fresh unnamed chat is opened automatically. |
-| `/session info` | Show the session ID, name, and message count for the current session. |
+| `/session name <alias>` | Rename the current webchat conversation in KoreConversation. The session ID stays the same; only the conversation subject changes. |
+| `/session list` | List resumable webchat conversations from KoreConversation. |
+| `/session resume <name>` | Switch to a webchat conversation in KoreConversation and replay its chat history into the UI. |
+| `/session resumecopy <source> <new>` | Clone an existing webchat conversation, including message history and metadata, into a new KoreConversation and switch into it. |
+| `/session park` | Leave the current conversation in place and open a fresh webchat session ID. A new KoreConversation is created lazily on the first message. |
+| `/session delete <name\|all>` | Delete one or all webchat conversations from KoreConversation. If the active session is deleted, a fresh unnamed chat is opened automatically. |
+| `/session info` | Show the current session ID plus the linked KoreConversation ID, status, turn count, and token estimate. |
 | `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. The argument is matched as a case-insensitive substring, so `/test web` matches `test_web_skill_prompts.json`. |
 | `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. All results are written to a single combined CSV file (`test_results_<timestamp>_all.csv`) with a banner printed between each suite. Prints a final summary with host, model, elapsed time, and cumulative pass/fail count. |
 | `/testtrend [prompts-file]` | Show pass-rate trend across all historical test runs, optionally filtered by prompts file. |
@@ -237,7 +239,7 @@ New slash commands can be added in [code/input_layer/slash_commands.py](code/inp
 
 ## Scheduled Tasks
 
-Each `*.json` file in `controldata/schedules/` defines one or more tasks with either a daily time (`HH:MM`) or a repeating interval (minutes). Tasks fire unattended and are serialised through the shared task queue. Each file must contain a top-level `"tasks"` list:
+Each `*.json` file in `datacontrol/schedules/` defines one or more tasks with either a daily time (`HH:MM`) or a repeating interval (minutes). Tasks fire unattended and are serialised through the shared task queue. Each file must contain a top-level `"tasks"` list:
 
 ```json
 {
@@ -355,9 +357,9 @@ python .\code\utils\system_check.py --ctx 4096
 
 | Path | Contents |
 |---|---|
-| `controldata/logs/YYYY-MM-DD/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) - one file per run, grouped into dated subfolders. |
-| `controldata/schedules/` | Schedule definition files (`*.json`) consumed by the Web UI / API scheduler. |
-| `controldata/test_prompts/` | Prompt suite JSON files used by the `/test` slash command. |
-| `controldata/test_results/` | Timestamped CSV results and analysis files produced by `/test`. |
+| `datacontrol/logs/YYYY-MM-DD/` | Runtime evidence logs (`run_YYYYMMDD_HHMMSS.txt`) - one file per run, grouped into dated subfolders. |
+| `datacontrol/schedules/` | Schedule definition files (`*.json`) consumed by the Web UI / API scheduler. |
+| `datacontrol/test_prompts/` | Prompt suite JSON files used by the `/test` slash command. |
+| `datacontrol/test_results/` | Timestamped CSV results and analysis files produced by `/test`. |
 
 Each log file contains full evidence for its run: resolved model, memory recall, tool rounds, tool call outputs, final LLM response, and per-call token throughput.

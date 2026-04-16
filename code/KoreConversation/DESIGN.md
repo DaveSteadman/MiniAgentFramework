@@ -42,11 +42,17 @@ Between calls, no conversation context lives inside MiniAgentFramework.
 
 KoreConversation knows only a `channel_type` string and the conversation ID. It never holds email addresses, phone numbers, OAuth tokens, or any channel-specific routing data. That all lives inside KoreComms. The agent never sees it either.
 
-### Profiles define capability, not channel
+### Profiles define capability, not transport
 
 Each conversation has a profile that determines what the agent is permitted to do. The profile defaults from the channel type but can be overridden per conversation.
 
-| Profile | Slash commands | Tools | Debug output | Auto-compress |
+Slash-command handling is intentionally narrower than general profile capability:
+- all active chats are represented as KoreConversation conversations
+- only prompts entered through the agent's main web chat panel are intercepted as slash commands
+- slash commands are handled before the prompt is appended to KoreConversation
+- slash-like text arriving through other KoreConversation channels is treated as ordinary message content
+
+| Profile | Slash commands in main web chat | Tools | Debug output | Auto-compress |
 |---|---|---|---|---|
 | `admin` | yes | all | yes | no |
 | `external` | no | limited set | no | yes |
@@ -77,6 +83,11 @@ The central conversation record.
 | updated_at | TEXT | |
 
 Status values: `active`, `waiting_agent`, `agent_processing`, `archived`, `deleted`
+
+Operational meaning:
+- `active` means the latest message has been answered and the system is awaiting the next inbound message.
+- `waiting_agent` means the latest message is inbound and still needs an agent response.
+- `agent_processing` means the agent has claimed the work and is actively handling it.
 
 Profile defaults by channel_type:
 - `webchat` -> `admin`
@@ -136,7 +147,7 @@ Event types:
 | GET | /conversations | List conversations (query: status, channel_type, limit, offset) |
 | GET | /conversations/{id} | Full record including unsummarised messages |
 | PATCH | /conversations/{id} | Partial update: status, thread_summary, scratchpad, background_context, token_estimate, turn_count |
-| DELETE | /conversations/{id} | Set status=deleted, raise conversation_deleted event |
+| DELETE | /conversations/{id} | Hard-delete the conversation row plus dependent events/messages |
 
 ### Messages
 
@@ -179,8 +190,8 @@ POST /conversations/{id}/messages  {direction: outbound, content: response}
 PATCH /conversations/{id}          {thread_summary, scratchpad, token_estimate, turn_count, status}
 POST /events/{event_id}/complete   {status: completed}
 
-If response produced:
-  POST /events  {conversation_id, event_type: outbound_ready, claimed_by: korecomms}
+If response produced for a non-webchat, non-manual channel:
+  POST /events  {conversation_id, event_type: outbound_ready}
 ```
 
 ---
@@ -207,7 +218,7 @@ A background thread runs every 60 seconds. Events with `status = 'claimed'` and 
 
 ## Relationship to chatsessions/
 
-KoreConversation supersedes the `datacontrol/chatsessions/` directory used by MiniAgentFramework. That directory stored one JSON file per session containing turns, summaries, and scratchpad.
+KoreConversation supersedes the historical `datacontrol/chatsessions/` directory used by MiniAgentFramework. That directory stored one JSON file per session containing turns, summaries, and scratchpad.
 
 Under the new model:
 - turns -> messages table
@@ -215,7 +226,7 @@ Under the new model:
 - scratchpad -> scratchpad field
 - session_id string -> conversation id integer
 
-The `chatsessions/` directory remains on disk during transition but new conversations do not write to it. Migration of existing named sessions can be done as a one-off script when needed.
+The old `chatsessions/` directory can remain on disk as historical data, but active runtime flows no longer write browser session state there. Session slash commands now operate through KoreConversation APIs and `external_id` mappings.
 
 ---
 

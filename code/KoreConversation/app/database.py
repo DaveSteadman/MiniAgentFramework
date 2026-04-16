@@ -565,11 +565,32 @@ def release_stale_claims() -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=CLAIM_TIMEOUT_SECS)
     cutoff_str = cutoff.isoformat()
     with _conn() as c:
+        stale_response_conversations = [
+            row["conversation_id"]
+            for row in c.execute(
+                """
+                SELECT DISTINCT conversation_id
+                FROM events
+                WHERE status='claimed'
+                  AND claimed_at < ?
+                  AND event_type = 'response_needed'
+                  AND conversation_id IS NOT NULL
+                """,
+                (cutoff_str,),
+            ).fetchall()
+        ]
         cur = c.execute(
             "UPDATE events SET status='pending', claimed_by=NULL, claimed_at=NULL "
             "WHERE status='claimed' AND claimed_at < ?",
             (cutoff_str,),
         )
+
+        for conversation_id in stale_response_conversations:
+            new_status = "waiting_agent" if _conversation_has_unanswered_inbound_tx(c, conversation_id) else "active"
+            c.execute(
+                "UPDATE conversations SET status=?, updated_at=?, last_activity_at=? WHERE id=?",
+                (new_status, _now(), _now(), conversation_id),
+            )
         return cur.rowcount
 
 

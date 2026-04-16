@@ -332,7 +332,7 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output("  /session name <alias>                - rename the current KoreConversation", "item")
     ctx.output("  /session list                        - list webchat KoreConversations", "item")
     ctx.output("  /session resume <name>               - switch to a named KoreConversation", "item")
-    ctx.output("  /session resumecopy <old> <new>      - copy metadata into a new KoreConversation and resume it", "item")
+    ctx.output("  /session resumecopy <old> <new>      - copy a KoreConversation and resume the copy", "item")
     ctx.output("  /session park                        - start a fresh webchat session", "item")
     ctx.output("  /session delete <name>               - delete a KoreConversation by name", "item")
     ctx.output("  /session delete all                  - delete all webchat KoreConversations", "item")

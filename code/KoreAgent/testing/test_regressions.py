@@ -18,6 +18,7 @@ from KoreAgent.orchestration import delegate_subrun
 from KoreAgent.orchestration import OrchestratorConfig
 from KoreAgent.prompt_builder import build_system_message
 from KoreAgent.scratchpad import scratch_clear
+from KoreAgent.scratchpad import get_store
 from KoreAgent.scratchpad import scratch_load
 from KoreAgent.scratchpad import scratch_query
 from KoreAgent.scratchpad import scratch_save
@@ -214,33 +215,48 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result.split()[0:2], ["#", "Stats"])
         self.assertGreaterEqual(len(body_words), 2500)
 
-    def test_session_write_path_uses_dated_folder_for_unnamed_sessions(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_root = Path(tmp)
-            named_dir = tmp_root / "named"
-            day_dir = tmp_root / "2026-04-04"
+    def test_load_session_rebuilds_history_from_koreconversation(self) -> None:
+        session_id = "web_1775338532521"
+        scratch_clear(session_id)
 
-            with patch.object(api_module, "get_chatsessions_dir", return_value=tmp_root):
-                with patch.object(api_module, "get_chatsessions_named_dir", return_value=named_dir):
-                    with patch.object(api_module, "get_chatsessions_day_dir", return_value=day_dir):
-                        result = api_module._session_write_path("web_1775338532521")
+        conversation = {
+            "id": 7,
+            "thread_summary": "Prior summary",
+            "scratchpad": {"topic": "alpha"},
+        }
+        messages = [
+            {"direction": "inbound", "content": "Hi"},
+            {"direction": "outbound", "content": "Hello"},
+            {"direction": "inbound", "content": "Need status"},
+            {"direction": "outbound", "content": "Status is green"},
+        ]
 
-        self.assertEqual(result, day_dir / "web_1775338532521.json")
+        with patch.object(api_module, "_kc_get_conversation_for_session", return_value=conversation):
+            with patch.object(api_module, "_kc_get", return_value=messages):
+                history, summaries = api_module._load_session(session_id)
 
-    def test_session_path_reads_legacy_root_when_present(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_root = Path(tmp)
-            named_dir = tmp_root / "named"
-            day_dir = tmp_root / "2026-04-04"
-            legacy_root = tmp_root / "web_1775338532521.json"
-            legacy_root.write_text("{}", encoding="utf-8")
+        self.assertEqual(
+            history.as_list(),
+            [
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello"},
+                {"role": "user", "content": "Need status"},
+                {"role": "assistant", "content": "Status is green"},
+            ],
+        )
+        self.assertEqual(summaries, [{"text": "Prior summary", "turn_range": [1, 1]}])
+        self.assertEqual(scratch_load("topic", session_id), "alpha")
 
-            with patch.object(api_module, "get_chatsessions_dir", return_value=tmp_root):
-                with patch.object(api_module, "get_chatsessions_named_dir", return_value=named_dir):
-                    with patch.object(api_module, "get_chatsessions_day_dir", return_value=day_dir):
-                        result = api_module._session_path("web_1775338532521")
+    def test_delete_session_state_deletes_koreconversation_record(self) -> None:
+        session_id = "web_1775338532521"
+        scratch_save("topic", "alpha", session_id)
 
-        self.assertEqual(result, legacy_root)
+        with patch.object(api_module, "_kc_get_conversation_for_session", return_value={"id": 7}):
+            with patch.object(api_module, "_kc_delete") as mock_delete:
+                api_module._delete_session_state(session_id)
+
+        mock_delete.assert_called_once_with("/conversations/7")
+        self.assertEqual(get_store(session_id), {})
 
     def test_system_prompt_steers_exhaustive_fetches_into_scratchpad(self) -> None:
         system_message = build_system_message("", None, {"skills": []}, skill_guidance_enabled=False, sandbox_enabled=True)

@@ -64,9 +64,9 @@ flowchart TD
     R --> X[ollama_client.py]
 
     R --> Y[runtime_logger.py]
-    Y --> Z[controldata/logs]
+    Y --> Z[datacontrol/logs]
 
-    G3 --> AA[chatsessions]
+    G3 --> AA[KoreConversation]
     F --> AB[schedules]
 ```
 
@@ -83,8 +83,8 @@ Browser UI
   -> orchestrate_prompt(...)
   -> tool_loop calls LLM and skills
   -> results streamed over /runs/{id}/stream SSE
-  -> logs written to controldata/logs/YYYY-MM-DD/
-  -> session turns persisted under controldata/chatsessions/
+  -> logs written to datacontrol/logs/YYYY-MM-DD/
+  -> browser session state reconstructed from KoreConversation
 ```
 
 ### 2. Slash command
@@ -396,19 +396,18 @@ The important mental model here is: browser prompts and scheduled tasks ultimate
 
 ## Runtime Data
 
-Everything mutable lives under `controldata/`.
+Everything mutable lives under the configured control-data root. In this checkout `default.json` points `ControlDataFolder` at `datacontrol/`.
 
 | Path | Purpose |
 |---|---|
 | `default.json` | persisted startup defaults |
-| `controldata/chathistory.json` | UI input history |
-| `controldata/memory_store.json` | durable memory facts |
-| `controldata/chatsessions/` | session files and persisted conversation state |
-| `controldata/chatsessions/named/` | named sessions |
-| `controldata/logs/YYYY-MM-DD/` | runtime evidence logs |
-| `controldata/schedules/` | scheduled tasks |
-| `controldata/test_prompts/` | prompt suites |
-| `controldata/test_results/YYYY-MM-DD/` | test CSV outputs |
+| `datacontrol/chathistory.json` | UI input history |
+| `datacontrol/memory_store.json` | durable memory facts |
+| `datacontrol/conversations/koreconversation.db` | canonical persisted conversation state for webchat and external channels |
+| `datacontrol/logs/YYYY-MM-DD/` | runtime evidence logs |
+| `datacontrol/schedules/` | scheduled tasks |
+| `datacontrol/test_prompts/` | prompt suites |
+| `datacontrol/test_results/YYYY-MM-DD/` | test CSV outputs |
 
 ---
 
