@@ -194,7 +194,6 @@ from KoreAgent.utils.runtime_logger import SessionLogger
 from KoreAgent.input_layer.slash_commands import SlashCommandContext
 from KoreAgent.input_layer.slash_commands import handle as handle_slash
 from KoreAgent.utils.workspace_utils import get_bootstrap_defaults_file
-from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
 from KoreAgent.utils.workspace_utils import get_controldata_dir
 from KoreAgent.utils.workspace_utils import get_logs_dir
 from KoreAgent.utils.workspace_utils import get_user_data_dir
@@ -326,7 +325,7 @@ def run_chat_sequence_mode(
 
     history, session_ctx = make_task_session(
         session_id   = log_path.stem,
-        persist_path = get_chatsessions_day_dir() / f"{log_path.stem}.json",
+        persist_path = None,
     )
 
     for turn_idx, user_prompt in enumerate(prompts, start=1):

@@ -44,7 +44,6 @@ from KoreAgent.scheduler.scheduler import initial_last_run
 from KoreAgent.scheduler.scheduler import is_task_due
 from KoreAgent.scheduler.scheduler import load_schedules_dir
 from KoreAgent.scheduler.scheduler import task_queue
-from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
 from KoreAgent.utils.workspace_utils import get_logs_dir
 from KoreAgent.utils.workspace_utils import get_schedules_dir
 
@@ -154,7 +153,7 @@ def run_api_mode(
                             results = run_prompt_batch(
                                 _prompts,
                                 session_id=f"task_{_name}",
-                                persist_path=get_chatsessions_day_dir() / f"task_{_name}.json",
+                                persist_path=None,
                                 config=config,
                                 logger=run_logger,
                                 quiet=True,

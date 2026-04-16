@@ -19,7 +19,7 @@ def run_prompt_batch(
     prompts: list,
     *,
     session_id: str,
-    persist_path: Path,
+    persist_path: Path | None,
     config,
     logger,
     quiet: bool = True,

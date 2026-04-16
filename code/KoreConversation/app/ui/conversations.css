@@ -295,6 +295,7 @@ html, body {
     white-space:   nowrap;
 }
 .pill-active            { color: var(--green);  }
+.pill-awaiting_inbound  { color: var(--green);  }
 .pill-waiting_agent     { color: var(--yellow); }
 .pill-agent_processing  { color: var(--cyan);   }
 .pill-archived          { color: var(--text-dim); }
@@ -420,6 +421,23 @@ html, body {
 .kv-table td:last-child {
     color:       var(--text-hi);
     word-break:  break-word;
+}
+
+.meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.meta-col {
+    border-right: 1px solid var(--border);
+}
+
+.meta-col:last-child {
+    border-right: 0;
+}
+
+.section.is-empty {
+    display: none;
 }
 
 /* ============================================================
@@ -555,3 +573,26 @@ html, body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+@media (max-width: 920px) {
+    #header {
+        flex-wrap: wrap;
+        height: auto;
+        min-height: var(--header-h);
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
+
+    .meta-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .meta-col {
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .meta-col:last-child {
+        border-bottom: 0;
+    }
+}

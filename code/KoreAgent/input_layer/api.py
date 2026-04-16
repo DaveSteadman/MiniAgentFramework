@@ -101,9 +101,6 @@ from KoreAgent.scheduler.scheduler import is_task_due
 from KoreAgent.scheduler.scheduler import task_queue
 from KoreAgent.input_layer.slash_commands import handle as handle_slash
 from KoreAgent.input_layer.slash_command_context import SlashCommandContext
-from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
-from KoreAgent.utils.workspace_utils import get_chatsessions_dir
-from KoreAgent.utils.workspace_utils import get_chatsessions_named_dir
 from KoreAgent.utils.workspace_utils import get_logs_dir
 from KoreAgent.utils.workspace_utils import get_test_prompts_dir
 from KoreAgent.utils.version import __version__
@@ -324,17 +321,19 @@ register_status_routes(
 @app.get("/completions")
 def get_completions():
     """Return tab-completion candidates grouped by type for the UI tab-complete feature."""
-    named_dir = get_chatsessions_named_dir()
-    sessions  = []
-    if named_dir.exists():
-        for p in sorted(named_dir.glob("*.json")):
-            try:
-                data = json.loads(p.read_text(encoding="utf-8"))
-                name = data.get("name", "")
-                if name:
+    sessions = []
+    try:
+        kc_sessions = _kc_get("/conversations?channel_type=webchat&limit=500") or []
+        if isinstance(kc_sessions, list):
+            for item in kc_sessions:
+                external_id = str(item.get("external_id") or "")
+                if not external_id.startswith("webchat_"):
+                    continue
+                name = (item.get("subject") or "").strip() or external_id.removeprefix("webchat_")
+                if name and name not in sessions:
                     sessions.append(name)
-            except Exception:
-                pass
+    except HTTPException:
+        pass
 
     test_dir   = get_test_prompts_dir()
     test_files = []
@@ -477,72 +476,64 @@ def _handle_stoprun_immediate(run_id: str, run_q: "queue.Queue") -> None:
 # ====================================================================================================
 # MARK: SESSION HELPERS
 # ====================================================================================================
-def _session_write_path(session_id: str) -> Path:
-    """Return the canonical write path for a session file.
-
-    Named sessions stay in chatsessions/named/. Unnamed sessions are always written
-    to today's dated chatsessions subfolder.
-    """
-    named = get_chatsessions_named_dir() / f"{session_id}.json"
-    if named.exists():
-        return named
-    return get_chatsessions_day_dir() / f"{session_id}.json"
+def _kc_external_id_for_session(session_id: str) -> str:
+    return f"webchat_{session_id}"
 
 
-def _session_path(session_id: str) -> Path:
-    """Return the best available existing session file path for reads.
-
-    Preference order:
-    1. named/ session file
-    2. today's dated session file
-    3. legacy root-level session file
-    4. any dated session file under chatsessions/YYYY-MM-DD/
-
-    If no existing file is found, return the canonical write path.
-    """
-    named = get_chatsessions_named_dir() / f"{session_id}.json"
-    if named.exists():
-        return named
-
-    today = get_chatsessions_day_dir() / f"{session_id}.json"
-    if today.exists():
-        return today
-
-    legacy_root = get_chatsessions_dir() / f"{session_id}.json"
-    if legacy_root.exists():
-        return legacy_root
-
-    for dated_path in sorted(get_chatsessions_dir().glob(f"*/{session_id}.json"), reverse=True):
-        if dated_path.is_file():
-            return dated_path
-
-    return today
+def _kc_get_conversation_for_session(session_id: str) -> dict | None:
+    external_id = _kc_external_id_for_session(session_id)
+    try:
+        result = _kc_get(f"/conversations/by-external-id/{urllib.parse.quote(external_id, safe='')}")
+    except HTTPException as exc:
+        if exc.status_code in {404, 503}:
+            return None
+        raise
+    return result if isinstance(result, dict) else None
 
 
 def _load_session(session_id: str) -> tuple["ConversationHistory", list[dict]]:
-    """Load conversation history and summary blocks from the session file.
-
-    Returns (ConversationHistory, summaries) where summaries is a list of
-    {"text": str, "turn_range": [int, int]} dicts covering older exchanges that
-    have been compacted.  Falls back to legacy date-scoped files on first run.
-    """
-    history   = ConversationHistory()  # unlimited - compaction governs retention
+    """Load conversation history and scratchpad from KoreConversation when present."""
+    history   = ConversationHistory()
     summaries: list[dict] = []
-    path = _session_path(session_id)
+    conv = _kc_get_conversation_for_session(session_id)
+    if conv is None:
+        return history, summaries
 
-    if path.exists():
+    scratch_clear(session_id)
+    scratchpad = conv.get("scratchpad") or {}
+    if isinstance(scratchpad, str):
         try:
-            data      = json.loads(path.read_text(encoding="utf-8"))
-            summaries = data.get("summaries", [])
-            for t in data.get("turns", []):
-                up = t.get("user_prompt", "")
-                ar = t.get("assistant_response", "")
-                if up and ar:
-                    history.add(up, ar)
-            for key, value in data.get("scratch", {}).items():
-                scratch_restore_key(key, str(value), session_id)
+            scratchpad = json.loads(scratchpad)
+        except Exception:
+            scratchpad = {}
+    for key, value in scratchpad.items():
+        try:
+            scratch_restore_key(key, str(value), session_id)
         except Exception:
             pass
+
+    thread_summary = (conv.get("thread_summary") or "").strip()
+    if thread_summary:
+        summaries = [{"text": thread_summary, "turn_range": [1, 1]}]
+
+    try:
+        messages = _kc_get(f"/conversations/{conv['id']}/messages?limit=1000") or []
+    except HTTPException:
+        messages = []
+
+    pending_prompt: str | None = None
+    for message in messages:
+        direction = message.get("direction")
+        content = (message.get("content") or "").strip()
+        if not content:
+            continue
+        if direction == "inbound":
+            pending_prompt = content
+            continue
+        if direction == "outbound" and pending_prompt is not None:
+            history.add(pending_prompt, content)
+            pending_prompt = None
+
     return history, summaries
 
 
@@ -620,63 +611,33 @@ def _save_session(
     prompt_tokens: int,
     num_ctx:       int,
 ) -> list[dict]:
-    """Persist turns and summaries to the root-level session file.
-
-    Triggers compaction when the prompt-token fill exceeds _COMPACT_FILL_PCT of num_ctx,
-    compressing the oldest half of raw turns per pass.
-    Returns the (possibly updated) summaries list so the caller can inject
-    fresh summaries into the next orchestration run.
-    """
-    turns_raw = history.as_list()
-    pairs: list[dict] = []
-    for i in range(0, len(turns_raw) - 1, 2):
-        u = turns_raw[i]
-        a = turns_raw[i + 1]
-        if u.get("role") == "user" and a.get("role") == "assistant":
-            pairs.append({"user_prompt": u["content"], "assistant_response": a["content"]})
-
-    if num_ctx > 0 and pairs and prompt_tokens / num_ctx >= _COMPACT_FILL_PCT:
-        batch_size  = max(1, len(pairs) // 2)
-        pairs, summaries = _compact_old_turns(pairs, summaries, batch_size)
-
-    path = _session_write_path(session_id)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        named_scratch = {k: v for k, v in get_scratch_store(session_id).items() if not k.startswith("_tc_")}
-        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-        session_name = existing.get("name")
-        if not session_name and session_id.startswith("session_"):
-            session_name = session_id.removeprefix("session_")
-        path.write_text(
-            json.dumps(
-                {
-                    "name": session_name,
-                    "turns": pairs,
-                    "summaries": summaries,
-                    "scratch": named_scratch,
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-    except Exception:
-        pass
+    """Retained for compatibility - runtime session state now lives in KoreConversation."""
+    _flush_scratch_to_session(session_id)
     return summaries
 
 
 def _flush_scratch_to_session(session_id: str) -> None:
-    # Partial update: read existing JSON, replace "scratch" key only, write back.
-    # Called at the end of every tool round for crash-visibility; cheaper than a full save.
-    path = _session_write_path(session_id)
+    # Runtime scratch now syncs to KoreConversation instead of chatsessions JSON files.
+    conv = _kc_get_conversation_for_session(session_id)
+    if conv is None:
+        return
     try:
         named_scratch = {k: v for k, v in get_scratch_store(session_id).items() if not k.startswith("_tc_")}
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"turns": [], "summaries": []}
-        data["scratch"] = named_scratch
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        _kc_patch(f"/conversations/{conv['id']}", {"scratchpad": named_scratch})
     except Exception:
         pass
+
+
+def _delete_session_state(session_id: str) -> None:
+    scratch_clear(session_id)
+    conv = _kc_get_conversation_for_session(session_id)
+    if conv is None:
+        return
+    try:
+        _kc_delete(f"/conversations/{conv['id']}")
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
 
 
 # ====================================================================================================
@@ -770,7 +731,7 @@ register_session_routes(
     run_queues=_run_event_queues,
     run_queues_lock=_run_queues_lock,
     sse=lambda data: _sse(data),
-    get_chatsessions_day_dir=get_chatsessions_day_dir,
+    delete_session_state=_delete_session_state,
 )
 
 register_log_routes(
@@ -795,8 +756,8 @@ register_log_routes(
 # to the KC service at its own port.
 #
 # POST /kc/send   - create or find the KC conversation for a session, append an inbound
-#                   message, create a response_needed event.  Returns {conv_id, msg_id}.
-#                   The koreconv_input.py poll loop will then pick up the event.
+#                   message. Returns {conv_id, msg_id}. The KoreConversation message
+#                   append endpoint is the sole source of response_needed events.
 # GET  /kc/conversations/{conv_id}/messages - proxy the KC message list to the browser.
 
 _KC_TIMEOUT = 8
@@ -842,6 +803,44 @@ def _kc_post(path: str, payload: dict) -> dict | None:
         raise HTTPException(status_code=503, detail=f"KoreConversation unreachable: {exc.reason}") from exc
 
 
+def _kc_patch(path: str, payload: dict) -> dict | None:
+    """Proxy a PATCH request to the KoreConversation service."""
+    base = _kc_client.get_base_url()
+    if not base:
+        raise HTTPException(status_code=503, detail="KoreConversation not configured")
+    url  = f"{base}{path}"
+    body = json.dumps(payload).encode("utf-8")
+    req  = urllib.request.Request(
+        url,
+        data    = body,
+        method  = "PATCH",
+        headers = {"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_KC_TIMEOUT) as resp:
+            raw = resp.read().decode("utf-8").strip()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=exc.code, detail=exc.read().decode("utf-8", errors="replace")[:200]) from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=503, detail=f"KoreConversation unreachable: {exc.reason}") from exc
+
+
+def _kc_delete(path: str) -> None:
+    """Proxy a DELETE request to the KoreConversation service."""
+    base = _kc_client.get_base_url()
+    if not base:
+        raise HTTPException(status_code=503, detail="KoreConversation not configured")
+    req = urllib.request.Request(f"{base}{path}", method="DELETE")
+    try:
+        with urllib.request.urlopen(req, timeout=_KC_TIMEOUT):
+            return None
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=exc.code, detail=exc.read().decode("utf-8", errors="replace")[:200]) from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=503, detail=f"KoreConversation unreachable: {exc.reason}") from exc
+
+
 class KcSendRequest(BaseModel):
     session_id: str
     content:    str
@@ -849,7 +848,7 @@ class KcSendRequest(BaseModel):
 
 @app.post("/kc/send", status_code=201)
 def kc_send(body: KcSendRequest):
-    """Append an inbound chat message to KoreConversation and create a response_needed event.
+    """Append an inbound chat message to KoreConversation.
 
     Finds or creates the KC conversation for the given session_id (mapped via external_id).
     Returns {conv_id, msg_id} so the browser can poll for the outbound reply.
@@ -891,14 +890,6 @@ def kc_send(body: KcSendRequest):
     })
     if not msg:
         raise HTTPException(status_code=502, detail="Failed to append message to KC conversation")
-
-    # Create response_needed event.
-    _kc_post("/events", {
-        "conversation_id": conv_id,
-        "event_type":      "response_needed",
-        "priority":        0,
-        "payload":         {},
-    })
 
     return {"conv_id": conv_id, "msg_id": msg.get("id")}
 

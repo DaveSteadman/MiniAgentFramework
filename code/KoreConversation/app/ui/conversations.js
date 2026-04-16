@@ -108,6 +108,7 @@ function renderConvList(conversations) {
         const subject  = c.subject || "(no subject)";
         const selected = c.id === _selectedId ? " selected" : "";
         const ts       = formatDateTime(c.last_activity_at);
+        const displayStatus = getDisplayStatus(c.status);
         return `
 <div class="conv-item${selected}" onclick="selectConversation(${c.id})" data-id="${c.id}">
     <div class="conv-item-top">
@@ -115,7 +116,7 @@ function renderConvList(conversations) {
         <span class="conv-subject">${escHtml(subject)}</span>
     </div>
     <div class="conv-item-mid">
-        <span class="pill pill-${c.status}">${c.status}</span>
+        <span class="pill pill-${displayStatus.className}">${displayStatus.label}</span>
         <span class="pill pill-${c.profile}">${c.profile}</span>
         <span class="pill">${escHtml(c.channel_type)}</span>
     </div>
@@ -170,9 +171,10 @@ async function selectConversation(id) {
 // ====================================================================================================
 
 function renderMeta(conv) {
+    const displayStatus = getDisplayStatus(conv.status);
     const rows = [
         ["id",              conv.id],
-        ["status",          pill(conv.status,       `pill-${conv.status}`)],
+        ["status",          pill(displayStatus.label, `pill-${displayStatus.className}`)],
         ["channel_type",    escHtml(conv.channel_type || "-")],
         ["profile",         pill(conv.profile,      `pill-${conv.profile}`)],
         ["subject",         escHtml(conv.subject || "(none)")],
@@ -182,8 +184,14 @@ function renderMeta(conv) {
         ["created_at",      formatDateTime(conv.created_at)],
         ["updated_at",      formatDateTime(conv.updated_at)],
     ];
+    const midpoint = Math.ceil(rows.length / 2);
     document.getElementById("meta-table").innerHTML =
-        rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+        renderMetaColumn(rows.slice(0, midpoint)) +
+        renderMetaColumn(rows.slice(midpoint));
+}
+
+function renderMetaColumn(rows) {
+    return `<table class="kv-table meta-col">${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("")}</table>`;
 }
 
 // ====================================================================================================
@@ -191,6 +199,7 @@ function renderMeta(conv) {
 // ====================================================================================================
 
 function renderBackground(text) {
+    document.getElementById("sec-bg").classList.toggle("is-empty", text.length === 0);
     document.getElementById("bg-empty").hidden = text.length > 0;
     document.getElementById("bg-text").textContent = text;
 }
@@ -200,6 +209,7 @@ function renderBackground(text) {
 // ====================================================================================================
 
 function renderSummary(text) {
+    document.getElementById("sec-summary").classList.toggle("is-empty", text.length === 0);
     document.getElementById("summary-empty").hidden = text.length > 0;
     document.getElementById("summary-text").textContent = text;
 }
@@ -283,7 +293,7 @@ async function deleteConversation() {
     const id  = _selectedId;
     const btn = document.getElementById("delete-conv-btn");
     const ok  = window.confirm(
-        `Delete conversation #${id}?\n\nThis marks the conversation as deleted and keeps its history for inspection.`
+        `Delete conversation #${id}?\n\nThis permanently removes it from KoreConversation.`
     );
     if (!ok) return;
 
@@ -305,6 +315,59 @@ async function deleteConversation() {
         window.alert(`Delete failed: ${e.message}`);
     } finally {
         btn.disabled = false;
+    }
+}
+
+async function createConversation() {
+    const subject = window.prompt("New conversation name:", "New conversation");
+    if (subject === null) return;
+
+    try {
+        const resp = await fetch("/conversations", {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({
+                channel_type: "webchat",
+                profile:      "admin",
+                subject:      subject.trim() || "New conversation",
+            }),
+        });
+        if (!resp.ok) {
+            const err = await resp.text();
+            throw new Error(`HTTP ${resp.status}: ${err}`);
+        }
+
+        const conv = await resp.json();
+        await loadConversations();
+        await selectConversation(conv.id);
+    } catch (e) {
+        console.error("createConversation:", e);
+        window.alert(`Create failed: ${e.message}`);
+    }
+}
+
+async function renameConversation() {
+    if (_selectedId === null) return;
+
+    const current = _allConversations.find(c => c.id === _selectedId);
+    const nextSubject = window.prompt("Rename conversation:", current?.subject || "");
+    if (nextSubject === null) return;
+
+    try {
+        const resp = await fetch(`/conversations/${_selectedId}`, {
+            method:  "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ subject: nextSubject.trim() }),
+        });
+        if (!resp.ok) {
+            const err = await resp.text();
+            throw new Error(`HTTP ${resp.status}: ${err}`);
+        }
+
+        await refreshAll();
+    } catch (e) {
+        console.error("renameConversation:", e);
+        window.alert(`Rename failed: ${e.message}`);
     }
 }
 
@@ -487,4 +550,11 @@ function formatDateTime(iso) {
     } catch {
         return iso;
     }
+}
+
+function getDisplayStatus(status) {
+    if (status === "active") {
+        return { label: "awaiting_inbound", className: "awaiting_inbound" };
+    }
+    return { label: status || "-", className: status || "active" };
 }

@@ -189,7 +189,6 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
         def _run_task(_rest=rest, _prompts=list(prompts), _ctx=ctx) -> None:
             from KoreAgent.utils.runtime_logger import SessionLogger
             from KoreAgent.utils.runtime_logger import create_log_file_path
-            from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
             from KoreAgent.utils.workspace_utils import get_logs_dir
 
             run_log_path = create_log_file_path(log_dir=get_logs_dir())
@@ -202,7 +201,7 @@ def _cmd_task(arg: str, ctx: SlashCommandContext) -> None:
                     results = run_prompt_batch(
                         _prompts,
                         session_id=f"task_{_rest}",
-                        persist_path=get_chatsessions_day_dir() / f"task_{_rest}.json",
+                        persist_path=None,
                         config=_ctx.config,
                         logger=run_logger,
                         quiet=True,

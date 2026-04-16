@@ -42,7 +42,7 @@ def register_session_routes(
     run_queues,
     run_queues_lock,
     sse,
-    get_chatsessions_day_dir,
+    delete_session_state,
 ) -> None:
     @app.post("/sessions/{session_id}/prompt")
     def post_prompt(session_id: str, body: PromptRequest):
@@ -61,8 +61,7 @@ def register_session_routes(
             return {"run_id": run_id, "session_id": session_id, "queued": True}
 
         def _run(_prompt=prompt_text) -> None:
-            persist = get_chatsessions_day_dir() / f"{session_id}.json"
-            session_context = create_session_context(session_id=session_id, persist_path=persist)
+            session_context = create_session_context(session_id=session_id, persist_path=None)
             history, summaries = load_session(session_id)
             queue_run_event(run_q, {"type": "start", "run_id": run_id, "prompt": _prompt}, priority=True)
             try:
@@ -159,20 +158,10 @@ def register_session_routes(
 
     @app.delete("/sessions/{session_id}")
     def delete_session(session_id: str):
-        """Delete all persisted state for a session: history file + in-memory scratch."""
+        """Delete all persisted state for a session."""
         validate_session_id(session_id)
-        clear_session_scratch(session_id)
-        deleted_path = None
-        for candidate in [
-            *list(get_chatsessions_day_dir().parent.glob(f"*/{session_id}.json")),
-            get_chatsessions_day_dir().parent / "named" / f"{session_id}.json",
-            get_chatsessions_day_dir().parent / f"{session_id}.json",
-        ]:
-            if candidate.exists():
-                candidate.unlink()
-                deleted_path = str(candidate)
-                break
-        return {"ok": True, "session_id": session_id, "deleted_file": deleted_path}
+        delete_session_state(session_id)
+        return {"ok": True, "session_id": session_id}
 
     @app.get("/runs/{run_id}/stream")
     def stream_run(run_id: str):

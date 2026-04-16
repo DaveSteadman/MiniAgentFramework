@@ -38,6 +38,11 @@ _PROFILE_DEFAULTS: dict[str, str] = {
 }
 _FALLBACK_PROFILE = "external"
 
+_CLAIMABLE_EVENT_TYPES: dict[str, tuple[str, ...]] = {
+    "agent": ("response_needed", "compress_needed", "conversation_closed"),
+    "korecomms": ("outbound_ready", "conversation_deleted"),
+}
+
 _DB_PATH: Path | None = None
 
 
@@ -161,6 +166,12 @@ def _default_profile(channel_type: str) -> str:
     return _PROFILE_DEFAULTS.get(channel_type, _FALLBACK_PROFILE)
 
 
+# ----------------------------------------------------------------------------------------------------
+def _claimable_event_types_for_consumer(claimed_by: str) -> tuple[str, ...] | None:
+    key = (claimed_by or "").strip().lower()
+    return _CLAIMABLE_EVENT_TYPES.get(key)
+
+
 # ====================================================================================================
 # MARK: CONVERSATIONS
 # ====================================================================================================
@@ -265,6 +276,7 @@ def conversation_list(
 def conversation_update(
     conversation_id: int,
     status:           str | None  = None,
+    subject:          str | None  = None,
     thread_summary:   str | None  = None,
     scratchpad:       dict | None = None,
     background_context: str | None = None,
@@ -277,6 +289,9 @@ def conversation_update(
     if status is not None:
         fields.append("status = ?")
         params.append(status)
+    if subject is not None:
+        fields.append("subject = ?")
+        params.append(subject)
     if thread_summary is not None:
         fields.append("thread_summary = ?")
         params.append(thread_summary)
@@ -333,6 +348,68 @@ def message_append(
         row_id = cur.lastrowid
         row    = c.execute("SELECT * FROM messages WHERE id = ?", (row_id,)).fetchone()
     return _row_to_dict(row)
+
+
+# ----------------------------------------------------------------------------------------------------
+def _latest_message_tx(c: sqlite3.Connection, conversation_id: int) -> sqlite3.Row | None:
+    return c.execute(
+        """
+        SELECT id, direction, created_at FROM messages
+        WHERE conversation_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (conversation_id,),
+    ).fetchone()
+
+
+# ----------------------------------------------------------------------------------------------------
+def _conversation_has_unanswered_inbound_tx(c: sqlite3.Connection, conversation_id: int) -> bool:
+    row = _latest_message_tx(c, conversation_id)
+    return row is not None and row["direction"] == "inbound"
+
+
+# ----------------------------------------------------------------------------------------------------
+def conversation_has_unanswered_inbound(conversation_id: int) -> bool:
+    with _conn() as c:
+        return _conversation_has_unanswered_inbound_tx(c, conversation_id)
+
+
+# ----------------------------------------------------------------------------------------------------
+def event_has_open_response_needed(conversation_id: int) -> bool:
+    with _conn() as c:
+        latest = _latest_message_tx(c, conversation_id)
+        if latest is None or latest["direction"] != "inbound":
+            return False
+        row = c.execute(
+            """
+            SELECT 1 FROM events
+            WHERE conversation_id = ?
+              AND event_type = 'response_needed'
+              AND status IN ('pending', 'claimed')
+              AND created_at >= ?
+            LIMIT 1
+            """,
+            (conversation_id, latest["created_at"]),
+        ).fetchone()
+    return row is not None
+
+
+# ----------------------------------------------------------------------------------------------------
+def clear_pending_response_needed_events(conversation_id: int) -> int:
+    now = _now()
+    with _conn() as c:
+        cur = c.execute(
+            """
+            UPDATE events
+            SET status = 'completed', completed_at = ?
+            WHERE conversation_id = ?
+              AND event_type = 'response_needed'
+              AND status IN ('pending', 'claimed')
+            """,
+            (now, conversation_id),
+        )
+    return cur.rowcount
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -416,27 +493,56 @@ def event_create(
 def event_claim_next(claimed_by: str) -> dict | None:
     """Atomically claim the highest-priority pending event. Returns the event dict or None."""
     now = _now()
+    claimable_types = _claimable_event_types_for_consumer(claimed_by)
+    type_clause = ""
+    type_params: list[str] = []
+    if claimable_types:
+        placeholders = ", ".join("?" for _ in claimable_types)
+        type_clause = f" AND event_type IN ({placeholders})"
+        type_params = list(claimable_types)
     with _conn() as c:
         # BEGIN IMMEDIATE gives write lock for the duration - prevents double-claim.
         c.execute("BEGIN IMMEDIATE")
-        row = c.execute(
-            """
-            SELECT * FROM events
-            WHERE status = 'pending'
-            ORDER BY priority DESC, created_at ASC
-            LIMIT 1
-            """,
-        ).fetchone()
-        if row is None:
+        while True:
+            row = c.execute(
+                f"""
+                SELECT * FROM events
+                WHERE status = 'pending'
+                {type_clause}
+                ORDER BY priority DESC, created_at ASC
+                LIMIT 1
+                """,
+                type_params,
+            ).fetchone()
+            if row is None:
+                c.execute("COMMIT")
+                return None
+
+            event_id = row["id"]
+            conversation_id = row["conversation_id"]
+            if (
+                row["event_type"] == "response_needed"
+                and conversation_id is not None
+                and not _conversation_has_unanswered_inbound_tx(c, conversation_id)
+            ):
+                c.execute(
+                    "UPDATE events SET status='completed', completed_at=? WHERE id=?",
+                    (now, event_id),
+                )
+                continue
+
+            c.execute(
+                "UPDATE events SET status='claimed', claimed_by=?, claimed_at=? WHERE id=?",
+                (claimed_by, now, event_id),
+            )
+            if row["event_type"] == "response_needed" and conversation_id is not None:
+                c.execute(
+                    "UPDATE conversations SET status='agent_processing', updated_at=?, last_activity_at=? WHERE id=?",
+                    (now, now, conversation_id),
+                )
             c.execute("COMMIT")
-            return None
-        event_id = row["id"]
-        c.execute(
-            "UPDATE events SET status='claimed', claimed_by=?, claimed_at=? WHERE id=?",
-            (claimed_by, now, event_id),
-        )
-        c.execute("COMMIT")
-        updated = c.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            updated = c.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            break
     return _row_to_dict(updated)
 
 

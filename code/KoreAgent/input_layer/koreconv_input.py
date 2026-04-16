@@ -229,8 +229,17 @@ def _handle_event(
         return
 
     event_id = event.get("id")
+    event_type = (event.get("event_type") or "").strip()
     conv     = event.get("conversation") or {}
     conv_id  = conv.get("id")
+
+    if event_type != "response_needed":
+        push_log_line(f"[KORECONV] Skipping unsupported event {event_id} ({event_type or 'unknown'})")
+        try:
+            _http_post(base, f"/events/{event_id}/complete", {"status": "completed"})
+        except Exception as exc:
+            push_log_line(f"[KORECONV] Event {event_id}: skip-complete failed: {exc}")
+        return
 
     if not conv_id:
         push_log_line(f"[KORECONV] Event {event_id} has no conversation - completing as failed")
@@ -313,7 +322,7 @@ def _handle_event(
         # Patch conversation metadata
         try:
             _http_patch(base, f"/conversations/{conv_id}", {
-                "status":         "waiting_agent",
+                "status":         "active",
                 "token_estimate": prompt_tokens,
                 "turn_count":     turn_count + 1,
                 "scratchpad":     current_scratchpad,
@@ -329,7 +338,7 @@ def _handle_event(
 
         # Raise outbound_ready for KoreComms delivery if needed
         channel = conv.get("channel_type", "webchat")
-        if channel != "webchat":
+        if channel not in {"webchat", "manual"}:
             try:
                 _http_post(base, "/events", {
                     "conversation_id": conv_id,

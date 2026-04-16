@@ -29,7 +29,7 @@
             <label>status</label>
             <select id="filter-status">
                 <option value="">all</option>
-                <option value="active">active</option>
+                <option value="active">awaiting_inbound</option>
                 <option value="waiting_agent">waiting_agent</option>
                 <option value="agent_processing">agent_processing</option>
                 <option value="archived">archived</option>
@@ -45,6 +45,7 @@
                 <option value="manual">manual</option>
             </select>
         </div>
+        <button class="hdr-btn" id="btn-new-conv" onclick="createConversation()">new</button>
         <button class="hdr-btn" id="btn-refresh" onclick="refreshAll()">refresh</button>
         <label class="hdr-btn auto-label">
             <input type="checkbox" id="chk-auto" onchange="toggleAuto()"> auto
@@ -62,6 +63,8 @@
                 <div class="dot"></div>
                 Conversations
                 <span class="count-badge" id="conv-count">0</span>
+                <div class="flex-gap"></div>
+                <button class="section-btn" type="button" onclick="createConversation()">new</button>
             </div>
             <div id="conv-list"></div>
         </div>
@@ -84,9 +87,10 @@
                     <div class="section-header">
                         <span class="section-icon">i</span> Metadata
                         <div class="flex-gap"></div>
+                        <button id="rename-conv-btn" class="section-btn" onclick="renameConversation()">rename</button>
                         <button id="delete-conv-btn" class="section-btn section-btn-danger" onclick="deleteConversation()">delete</button>
                     </div>
-                    <table id="meta-table" class="kv-table"></table>
+                    <div id="meta-table" class="meta-grid"></div>
                 </section>
 
                 <!-- Background context -->

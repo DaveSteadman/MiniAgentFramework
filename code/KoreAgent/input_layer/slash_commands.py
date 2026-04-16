@@ -39,7 +39,6 @@ from KoreAgent.input_layer.slash_command_handlers_sessions import register_sessi
 from KoreAgent.input_layer.slash_command_handlers_tasks import register_task_slash_commands
 from KoreAgent.input_layer.slash_command_handlers_testing import register_testing_slash_commands
 from KoreAgent.utils.workspace_utils import get_bootstrap_defaults_file
-from KoreAgent.utils.workspace_utils import get_chatsessions_dir
 from KoreAgent.utils.workspace_utils import get_controldata_dir
 from KoreAgent.utils.workspace_utils import get_logs_dir
 from KoreAgent.utils.workspace_utils import get_test_results_dir
@@ -297,7 +296,7 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
     import shutil
 
     if not arg.strip():
-        ctx.output("Usage: /deletelogs <days>  |  delete log, chatsession, and test_results date-folders older than N days (named sessions are never culled)", "dim")
+        ctx.output("Usage: /deletelogs <days>  |  delete log and test_results date-folders older than N days", "dim")
         return
     try:
         days = int(arg.strip())
@@ -312,7 +311,7 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
     date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
     deleted = []
     errors = []
-    for base_dir in (get_logs_dir(), get_chatsessions_dir(), get_test_results_dir()):
+    for base_dir in (get_logs_dir(), get_test_results_dir()):
         if not base_dir.exists():
             continue
         for folder in sorted(base_dir.iterdir()):
@@ -331,7 +330,7 @@ def _cmd_deletelogs(arg: str, ctx: SlashCommandContext) -> None:
 
     stray_deleted = []
     stray_errors = []
-    for base_dir in (get_logs_dir(), get_test_results_dir(), get_chatsessions_dir()):
+    for base_dir in (get_logs_dir(), get_test_results_dir()):
         if not base_dir.exists():
             continue
         for item in sorted(base_dir.iterdir()):

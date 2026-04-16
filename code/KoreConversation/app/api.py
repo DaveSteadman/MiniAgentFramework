@@ -107,6 +107,7 @@ class ConversationCreateRequest(BaseModel):
 
 class ConversationPatchRequest(BaseModel):
     status:             str | None  = None
+    subject:            str | None  = None
     thread_summary:     str | None  = None
     scratchpad:         dict | None = None
     background_context: str | None  = None
@@ -167,6 +168,7 @@ def patch_conversation(conversation_id: int, req: ConversationPatchRequest):
     result = db.conversation_update(
         conversation_id    = conversation_id,
         status             = req.status,
+        subject            = req.subject,
         thread_summary     = req.thread_summary,
         scratchpad         = req.scratchpad,
         background_context = req.background_context,
@@ -261,11 +263,16 @@ def append_message(conversation_id: int, req: MessageAppendRequest):
     )
     # Inbound messages need an agent response - create the event so the agent picks it up.
     if req.direction == "inbound":
-        db.event_create(
-            conversation_id = conversation_id,
-            event_type      = "response_needed",
-            priority        = 0,
-        )
+        if not db.event_has_open_response_needed(conversation_id):
+            db.event_create(
+                conversation_id = conversation_id,
+                event_type      = "response_needed",
+                priority        = 0,
+            )
+        db.conversation_update(conversation_id=conversation_id, status="waiting_agent")
+    elif req.direction == "outbound":
+        db.clear_pending_response_needed_events(conversation_id)
+        db.conversation_update(conversation_id=conversation_id, status="active")
     return msg
 
 

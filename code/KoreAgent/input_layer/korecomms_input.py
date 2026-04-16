@@ -259,15 +259,13 @@ def _handle_message(
     run_log_path = create_log_file_path(log_dir=log_dir)
     with session_logger_cls(run_log_path) as run_logger:
 
-        # Load existing session state (conversation history + scratchpad).
+        # Legacy chatsessions persistence is retired; this path now runs transiently.
         history, summaries = load_session(session_id)
 
         # Build the context objects for orchestration.
-        from KoreAgent.utils.workspace_utils import get_chatsessions_day_dir
-        persist_path = get_chatsessions_day_dir() / f"{session_id}.json"
         _, session_ctx = make_task_session(
             session_id   = session_id,
-            persist_path = persist_path,
+            persist_path = None,
             max_turns    = 10,
         )
 
