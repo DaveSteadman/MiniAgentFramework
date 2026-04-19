@@ -111,6 +111,15 @@ def _display_name(conv: dict) -> str:
     return f"conversation_{conv.get('id', '?')}"
 
 
+def _list_all_conversations() -> list[dict]:
+    result = _kc_get("/conversations?limit=500") or []
+    if not isinstance(result, list):
+        return []
+    conversations = list(result)
+    conversations.sort(key=lambda item: item.get("last_activity_at") or "", reverse=True)
+    return conversations
+
+
 def _list_webchat_conversations() -> list[dict]:
     result = _kc_get("/conversations?channel_type=webchat&limit=500") or []
     if not isinstance(result, list):
@@ -215,16 +224,17 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
             return
 
         if sub == "list":
-            conversations = _list_webchat_conversations()
+            conversations = _list_all_conversations()
             if not conversations:
-                ctx.output("No KoreConversation webchat sessions found.", "dim")
+                ctx.output("No KoreConversation conversations found.", "dim")
                 return
             ctx.output(f"{len(conversations)} conversation(s):", "info")
             for conv in conversations:
-                label = _display_name(conv)
-                turns = conv.get("turn_count", 0)
-                status = conv.get("status", "-")
-                ctx.output(f"  {label:<30}  {turns} turn(s)  [{status}]", "item")
+                label   = _display_name(conv)
+                turns   = conv.get("turn_count", 0)
+                status  = conv.get("status", "-")
+                channel = conv.get("channel_type", "-")
+                ctx.output(f"  {label:<30}  {turns} turn(s)  [{status}]  [{channel}]", "item")
             return
 
         if sub == "resume":
