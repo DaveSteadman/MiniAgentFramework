@@ -15,8 +15,8 @@
 #   GET  /tasks                        enabled scheduled tasks with last-run and next-fire times
 #   GET  /timeline                     minute-resolution task timeline centred on now
 #   GET  /queue                        current task queue state
-#   GET  /history                      last 20 input history entries (shared with TUI)
-#   POST /history                      append an entry to input history
+#   GET  /sessions/{id}/input-history  last 20 input history entries for the session
+#   POST /sessions/{id}/input-history  append an entry to session input history
 #   GET  /sessions/{id}/history        full conversation history for a session
 #   POST /sessions/{id}/prompt         submit a new prompt (enqueues on task_queue)
 #   GET  /logs                         list all log directories and files
@@ -95,8 +95,6 @@ from KoreAgent.input_layer.api_routes_status import register_status_routes
 from KoreAgent.input_layer.api_routes_tasks import register_task_routes
 from KoreAgent.utils.runtime_logger import SessionLogger
 from KoreAgent.utils.runtime_logger import create_log_file_path
-from KoreAgent.input_layer.chat_input import append_to_history
-from KoreAgent.input_layer.chat_input import load_history
 from KoreAgent.scheduler.scheduler import is_task_due
 from KoreAgent.scheduler.scheduler import task_queue
 from KoreAgent.input_layer.slash_commands import handle as handle_slash
@@ -406,21 +404,36 @@ class HistoryAppendRequest(BaseModel):
     text: str
 
 
-@app.get("/history")
-def get_history():
-    """Return the last _HISTORY_LIMIT input history entries (oldest-first)."""
-    entries = load_history()
+@app.get("/sessions/{session_id}/input-history")
+def get_session_input_history(session_id: str):
+    """Return the last _HISTORY_LIMIT input history entries for the session's conversation."""
+    _validate_session_id(session_id)
+    conv = _kc_get_conversation_for_session(session_id)
+    if conv is None:
+        return {"entries": []}
+    try:
+        result  = _kc_get(f"/conversations/{conv['id']}/input-history")
+        entries = result.get("entries", []) if isinstance(result, dict) else []
+    except HTTPException:
+        entries = []
     return {"entries": entries[-_HISTORY_LIMIT:]}
 
 
-@app.post("/history")
-def post_history(body: HistoryAppendRequest):
-    """Append one entry to the shared input history file."""
+@app.post("/sessions/{session_id}/input-history")
+def post_session_input_history(session_id: str, body: HistoryAppendRequest):
+    """Append one entry to the session's per-conversation input history."""
+    _validate_session_id(session_id)
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text cannot be empty")
-    append_to_history(text)
-    entries = load_history()
+    conv = _kc_ensure_conversation(session_id)
+    if conv is None:
+        return {"entries": [text]}
+    try:
+        result  = _kc_patch(f"/conversations/{conv['id']}/input-history", {"text": text})
+        entries = result.get("entries", []) if isinstance(result, dict) else []
+    except HTTPException:
+        entries = [text]
     return {"entries": entries[-_HISTORY_LIMIT:]}
 
 
@@ -480,7 +493,25 @@ def _kc_external_id_for_session(session_id: str) -> str:
     return f"webchat_{session_id}"
 
 
+# In-memory cache: session_id -> KC conversation dict (avoids repeated GET lookups per prompt).
+# Invalidated on session delete. Thread-safe for read-heavy access since dict reads are atomic
+# in CPython, but the cache is best-effort - a miss just does a fresh GET.
+_kc_conv_cache: dict[str, dict] = {}
+
+# Pending display names set via /newchat <name>. Consumed on first conversation create.
+_kc_session_names: dict[str, str] = {}
+
+
+def _kc_set_session_name(session_id: str, name: str) -> None:
+    if name:
+        _kc_session_names[session_id] = name
+    else:
+        _kc_session_names.pop(session_id, None)
+
+
 def _kc_get_conversation_for_session(session_id: str) -> dict | None:
+    if session_id in _kc_conv_cache:
+        return _kc_conv_cache[session_id]
     external_id = _kc_external_id_for_session(session_id)
     try:
         result = _kc_get(f"/conversations/by-external-id/{urllib.parse.quote(external_id, safe='')}")
@@ -488,7 +519,83 @@ def _kc_get_conversation_for_session(session_id: str) -> dict | None:
         if exc.status_code in {404, 503}:
             return None
         raise
-    return result if isinstance(result, dict) else None
+    conv = result if isinstance(result, dict) else None
+    if conv is not None:
+        _kc_conv_cache[session_id] = conv
+    return conv
+
+
+def _get_session_turns(session_id: str) -> list[dict]:
+    # Single KC HTTP call - returns paired inbound/outbound messages as turns.
+    external_id = _kc_external_id_for_session(session_id)
+    try:
+        result = _kc_get(f"/conversations/by-external-id/{urllib.parse.quote(external_id, safe='')}/turns")
+    except HTTPException as exc:
+        if exc.status_code in {404, 503}:
+            return []
+        raise
+    if not isinstance(result, dict):
+        return []
+    messages = result.get("messages") or []
+    turns: list[dict] = []
+    pending_prompt: str | None = None
+    for message in messages:
+        direction = message.get("direction")
+        content   = (message.get("content") or "").strip()
+        if not content:
+            continue
+        if direction == "inbound":
+            pending_prompt = content
+        elif direction == "outbound" and pending_prompt is not None:
+            turns.append({"role": "user",      "content": pending_prompt})
+            turns.append({"role": "assistant", "content": content})
+            pending_prompt = None
+    return turns
+
+
+def _kc_ensure_conversation(session_id: str) -> dict | None:
+    """Return the KC conversation for session_id, creating it if absent."""
+    conv = _kc_get_conversation_for_session(session_id)
+    if conv is not None:
+        return conv
+    try:
+        external_id = _kc_external_id_for_session(session_id)
+        # Use any pending display name set by /newchat <name>, fall back to default.
+        subject = _kc_session_names.pop(session_id, None) or f"Webchat {session_id}"
+        conv = _kc_post("/conversations", {
+            "channel_type": "webchat",
+            "subject":      subject,
+            "external_id":  external_id,
+        })
+    except Exception:
+        return None
+    if isinstance(conv, dict):
+        _kc_conv_cache[session_id] = conv
+        return conv
+    return None
+
+
+def _kc_save_turn(session_id: str, user_text: str, agent_text: str) -> None:
+    """Write a user + agent turn to the KC conversation as inbound + outbound messages."""
+    conv = _kc_ensure_conversation(session_id)
+    if conv is None:
+        return
+    conv_id = conv["id"]
+    try:
+        _kc_post(f"/conversations/{conv_id}/messages", {
+            "direction":      "inbound",
+            "content":        user_text,
+            "sender_display": session_id,
+            "status":         "received",
+        })
+        _kc_post(f"/conversations/{conv_id}/messages", {
+            "direction":      "outbound",
+            "content":        agent_text,
+            "sender_display": "agent",
+            "status":         "sent",
+        })
+    except Exception:
+        pass
 
 
 def _load_session(session_id: str) -> tuple["ConversationHistory", list[dict]]:
@@ -509,8 +616,8 @@ def _load_session(session_id: str) -> tuple["ConversationHistory", list[dict]]:
     for key, value in scratchpad.items():
         try:
             scratch_restore_key(key, str(value), session_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[session] Warning: could not restore scratchpad key '{key}': {exc}", flush=True)
 
     thread_summary = (conv.get("thread_summary") or "").strip()
     if thread_summary:
@@ -579,7 +686,8 @@ def _compact_old_turns(turns: list[dict], summaries: list[dict], batch_size: int
     try:
         result       = call_llm_chat(model_name=model, messages=messages, tools=None, num_ctx=num_ctx)
         summary_text = (result.response or "").strip()
-    except Exception:
+    except Exception as exc:
+        print(f"[session] Warning: history compaction LLM call failed: {exc}", flush=True)
         return turns, summaries
 
     if not summary_text:
@@ -624,12 +732,13 @@ def _flush_scratch_to_session(session_id: str) -> None:
     try:
         named_scratch = {k: v for k, v in get_scratch_store(session_id).items() if not k.startswith("_tc_")}
         _kc_patch(f"/conversations/{conv['id']}", {"scratchpad": named_scratch})
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[session] Warning: could not flush scratchpad to KoreConversation for session '{session_id}': {exc}", flush=True)
 
 
 def _delete_session_state(session_id: str) -> None:
     scratch_clear(session_id)
+    _kc_conv_cache.pop(session_id, None)
     conv = _kc_get_conversation_for_session(session_id)
     if conv is None:
         return
@@ -732,6 +841,9 @@ register_session_routes(
     run_queues_lock=_run_queues_lock,
     sse=lambda data: _sse(data),
     delete_session_state=_delete_session_state,
+    kc_save_turn=_kc_save_turn,
+    get_session_turns=_get_session_turns,
+    kc_set_session_name=_kc_set_session_name,
 )
 
 register_log_routes(

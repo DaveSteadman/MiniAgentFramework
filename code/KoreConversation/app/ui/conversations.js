@@ -15,31 +15,66 @@
 // STATE
 // ====================================================================================================
 
-let _selectedId     = null;
-let _autoInterval   = null;
-let _allConversations = [];
-let _dragStartX     = null;
-let _dragStartW     = null;
+let _selectedId         = null;
+let _selectedExternalId = null;
+let _autoInterval       = null;
+let _sse                = null;   // EventSource for /stream push notifications
+let _allConversations   = [];
+let _dragStartX         = null;
+let _dragStartW         = null;
+
+// ====================================================================================================
+// CACHE HELPERS
+// ====================================================================================================
+// Persist the last-known API responses in localStorage so the page can render instantly
+// on load before the network response arrives (stale-while-revalidate pattern).
+
+function _cacheSet(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
+}
+
+function _cacheGet(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+}
 
 // ====================================================================================================
 // INIT
 // ====================================================================================================
 
 document.addEventListener("DOMContentLoaded", () => {
-    loadStatus();
-    loadConversations().then(() => {
-        const saved = parseInt(localStorage.getItem("kc_selected_id"), 10);
-        if (saved && !isNaN(saved)) { selectConversation(saved); }
-    });
+    // Render from localStorage cache immediately - before any network request.
+    const cachedList = _cacheGet("kc_conv_list");
+    if (cachedList) { _allConversations = cachedList; applyFilters(); }
+
+    const saved = parseInt(localStorage.getItem("kc_selected_id"), 10);
+    if (saved && !isNaN(saved)) {
+        const cachedDetail = _cacheGet("kc_detail_" + saved);
+        if (cachedDetail) { _renderDetail(cachedDetail); }
+    }
+
+    // Fetch fresh data in parallel - updates the display when it arrives.
+    const loadDetail = (saved && !isNaN(saved)) ? selectConversation(saved) : Promise.resolve();
+    Promise.all([loadStatus(), loadConversations(), loadDetail]);
     initSplitter();
 
     document.getElementById("filter-status").addEventListener("change",  applyFilters);
     document.getElementById("filter-channel").addEventListener("change", applyFilters);
 
-    // Start auto-refresh immediately.
+    // Connect to the SSE push stream - this replaces the 5-second poll interval.
+    // A 30-second fallback interval handles SSE gaps (reconnect window, etc.).
     const chk = document.getElementById("chk-auto");
-    chk.checked    = true;
-    _autoInterval  = setInterval(refreshAll, 5000);
+    chk.checked = true;
+    _connectSSE();
+    _autoInterval = setInterval(refreshAll, 30000);
+
+    // Also refresh immediately when the tab becomes visible again.
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) refreshAll();
+    });
+    window.addEventListener("focus", refreshAll);
 });
 
 // ====================================================================================================
@@ -70,6 +105,7 @@ async function loadConversations() {
         const r = await fetch("/conversations?limit=500");
         if (!r.ok) { throw new Error(`HTTP ${r.status}`); }
         _allConversations = await r.json();
+        _cacheSet("kc_conv_list", _allConversations);
         applyFilters();
     } catch (e) {
         console.error("loadConversations:", e);
@@ -133,37 +169,39 @@ async function selectConversation(id) {
     _selectedId = id;
     localStorage.setItem("kc_selected_id", id);
 
-    // Highlight in sidebar
-    document.querySelectorAll(".conv-item").forEach(el => {
-        el.classList.toggle("selected", parseInt(el.dataset.id) === id);
-    });
-
     document.getElementById("detail-empty").hidden = true;
     document.getElementById("detail").hidden        = false;
 
     try {
-        const [convR, msgsR, evtsR] = await Promise.all([
-            fetch(`/conversations/${id}`),
-            fetch(`/conversations/${id}/messages?limit=1000`),
-            fetch(`/events?conversation_id=${id}&limit=200`),
-        ]);
-
-        const conv  = convR.ok  ? await convR.json()  : null;
-        const msgs  = msgsR.ok  ? await msgsR.json()  : [];
-        const evts  = evtsR.ok  ? await evtsR.json()  : [];
-
-        if (conv) {
-            renderMeta(conv);
-            renderBackground(conv.background_context || "");
-            renderSummary(conv.thread_summary || "");
-            renderScratchpad(conv.scratchpad);
-        }
-        renderMessages(msgs);
-        renderEvents(evts);
-
+        const r = await fetch(`/conversations/${id}/detail`);
+        if (!r.ok) return;
+        const data = await r.json();
+        _cacheSet("kc_detail_" + id, data);
+        _renderDetail(data);
     } catch (e) {
         console.error("selectConversation:", e);
     }
+}
+
+function _renderDetail(data) {
+    const id   = _selectedId;
+    const conv = data.conversation;
+    const msgs = data.messages;
+    const evts = data.events;
+
+    if (conv) {
+        _selectedExternalId = conv.external_id || null;
+        renderMeta(conv);
+        renderBackground(conv.background_context || "");
+        renderSummary(conv.thread_summary || "");
+        renderScratchpad(conv.scratchpad);
+        renderInputHistory(conv.input_history || []);
+    }
+    document.querySelectorAll(".conv-item").forEach(el => {
+        el.classList.toggle("selected", parseInt(el.dataset.id) === id);
+    });
+    renderMessages(msgs);
+    renderEvents(evts);
 }
 
 // ====================================================================================================
@@ -238,6 +276,23 @@ function renderScratchpad(scratchpad) {
 }
 
 // ====================================================================================================
+// INPUT HISTORY
+// ====================================================================================================
+
+function renderInputHistory(entries) {
+    const list  = document.getElementById("history-list");
+    const count = document.getElementById("history-count");
+    const empty = document.getElementById("history-empty");
+    const items = Array.isArray(entries) ? entries : [];
+    count.textContent = items.length;
+    empty.hidden      = items.length > 0;
+    // Render newest-first so the most recent prompt is at the top.
+    list.innerHTML    = items.slice().reverse().map(e =>
+        `<li class="history-item">${escHtml(e)}</li>`
+    ).join("");
+}
+
+// ====================================================================================================
 // MESSAGES
 // ====================================================================================================
 // COMPOSE
@@ -255,29 +310,55 @@ async function sendMessage() {
     const dirSel = document.getElementById("compose-direction");
     const btn    = document.getElementById("compose-btn");
 
-    const text = input.value.trim();
+    const text      = input.value.trim();
+    const direction = dirSel.value;
     if (!text) return;
 
     input.disabled = true;
     btn.disabled   = true;
 
+    // Inbound messages for webchat conversations route through the MAF agent so the agent
+    // processes them and writes the response back to KC - exactly like typing in the agent page.
+    const MAF_BASE     = "http://localhost:8000";
+    const wcPrefix     = "webchat_";
+    const isWebchat    = direction === "inbound" && _selectedExternalId && _selectedExternalId.startsWith(wcPrefix);
+
     try {
-        const resp = await fetch(`/conversations/${_selectedId}/messages`, {
-            method:  "POST",
-            headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({
-                direction:      dirSel.value,
-                content:        text,
-                sender_display: "debug-ui",
-            }),
-        });
-        if (!resp.ok) {
-            const err = await resp.text();
-            console.error("sendMessage failed:", resp.status, err);
-            return;
+        if (isWebchat) {
+            const sessionId = _selectedExternalId.slice(wcPrefix.length);
+            const resp = await fetch(`${MAF_BASE}/sessions/${encodeURIComponent(sessionId)}/prompt`, {
+                method:  "POST",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify({ prompt: text }),
+            });
+            if (!resp.ok) {
+                const err = await resp.text();
+                console.error("sendMessage (MAF) failed:", resp.status, err);
+                return;
+            }
+            const data = await resp.json();
+            input.value = "";
+            // Refresh immediately to show the inbound message, then again when the agent responds.
+            await refreshAll();
+            _listenForResponse(data.run_id, MAF_BASE);
+        } else {
+            const resp = await fetch(`/conversations/${_selectedId}/messages`, {
+                method:  "POST",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify({
+                    direction,
+                    content:        text,
+                    sender_display: "debug-ui",
+                }),
+            });
+            if (!resp.ok) {
+                const err = await resp.text();
+                console.error("sendMessage (KC) failed:", resp.status, err);
+                return;
+            }
+            input.value = "";
+            await refreshAll();
         }
-        input.value = "";
-        await refreshAll();
     } catch (e) {
         console.error("sendMessage:", e);
     } finally {
@@ -285,6 +366,25 @@ async function sendMessage() {
         btn.disabled   = false;
         input.focus();
     }
+}
+
+function _listenForResponse(runId, mafBase) {
+    // Subscribe to the MAF run SSE stream and refresh the conversations page when the
+    // agent finishes - so both the inbound message and the agent reply become visible.
+    const es = new EventSource(`${mafBase}/runs/${encodeURIComponent(runId)}/stream`);
+    const done = () => { try { es.close(); } catch (_) {} };
+    es.onmessage = async e => {
+        try {
+            const ev = JSON.parse(e.data);
+            if (ev.type === "response" || ev.type === "error") {
+                done();
+                await refreshAll();
+            }
+        } catch (_) {}
+    };
+    es.onerror = done;
+    // Safety net - close after 3 minutes regardless.
+    setTimeout(done, 180000);
 }
 
 async function deleteConversation() {
@@ -473,20 +573,70 @@ function renderEvents(evts) {
 // ====================================================================================================
 
 async function refreshAll() {
-    await loadStatus();
-    await loadConversations();
-    if (_selectedId !== null) {
-        await selectConversation(_selectedId);
-    }
+    await Promise.all([
+        loadStatus(),
+        loadConversations(),
+        _selectedId !== null ? selectConversation(_selectedId) : Promise.resolve(),
+    ]);
+}
+
+// ====================================================================================================
+// SSE PUSH
+// ====================================================================================================
+// The /stream endpoint pushes a small notification whenever a conversation or message changes.
+// On each push the client makes targeted refresh calls rather than a full blind poll.
+
+let _sseReconnectTimer = null;
+
+function _connectSSE() {
+    if (_sse) { try { _sse.close(); } catch (_) {} }
+    _sse = new EventSource("/stream");
+
+    _sse.onmessage = async e => {
+        try {
+            const ev = JSON.parse(e.data);
+            const cid = ev.conversation_id ?? null;
+
+            if (ev.type === "conv_deleted") {
+                // Remove from list; clear detail if it was selected.
+                _allConversations = _allConversations.filter(c => c.id !== cid);
+                _cacheSet("kc_conv_list", _allConversations);
+                applyFilters();
+                if (_selectedId === cid) {
+                    _selectedId         = null;
+                    _selectedExternalId = null;
+                    document.getElementById("detail-empty").hidden = false;
+                    document.getElementById("detail").hidden        = true;
+                }
+                return;
+            }
+
+            // For all other events: reload the conversation list (status/subject may have changed)
+            // and reload the detail panel if the affected conversation is currently selected.
+            await loadConversations();
+            if (cid !== null && cid === _selectedId) {
+                await selectConversation(_selectedId);
+            }
+        } catch (_) {}
+    };
+
+    _sse.onerror = () => {
+        // On error, close and reconnect after 3 seconds so a KC restart heals automatically.
+        try { _sse.close(); } catch (_) {}
+        _sse = null;
+        if (_sseReconnectTimer) clearTimeout(_sseReconnectTimer);
+        _sseReconnectTimer = setTimeout(_connectSSE, 3000);
+    };
 }
 
 function toggleAuto() {
     const on = document.getElementById("chk-auto").checked;
     if (on) {
-        _autoInterval = setInterval(refreshAll, 5000);
+        _connectSSE();
+        if (!_autoInterval) _autoInterval = setInterval(refreshAll, 30000);
     } else {
-        clearInterval(_autoInterval);
-        _autoInterval = null;
+        if (_sse)          { try { _sse.close(); } catch (_) {} _sse = null; }
+        if (_autoInterval) { clearInterval(_autoInterval); _autoInterval = null; }
     }
 }
 

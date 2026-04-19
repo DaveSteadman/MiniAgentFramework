@@ -12,7 +12,7 @@ let   _sessionId        = _restoreSessionId();  // mutable: /session resume chan
 const POLL_OLLAMA_MS    = 10_000;
 const POLL_QUEUE_MS     = 3_000;
 const POLL_TIMELINE_MS  = 30_000;
-const POLL_LATEST_LOG_MS = 1_000;
+const POLL_LATEST_LOG_MS = 15_000;   // fallback only - /logs/stream SSE handles normal case
 const MAX_QUEUE_ITEMS   = 10;
 const MAX_LOG_LINES_LIVE = 500;
 const MAX_CHAT_MESSAGES = 200;
@@ -43,7 +43,7 @@ const RE_LOG_OK         = /completed|success/i;
 // ====================================================================================================
 let _logLines       = [];
 let _logEventSource = null;
-let _inputHistory   = [];     // loaded from server on init, mirrors chathistory.json
+let _inputHistory   = [];     // loaded per conversation from server on init or session switch
 let _historyIdx        = -1;     // -1 = not browsing history
 let _ollamaReachable   = true;   // updated by refreshOllamaStatus; used in submitPrompt
 let _timelineRefreshTimer = null;
@@ -698,6 +698,11 @@ function startLogStream() {
     _logEventSource.onmessage = e => {
         try {
             const data = JSON.parse(e.data);
+            // When the active log file changes, switch to tailing that file directly.
+            if (data.path && data.path !== _currentLogPath && _logScrollCtl && _logScrollCtl.live) {
+                _switchLogStream(data.path);
+                return;
+            }
             if (data.path) {
                 _currentLogPath = data.path;
                 _setLogPanelTitle(data.path);
@@ -966,6 +971,12 @@ function listenRun(runId) {
                 removeThinking(runId);
                 const meta = ev.tokens ? ev.tokens.toLocaleString() + " ctx" + (ev.tps && ev.tps !== "0" ? " | " + ev.tps + " tok/s" : "") : "";
                 appendChatMessage("agent", ev.response, meta);
+                // Refresh the history cache silently so the next page load is instant.
+                apiFetch("/sessions/" + encodeURIComponent(_sessionId) + "/history").then(d => {
+                    if (d && Array.isArray(d.turns)) {
+                        try { localStorage.setItem("maf_history_" + _sessionId, JSON.stringify(d.turns)); } catch (_) {}
+                    }
+                });
             } else if (ev.type === "error") {
                 removeThinking(runId);
                 appendChatMessage("agent", "[Error: " + ev.message + "]");
@@ -987,6 +998,7 @@ function listenRun(runId) {
                     appendChatMessage("agent", "\u2500\u2500\u2500 Session: " + label + " \u2500\u2500\u2500");
                 }
                 _loadSessionHistory(ev.session_id);
+                _loadHistory();
                 _loadCompletions();
             } else if (ev.type === "done") {
                 removeThinking(runId);
@@ -1007,15 +1019,32 @@ function listenRun(runId) {
 // ----------------------------------------------------------------------------------------------------
 
 async function _loadSessionHistory(sessionId) {
-    // Fetch saved turns for sessionId and replay them into the chat panel.
+    // Render from cache immediately so the panel is populated before the network responds.
+    const cacheKey = "maf_history_" + sessionId;
+    const cached = (() => { try { const r = localStorage.getItem(cacheKey); return r ? JSON.parse(r) : null; } catch (_) { return null; } })();
+    if (cached && Array.isArray(cached)) {
+        for (let i = 0; i + 1 < cached.length; i += 2) {
+            const u = cached[i];
+            const a = cached[i + 1];
+            if (u && u.role === "user")      appendChatMessage("user",  u.content);
+            if (a && a.role === "assistant") appendChatMessage("agent", a.content);
+        }
+    }
+    // Fetch fresh data and update the panel.
     const data = await apiFetch("/sessions/" + encodeURIComponent(sessionId) + "/history");
     if (!data || !Array.isArray(data.turns)) return;
     const turns = data.turns;
-    for (let i = 0; i + 1 < turns.length; i += 2) {
-        const u = turns[i];
-        const a = turns[i + 1];
-        if (u && u.role === "user")      appendChatMessage("user",  u.content);
-        if (a && a.role === "assistant") appendChatMessage("agent", a.content);
+    try { localStorage.setItem(cacheKey, JSON.stringify(turns)); } catch (_) {}
+    // Only re-render if the content differs from what was already shown from cache.
+    const cachedJson = cached ? JSON.stringify(cached) : null;
+    if (cachedJson !== JSON.stringify(turns)) {
+        clearChatPanel();
+        for (let i = 0; i + 1 < turns.length; i += 2) {
+            const u = turns[i];
+            const a = turns[i + 1];
+            if (u && u.role === "user")      appendChatMessage("user",  u.content);
+            if (a && a.role === "assistant") appendChatMessage("agent", a.content);
+        }
     }
 }
 
@@ -1024,7 +1053,7 @@ async function _loadSessionHistory(sessionId) {
 // ====================================================================================================
 
 async function _loadHistory() {
-    const data = await apiFetch("/history");
+    const data = await apiFetch("/sessions/" + encodeURIComponent(_sessionId) + "/input-history");
     if (data && Array.isArray(data.entries)) {
         _inputHistory = data.entries;
     }
@@ -1032,12 +1061,13 @@ async function _loadHistory() {
 
 async function _pushHistory(text) {
     // Optimistic local update so Up-arrow works immediately.
-    if (_inputHistory[_inputHistory.length - 1] !== text) {
-        _inputHistory.push(text);
-        if (_inputHistory.length > 20) _inputHistory.shift();
-    }
+    // Erase-dups: remove any prior occurrence then append so each entry appears only once.
+    const idx = _inputHistory.lastIndexOf(text);
+    if (idx !== -1) _inputHistory.splice(idx, 1);
+    _inputHistory.push(text);
+    if (_inputHistory.length > 20) _inputHistory.shift();
     // Persist to server (fire-and-forget; refresh local list from response).
-    const data = await apiFetch("/history", {
+    const data = await apiFetch("/sessions/" + encodeURIComponent(_sessionId) + "/input-history", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ text }),
@@ -1071,47 +1101,21 @@ function submitPrompt() {
 }
 
 async function _dispatchPrompt(text) {
-    // Slash commands bypass KoreConversation - they run on the direct session endpoint.
-    if (text.startsWith("/")) {
-        const data = await apiFetch("/sessions/" + encodeURIComponent(_sessionId) + "/prompt", {
-            method:  "POST",
-            headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({ prompt: text }),
-        });
-        _pushHistory(text);
-        refreshQueue();
-        if (!data) {
-            appendChatMessage("user", text);
-            appendChatMessage("agent", "[Error: could not reach API]");
-            return;
-        }
-        listenRun(data.run_id);
-        return;
-    }
-
-    // Regular chat messages are routed through KoreConversation.
-    // Show the user message immediately, then poll KC for the outbound reply.
-    appendChatMessage("user", text);
-    _pushHistory(text);
-
-    const thinkKey = "kc_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-    appendThinking(thinkKey);
-
-    const data = await apiFetch("/kc/send", {
+    // All prompts - slash and regular - go through the session endpoint.
+    // The server handles KC conversation logging after orchestration completes.
+    const data = await apiFetch("/sessions/" + encodeURIComponent(_sessionId) + "/prompt", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ session_id: _sessionId, content: text }),
+        body:    JSON.stringify({ prompt: text }),
     });
-
+    _pushHistory(text);
     refreshQueue();
-
     if (!data) {
-        removeThinking(thinkKey);
-        appendChatMessage("agent", "[Error: could not reach KoreConversation]");
+        appendChatMessage("user", text);
+        appendChatMessage("agent", "[Error: could not reach API]");
         return;
     }
-
-    _pollKcReply(thinkKey, data.conv_id, data.msg_id);
+    listenRun(data.run_id);
 }
 
 async function _pollKcReply(thinkKey, convId, afterMsgId) {
@@ -1400,7 +1404,7 @@ function init() {
     // Initialise drag-resize splitters and apply stored layout.
     initSplitters();
 
-    // Load persisted input history from the server (shared with TUI).
+    // Load per-conversation input history from the server for the current session.
     _loadHistory();
 
     // Read sandbox state from server and reflect it in the button.

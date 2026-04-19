@@ -115,11 +115,7 @@ def _list_webchat_conversations() -> list[dict]:
     result = _kc_get("/conversations?channel_type=webchat&limit=500") or []
     if not isinstance(result, list):
         return []
-    conversations = []
-    for item in result:
-        external_id = str(item.get("external_id") or "")
-        if external_id.startswith(_WEBCHAT_PREFIX):
-            conversations.append(item)
+    conversations = list(result)
     conversations.sort(key=lambda item: item.get("last_activity_at") or "", reverse=True)
     return conversations
 

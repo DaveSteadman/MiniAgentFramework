@@ -296,7 +296,8 @@ def run_tool_loop(
             raw_args = tc_func.get("arguments", "{}")
             try:
                 arguments = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                _log(f"  [warn] Could not parse arguments for {func_name}: {exc} - raw: {raw_args!r}")
                 arguments = {}
             func_name, arguments, normalization_note = normalize_tool_request(func_name, arguments)
             _log(f"  -> {func_name}({', '.join(f'{k}={v!r}' for k, v in arguments.items())})")

@@ -242,8 +242,8 @@ def run_api_mode(
         shutdown.set()
         try:
             task_queue.stop()
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[API] Warning: error stopping task queue: {exc}", flush=True)
         server.should_exit = True
         try:
             sched_thread.join(timeout=2)

@@ -125,7 +125,7 @@ def run_delegate_subrun(
             # Return only the save notification - full content is in the scratchpad.
             # This keeps large delegate outputs out of the parent tool-call message thread.
             answer = f"[Result saved to scratchpad key '{out_key.lower()}'. Use scratch_load('{out_key.lower()}') or {{scratch:{out_key.lower()}}} to access it.]"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.log_file_only(f"[delegate] Warning: could not save result to scratchpad key '{out_key}': {exc}")
 
     return {"status": status, "answer": answer, "delegate_prompt": child_prompt, "depth": depth + 1, "max_iterations": child_iterations}

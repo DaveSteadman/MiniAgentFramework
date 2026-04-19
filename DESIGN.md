@@ -59,17 +59,18 @@ The system is divided into two layers with a clean interface between them.
 
 ## Server - LLM client
 
-**File:** `code/KoreAgent/ollama_client.py`
+**Files:** `code/KoreAgent/llm_client.py` (routing facade), `code/KoreAgent/llm_client_openai.py` (shared state and OpenAI-compatible core), `code/KoreAgent/llm_client_ollama.py` (Ollama-specific)
 
-**Intent:** Thin HTTP wrapper over Ollama's REST API. Manages host configuration, model resolution, health checking, and raw LLM calls. All other modules call through here; none make direct HTTP requests to Ollama.
+**Intent:** Multi-backend LLM client supporting Ollama and LM Studio. Manages host configuration, backend selection, model resolution, health checking, and raw LLM calls. All other modules import through the facade (`llm_client.py`); none make direct HTTP requests to the inference server.
 
 **Claims:**
-- Active host is set once at startup via `configure_host()`; all subsequent calls use the configured value.
-- A health-check cache (`_ollama_health_cache`) avoids a round-trip on every call; TTL is 30 seconds.
+- Active host and backend are set at startup via `configure_host()` or `configure_server()`; all subsequent calls use the configured values.
+- A health-check cache (`_ollama_health_cache`) avoids a round-trip on every call; TTL is 30 seconds. Shared by both backends.
 - `resolve_model_name(token, available)` matches partial tokens against installed model names using a word-boundary regex; hyphen-separated components are treated as separate tokens.
-- `call_llm_chat` is the sole function used by the tool-calling pipeline; it sends the full message list and tool definitions in one request.
-- Supports local Ollama, LAN-hosted Ollama, and Ollama Cloud; the host URL is the only difference.
+- `call_llm_chat` is the sole function used by the tool-calling pipeline; it sends the full message list and tool definitions in one request via the OpenAI-compatible `/v1/chat/completions` endpoint.
+- Supports local Ollama, LAN-hosted Ollama, Ollama Cloud, and LM Studio (local or remote); the host URL and backend flag are the only differences.
 - `get_active_model()` and `get_active_num_ctx()` are module globals; skills call these instead of accepting model as a parameter.
+- Ollama-specific operations (`/api/tags`, `/api/generate`, `/api/ps`, `ollama serve`) are isolated in `llm_client_ollama.py` and not available in LM Studio mode.
 
 ---
 
@@ -164,6 +165,7 @@ The system is divided into two layers with a clean interface between them.
 - `DateTime` - current date/time
 - `Delegate` - isolated child orchestration
 - `FileAccess` - read/write workspace files
+- `KoreData` - search and retrieve from local KoreData services (feeds, encyclopedia, library, documents)
 - `Memory` - persistent cross-session key-value memory
 - `Scratchpad` - session-scoped named-value store
 - `SystemInfo` - host hardware and OS info
@@ -172,7 +174,7 @@ The system is divided into two layers with a clean interface between them.
 - `WebNavigate` - multi-step browser-like page traversal
 - `WebResearch` - multi-source research traversal
 - `WebSearch` - web search results
-- `Wikipedia` - live Wikipedia article lookup
+- `WebWikipedia` - live Wikipedia article lookup
 
 **Claims:**
 - Each skill directory contains exactly one `skill.md` that defines its public interface for the catalog builder.
@@ -183,7 +185,7 @@ The system is divided into two layers with a clean interface between them.
 
 ## Server - Scheduler
 
-**File:** `code/scheduler/scheduler.py`
+**File:** `code/KoreAgent/scheduler/scheduler.py`
 
 **Intent:** Sequential task queue that serialises all LLM calls. Also loads and evaluates schedule definitions from JSON files.
 
@@ -192,8 +194,8 @@ The system is divided into two layers with a clean interface between them.
 - Tasks execute one at a time; the worker thread holds `run_lock` for the duration of each task.
 - Enqueueing a name that is already queued or active is a no-op (returns False); deduplication prevents backlog from repeated schedule triggers.
 - Two schedule types are supported: `interval` (every N minutes) and `daily` (once at a fixed wall-clock time).
-- Schedule files live in `controldata/schedules/*.json`; each must have a top-level `"tasks"` list.
-- Queue state is written to `controldata/task_queue.json` on every enqueue and dequeue so the web UI can poll it.
+- Schedule files live in `datacontrol/schedules/*.json`; each must have a top-level `"tasks"` list.
+- Queue state is written to `datacontrol/task_queue.json` on every enqueue and dequeue so the web UI can poll it.
 - The scheduler loop lives in `api_mode.py`, not in `scheduler.py`; `scheduler.py` provides utilities only.
 
 ---
@@ -318,13 +320,13 @@ The system is divided into two layers with a clean interface between them.
 
 ## Server - Testing
 
-**Files:** `code/testing/`, `controldata/test_prompts/`
+**Files:** `code/KoreAgent/testing/`, `datacontrol/test_prompts/`
 
 **Intent:** Automated regression testing via prompt sequences. Each test file contains a list of prompts and expected response patterns. Results are written to dated directories and compared against prior runs.
 
 **Claims:**
-- Test prompt files are JSON, stored in `controldata/test_prompts/`.
-- Each run creates a new results file in `controldata/test_results/<YYYY-MM-DD>/`.
+- Test prompt files are JSON, stored in `datacontrol/test_prompts/`.
+- Each run creates a new results file in `datacontrol/test_results/<YYYY-MM-DD/>`.
 - Each test turn uses its own isolated `ConversationHistory`; test runs do not share context with the live chat session.
 - `/testtrend` reads result files and reports pass/fail changes across runs.
 - The test runner serialises through `task_queue.llm_lock` so test runs and live prompts do not overlap.

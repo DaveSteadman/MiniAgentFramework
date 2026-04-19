@@ -50,7 +50,8 @@ _loop_thread: threading.Thread | None          = None
 _mcp_tool_defs:  list[dict] = []
 _mcp_tool_index: dict[str, dict] = {}   # tool_name -> {"url": str, "server": str}
 
-_CALL_TIMEOUT = 30.0   # seconds applied to list_tools and call_tool
+_CALL_TIMEOUT   = 30.0  # seconds applied to call_tool
+_CONNECT_TIMEOUT = 5.0  # seconds to wait for list_tools during startup
 
 
 # ====================================================================================================
@@ -86,7 +87,11 @@ def start(config_path: Path) -> None:
     _loop_thread.start()
 
     future          = asyncio.run_coroutine_threadsafe(_enumerate_all_servers(servers), _loop)
-    defs, index     = future.result(timeout=_CALL_TIMEOUT)
+    try:
+        defs, index = future.result(timeout=_CONNECT_TIMEOUT * len(servers) + 2)
+    except TimeoutError:
+        print(f"[mcp] Warning: tool enumeration timed out after {_CONNECT_TIMEOUT}s per server - continuing without MCP tools", flush=True)
+        defs, index = [], {}
     _mcp_tool_defs  = defs
     _mcp_tool_index = index
 
@@ -148,7 +153,11 @@ def _load_server_config(config_path: Path) -> list[dict]:
         data    = json.loads(config_path.read_text(encoding="utf-8"))
         servers = data.get("mcp_servers", [])
         return [s for s in servers if isinstance(s, dict) and s.get("url")]
-    except Exception:
+    except FileNotFoundError:
+        return []
+    except Exception as exc:
+        import sys
+        print(f"[mcp_client] Warning: could not load MCP server config from {config_path}: {exc}", file=sys.stderr)
         return []
 
 
@@ -163,7 +172,9 @@ async def _enumerate_all_servers(servers: list[dict]) -> tuple[list[dict], dict]
         name = server.get("name") or server["url"]
         url  = server["url"]
         try:
-            server_defs, server_index = await _list_tools_async(url, name)
+            server_defs, server_index = await asyncio.wait_for(
+                _list_tools_async(url, name), timeout=_CONNECT_TIMEOUT
+            )
             defs.extend(server_defs)
             index.update(server_index)
         except Exception as exc:

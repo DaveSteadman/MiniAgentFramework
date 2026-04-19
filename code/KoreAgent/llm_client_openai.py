@@ -100,8 +100,9 @@ def log_to_session(message: str) -> None:
     if _llm_call_log_fn is not None:
         try:
             _llm_call_log_fn(message)
-        except Exception:
-            pass
+        except Exception as exc:
+            import sys
+            print(f"[log_to_session] Logger callback failed: {exc} | msg: {message}", file=sys.stderr)
     else:
         import sys
         print(message, file=sys.stderr)

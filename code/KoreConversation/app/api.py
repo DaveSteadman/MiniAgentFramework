@@ -13,7 +13,9 @@
 # so a crashed consumer cannot permanently block a conversation.
 # ====================================================================================================
 
+import json
 import logging
+import queue
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -24,6 +26,7 @@ from fastapi import HTTPException
 from fastapi import Query
 from fastapi.responses import FileResponse
 from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import database as db
@@ -44,6 +47,35 @@ def _reaper_loop(stop_event: threading.Event) -> None:
                 logger.info("Reaper released %d stale claim(s)", released)
         except Exception as exc:
             logger.warning("Reaper error: %s", exc)
+
+
+# ====================================================================================================
+# MARK: SSE PUSH
+# ====================================================================================================
+# Lightweight broadcaster: any mutation endpoint calls _kc_push() with a small event dict.
+# All connected /stream clients receive it immediately, eliminating the 5-second poll cycle.
+
+_kc_subscribers:      list[queue.Queue] = []
+_kc_subscribers_lock: threading.Lock    = threading.Lock()
+
+
+def _kc_push(event_type: str, conversation_id: int | None = None) -> None:
+    """Broadcast a change notification to all connected SSE clients."""
+    item = {"type": event_type}
+    if conversation_id is not None:
+        item["conversation_id"] = conversation_id
+    with _kc_subscribers_lock:
+        dead = []
+        for sub in _kc_subscribers:
+            try:
+                sub.put_nowait(item)
+            except queue.Full:
+                dead.append(sub)
+        for sub in dead:
+            try:
+                _kc_subscribers.remove(sub)
+            except ValueError:
+                pass
 
 
 # ====================================================================================================
@@ -118,13 +150,15 @@ class ConversationPatchRequest(BaseModel):
 # ----------------------------------------------------------------------------------------------------
 @app.post("/conversations", status_code=201)
 def create_conversation(req: ConversationCreateRequest):
-    return db.conversation_create(
+    result = db.conversation_create(
         channel_type       = req.channel_type,
         subject            = req.subject,
         background_context = req.background_context,
         profile            = req.profile,
         external_id        = req.external_id,
     )
+    _kc_push("conv_created", result["id"])
+    return result
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -135,6 +169,16 @@ def get_conversation_by_external_id(external_id: str):
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conv
+
+
+# ----------------------------------------------------------------------------------------------------
+@app.get("/conversations/by-external-id/{external_id}/turns")
+def get_conversation_turns_by_external_id(external_id: str):
+    """Return raw inbound/outbound messages for the conversation - single DB call, no extra data."""
+    messages = db.conversation_get_turns_by_external_id(external_id)
+    if messages is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"messages": messages}
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -163,6 +207,16 @@ def get_conversation(conversation_id: int):
 
 
 # ----------------------------------------------------------------------------------------------------
+@app.get("/conversations/{conversation_id}/detail")
+def get_conversation_detail(conversation_id: int):
+    """Return conversation + messages + events in a single response for fast UI population."""
+    detail = db.conversation_get_detail(conversation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return detail
+
+
+# ----------------------------------------------------------------------------------------------------
 @app.patch("/conversations/{conversation_id}")
 def patch_conversation(conversation_id: int, req: ConversationPatchRequest):
     result = db.conversation_update(
@@ -177,6 +231,7 @@ def patch_conversation(conversation_id: int, req: ConversationPatchRequest):
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    _kc_push("conv_updated", conversation_id)
     return result
 
 
@@ -187,7 +242,49 @@ def delete_conversation(conversation_id: int):
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     db.conversation_delete(conversation_id)
+    _kc_push("conv_deleted", conversation_id)
     return Response(status_code=204)
+
+
+# ====================================================================================================
+# MARK: INPUT HISTORY
+# ====================================================================================================
+
+_INPUT_HISTORY_MAX = 32
+
+
+class InputHistoryAppendRequest(BaseModel):
+    text: str
+
+
+# ----------------------------------------------------------------------------------------------------
+@app.get("/conversations/{conversation_id}/input-history")
+def get_conversation_input_history(conversation_id: int):
+    """Return all stored input-history entries for a conversation."""
+    conv = db.conversation_get(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"entries": db.conversation_get_input_history(conversation_id)}
+
+
+# ----------------------------------------------------------------------------------------------------
+@app.patch("/conversations/{conversation_id}/input-history")
+def patch_conversation_input_history(conversation_id: int, req: InputHistoryAppendRequest):
+    """Append one entry to the conversation's input history (dedup, capped at _INPUT_HISTORY_MAX)."""
+    conv = db.conversation_get(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text cannot be empty")
+    entries = db.conversation_get_input_history(conversation_id)
+    # Erase-dups: remove any prior occurrence so each entry appears only once.
+    entries = [e for e in entries if e != text]
+    entries.append(text)
+    if len(entries) > _INPUT_HISTORY_MAX:
+        entries = entries[-_INPUT_HISTORY_MAX:]
+    db.conversation_set_input_history(conversation_id, entries)
+    return {"entries": entries}
 
 
 # ====================================================================================================
@@ -233,6 +330,39 @@ def serve_ui_css():
 
 
 # ====================================================================================================
+# MARK: SSE STREAM
+# ====================================================================================================
+
+@app.get("/stream", include_in_schema=False)
+def stream_events():
+    """SSE push stream - clients subscribe once and receive change notifications in real time."""
+    sub: queue.Queue = queue.Queue(maxsize=64)
+    with _kc_subscribers_lock:
+        _kc_subscribers.append(sub)
+
+    def generate():
+        try:
+            while True:
+                try:
+                    item = sub.get(timeout=20)
+                    yield f"data: {json.dumps(item)}\n\n"
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+        finally:
+            with _kc_subscribers_lock:
+                try:
+                    _kc_subscribers.remove(sub)
+                except ValueError:
+                    pass
+
+    return StreamingResponse(
+        generate(),
+        media_type = "text/event-stream",
+        headers    = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ====================================================================================================
 # MARK: MESSAGES
 # ====================================================================================================
 
@@ -273,6 +403,7 @@ def append_message(conversation_id: int, req: MessageAppendRequest):
     elif req.direction == "outbound":
         db.clear_pending_response_needed_events(conversation_id)
         db.conversation_update(conversation_id=conversation_id, status="active")
+    _kc_push("message_added", conversation_id)
     return msg
 
 
@@ -358,4 +489,5 @@ def complete_event(event_id: int, req: EventCompleteRequest):
     result = db.event_complete(event_id, status=req.status)
     if result is None:
         raise HTTPException(status_code=404, detail="Event not found")
+    _kc_push("event_completed", result.get("conversation_id"))
     return result

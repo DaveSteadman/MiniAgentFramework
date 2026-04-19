@@ -200,9 +200,12 @@ def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
 
 
 def _cmd_newchat(arg: str, ctx: SlashCommandContext) -> None:
+    name = arg.strip()
+    new_session_id = f"web_{int(time.time() * 1000)}"
     if ctx.switch_session:
-        ctx.switch_session(f"web_{int(time.time() * 1000)}", "")
-        ctx.output("Conversation history cleared - starting a new chat.", "success")
+        ctx.switch_session(new_session_id, name)
+        label = f"'{name}'" if name else "a new chat"
+        ctx.output(f"Conversation history cleared - starting {label}.", "success")
         return
     ctx.clear_history()
     ctx.output("Conversation history cleared - starting a new chat.", "success")
@@ -443,7 +446,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/rounds": "<n>  Set max tool-call rounds per prompt (e.g. /rounds 6)",
     "/timeout": "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
     "/stoprun": "Cancel the active LLM run (after its current round) and clear all pending queued prompts",
-    "/newchat": "Clear conversation history and session context, starting a fresh chat",
+    "/newchat": "Clear conversation history and start a fresh chat  (optional: /newchat <name>)",
     "/clearmemory": "Delete the memory store file, starting with a blank memory next session",
     "/reskill": "[min|max]  Rebuild skills catalog and set system prompt guidance mode (default: min)",
     "/version": "Show framework version, active model, and context size",

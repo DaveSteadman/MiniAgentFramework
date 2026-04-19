@@ -34,7 +34,7 @@ from KoreAgent.utils.workspace_utils import get_controldata_dir
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-# Store runtime data under controldata/ rather than beside the skill source files, so
+# Store runtime data under datacontrol/ rather than beside the skill source files, so
 # memory_store.json is never accidentally committed alongside version-controlled code.
 MEMORY_STORE_PATH        = get_controldata_dir() / "memory_store.json"
 MEMORY_STORE_LEGACY_PATH = Path(__file__).resolve().parent / "memory_store.txt"

@@ -75,7 +75,8 @@ def start(defaults_path: Path) -> None:
     try:
         import json as _json
         raw = _json.loads(defaults_path.read_text(encoding="utf-8")) if defaults_path.exists() else {}
-    except Exception:
+    except Exception as exc:
+        print(f"[koreconv] Warning: could not read config from {defaults_path}: {exc}", flush=True)
         raw = {}
 
     url = str(raw.get("koreconvurl", "")).strip().rstrip("/")

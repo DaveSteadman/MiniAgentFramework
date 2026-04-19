@@ -14,14 +14,14 @@
 #   is_task_due        -- pure function; tests whether a task should fire given current time.
 #
 # Schedule directory layout:
-#   controldata/schedules/*.json   each file must have a top-level "tasks" list.
+#   datacontrol/schedules/*.json   each file must have a top-level "tasks" list.
 #   Files are loaded in sorted filename order; tasks from all files are merged into one flat list.
 #
 # Schedule types:
 #   interval   fires every N minutes  {"type": "interval", "minutes": N}
 #   daily      fires once per day at a fixed wall-clock time  {"type": "daily", "time": "HH:MM"}
 #
-# Queue state is persisted to controldata/task_queue.json on every enqueue/dequeue so the
+# Queue state is persisted to datacontrol/task_queue.json on every enqueue/dequeue so the
 # web UI and other tooling can observe pending and active tasks.
 #
 # The scheduler loop lives in modes/api_mode.py.

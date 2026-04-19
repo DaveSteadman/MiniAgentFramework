@@ -42,7 +42,8 @@ from collections import OrderedDict
 from html.parser import HTMLParser
 
 try:
-    from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+    from bs4 import BeautifulSoup
+    from bs4 import XMLParsedAsHTMLWarning
     import warnings
     warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
     BS4_AVAILABLE = True

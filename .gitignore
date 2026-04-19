@@ -5,7 +5,6 @@
 /datacontrol/chatsessions
 /datacontrol/logs
 /datacontrol/test_results
-/datacontrol/chathistory.json
 /datacontrol/memory_store.json
 /datacontrol/task_queue.json
 

@@ -44,6 +44,7 @@ _CLAIMABLE_EVENT_TYPES: dict[str, tuple[str, ...]] = {
 }
 
 _DB_PATH: Path | None = None
+_wal_initialized:  bool   = False  # set True after first init_db so _conn skips the WAL pragma
 
 
 # ====================================================================================================
@@ -63,7 +64,8 @@ def get_db_path() -> Path:
 def _conn() -> Generator[sqlite3.Connection, None, None]:
     c = sqlite3.connect(get_db_path(), check_same_thread=False)
     c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode=WAL")
+    if not _wal_initialized:
+        c.execute("PRAGMA journal_mode=WAL")
     c.execute("PRAGMA foreign_keys=ON")
     try:
         yield c
@@ -91,6 +93,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     external_id         TEXT,
     thread_summary      TEXT    NOT NULL DEFAULT '',
     scratchpad          TEXT    NOT NULL DEFAULT '{}',
+    input_history       TEXT    NOT NULL DEFAULT '[]',
     background_context  TEXT    NOT NULL DEFAULT '',
     token_estimate      INTEGER NOT NULL DEFAULT 0,
     turn_count          INTEGER NOT NULL DEFAULT 0,
@@ -141,13 +144,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_convs_external_id ON conversations(externa
 
 # ----------------------------------------------------------------------------------------------------
 def init_db() -> None:
+    global _wal_initialized
     with _conn() as c:
-        # Migration first: add external_id before executescript so the unique
-        # index on that column (defined in _SCHEMA) can be created successfully.
+        # Migration first: add columns before executescript so indexes defined
+        # in _SCHEMA can be created successfully.
         cols = {row[1] for row in c.execute("PRAGMA table_info(conversations)")}
         if cols and "external_id" not in cols:
             c.execute("ALTER TABLE conversations ADD COLUMN external_id TEXT")
+        if cols and "input_history" not in cols:
+            c.execute("ALTER TABLE conversations ADD COLUMN input_history TEXT NOT NULL DEFAULT '[]'")
         c.executescript(_SCHEMA)
+    _wal_initialized = True
 
 
 # ====================================================================================================
@@ -209,8 +216,16 @@ def conversation_get_by_external_id(external_id: str) -> dict | None:
         ).fetchone()
     if row is None:
         return None
-    result               = _row_to_dict(row)
-    result["scratchpad"] = json.loads(result["scratchpad"] or "{}")
+    result = _row_to_dict(row)
+    try:
+        result["scratchpad"] = json.loads(result["scratchpad"] or "{}")
+    except json.JSONDecodeError:
+        print(f"[database] Warning: malformed scratchpad JSON for external_id={external_id} - resetting to empty", flush=True)
+        result["scratchpad"] = {}
+    try:
+        result["input_history"] = json.loads(result.get("input_history") or "[]")
+    except json.JSONDecodeError:
+        result["input_history"] = []
     return result
 
 
@@ -222,9 +237,71 @@ def conversation_get(conversation_id: int) -> dict | None:
         ).fetchone()
     if row is None:
         return None
-    result              = _row_to_dict(row)
-    result["scratchpad"] = json.loads(result["scratchpad"] or "{}")
+    result = _row_to_dict(row)
+    try:
+        result["scratchpad"] = json.loads(result["scratchpad"] or "{}")
+    except json.JSONDecodeError:
+        print(f"[database] Warning: malformed scratchpad JSON for conversation {conversation_id} - resetting to empty", flush=True)
+        result["scratchpad"] = {}
+    try:
+        result["input_history"] = json.loads(result.get("input_history") or "[]")
+    except json.JSONDecodeError:
+        result["input_history"] = []
     return result
+
+
+# ----------------------------------------------------------------------------------------------------
+def conversation_get_turns_by_external_id(external_id: str) -> list[dict] | None:
+    """Return messages for the conversation with the given external_id in a single DB connection.
+
+    Returns None if no matching conversation exists.
+    Returns an empty list if the conversation exists but has no messages.
+    """
+    with _conn() as c:
+        conv_row = c.execute(
+            "SELECT id FROM conversations WHERE external_id = ? LIMIT 1", (external_id,)
+        ).fetchone()
+        if conv_row is None:
+            return None
+        conv_id = conv_row["id"]
+        msg_rows = c.execute(
+            "SELECT direction, content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 1000",
+            (conv_id,),
+        ).fetchall()
+    return [{"direction": r["direction"], "content": r["content"]} for r in msg_rows]
+
+
+# ----------------------------------------------------------------------------------------------------
+def conversation_get_detail(conversation_id: int) -> dict | None:
+    """Return conversation + messages + events in a single DB connection."""
+    with _conn() as c:
+        conv_row = c.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+        if conv_row is None:
+            return None
+        conv = _row_to_dict(conv_row)
+        try:
+            conv["scratchpad"] = json.loads(conv["scratchpad"] or "{}")
+        except json.JSONDecodeError:
+            conv["scratchpad"] = {}
+        try:
+            conv["input_history"] = json.loads(conv.get("input_history") or "[]")
+        except json.JSONDecodeError:
+            conv["input_history"] = []
+        msg_rows = c.execute(
+            "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 500",
+            (conversation_id,),
+        ).fetchall()
+        evt_rows = c.execute(
+            "SELECT * FROM events WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 100",
+            (conversation_id,),
+        ).fetchall()
+    return {
+        "conversation": conv,
+        "messages":     [_row_to_dict(r) for r in msg_rows],
+        "events":       [_row_to_dict(r) for r in evt_rows],
+    }
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -266,8 +343,16 @@ def conversation_list(
         rows = c.execute(query, params).fetchall()
     result = []
     for row in rows:
-        item               = _row_to_dict(row)
-        item["scratchpad"] = json.loads(item["scratchpad"] or "{}")
+        item = _row_to_dict(row)
+        try:
+            item["scratchpad"] = json.loads(item["scratchpad"] or "{}")
+        except json.JSONDecodeError:
+            print(f"[database] Warning: malformed scratchpad JSON for conversation {item.get('id')} - resetting to empty", flush=True)
+            item["scratchpad"] = {}
+        try:
+            item["input_history"] = json.loads(item.get("input_history") or "[]")
+        except json.JSONDecodeError:
+            item["input_history"] = []
         result.append(item)
     return result
 
@@ -314,6 +399,30 @@ def conversation_update(
             params,
         )
     return conversation_get(conversation_id)
+
+
+# ----------------------------------------------------------------------------------------------------
+def conversation_get_input_history(conversation_id: int) -> list:
+    with _conn() as c:
+        row = c.execute(
+            "SELECT input_history FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+    if row is None:
+        return []
+    try:
+        return json.loads(row["input_history"] or "[]")
+    except json.JSONDecodeError:
+        return []
+
+
+# ----------------------------------------------------------------------------------------------------
+def conversation_set_input_history(conversation_id: int, history: list) -> None:
+    now = _now()
+    with _conn() as c:
+        c.execute(
+            "UPDATE conversations SET input_history = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(history), now, conversation_id),
+        )
 
 
 # ----------------------------------------------------------------------------------------------------

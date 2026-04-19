@@ -105,7 +105,7 @@ ctx:             256000
 LLM timeout:     600s
 Max iterations:  25
 Model runtime status: nemotron-cascade-2:latest not currently loaded (ollama ps).
-Log file:        C:/Util/MAF/controldata/logs/2026-04-03/run_20260403_142109.txt
+Log file:        C:/Util/MAF/datacontrol/logs/2026-04-03/run_20260403_142109.txt
 
 API mode - http://0.0.0.0:8000  (Ctrl+C to stop)
 Web UI:   http://localhost:8000/    <-- open this in your browser
@@ -151,8 +151,6 @@ Only the recognised keys are accepted. Unknown keys print a warning at startup a
 
 ## Slash Commands
 
-This checkout resolves `ControlDataFolder` to `datacontrol/` via `default.json`, so the runtime paths below use `datacontrol/` rather than the older `controldata/` examples still found in some historical notes.
-
 Slash commands are available in the **Web UI** chat input and inside **scheduled task prompt lists**. They bypass the orchestration pipeline and take effect immediately.
 
 Type `/help` at any prompt to see the full list. Tab completion is available in the Web UI: pressing Tab after a `/` character opens a dropdown of matching commands and sub-commands.
@@ -187,8 +185,8 @@ Type `/help` at any prompt to see the full list. Tab completion is available in 
 | `/session park` | Leave the current conversation in place and open a fresh webchat session ID. A new KoreConversation is created lazily on the first message. |
 | `/session delete <name\|all>` | Delete one or all webchat conversations from KoreConversation. If the active session is deleted, a fresh unnamed chat is opened automatically. |
 | `/session info` | Show the current session ID plus the linked KoreConversation ID, status, turn count, and token estimate. |
-| `/test <prompts-file>` | Run the test wrapper against a prompts file from `controldata/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. The argument is matched as a case-insensitive substring, so `/test web` matches `test_web_skill_prompts.json`. |
-| `/test all` | Run every `*.json` file in `controldata/test_prompts/` in sequence, streaming results live. All results are written to a single combined CSV file (`test_results_<timestamp>_all.csv`) with a banner printed between each suite. Prints a final summary with host, model, elapsed time, and cumulative pass/fail count. |
+| `/test <prompts-file>` | Run the test wrapper against a prompts file from `datacontrol/test_prompts/` and stream results live. The current host and model are forwarded automatically. Omit the argument to list available files. The argument is matched as a case-insensitive substring, so `/test web` matches `test_web_skill_prompts.json`. |
+| `/test all` | Run every `*.json` file in `datacontrol/test_prompts/` in sequence, streaming results live. All results are written to a single combined CSV file (`test_results_<timestamp>_all.csv`) with a banner printed between each suite. Prints a final summary with host, model, elapsed time, and cumulative pass/fail count. |
 | `/testtrend [prompts-file]` | Show pass-rate trend across all historical test runs, optionally filtered by prompts file. |
 | `/tasks` | List all scheduled tasks with their status (on/off), schedule, and prompt preview. |
 | `/task enable <name>` | Enable a task by name. The API scheduler picks up the change on its next reload cycle. |
@@ -276,7 +274,7 @@ Scheduled tasks can be managed in three complementary ways, depending on the con
 
 ### 1. Slash commands (operator, in-session)
 
-The `/tasks` and `/task` commands manipulate `controldata/schedules/*.json` files directly from the Web UI chat input. Zero LLM involvement - changes are instant and deterministic.
+The `/tasks` and `/task` commands manipulate `datacontrol/schedules/*.json` files directly from the Web UI chat input. Zero LLM involvement - changes are instant and deterministic.
 
 ```
 /tasks                                          # list all tasks
@@ -307,7 +305,7 @@ The skills catalog (`code/KoreAgent/skills/skills_summary.md`) is rebuilt automa
 
 ### 3. Direct JSON editing
 
-Each task lives in its own `controldata/schedules/task_<name>.json` file and can be edited in any text editor. The scheduler hot-reloads all `*.json` files in the schedules directory each cycle.
+Each task lives in its own `datacontrol/schedules/task_<name>.json` file and can be edited in any text editor. The scheduler hot-reloads all `*.json` files in the schedules directory each cycle.
 
 ```json
 {

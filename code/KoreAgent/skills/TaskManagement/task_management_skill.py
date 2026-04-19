@@ -4,7 +4,7 @@
 # TaskManagement skill for the MiniAgentFramework.
 #
 # Provides create/read/update/delete operations on scheduled task JSON files stored in
-# controldata/schedules/.  Each task lives in its own file named task_<name>.json so the
+# datacontrol/schedules/.  Each task lives in its own file named task_<name>.json so the
 # dashboard scheduler hot-reloads changes within its next poll cycle without a restart.
 #
 # All public functions return plain-text status strings so the model can present them

@@ -101,7 +101,7 @@ Browser input beginning with /
 
 ```text
 scheduler.py
-  -> loads task_*.json from controldata/schedules/
+  -> loads task_*.json from datacontrol/schedules/
   -> checks due tasks
   -> queues work on task_queue
   -> run_helpers.run_prompt_batch(...)
@@ -297,7 +297,7 @@ Key built-in skill families:
 ### `code/KoreAgent/skills/Memory/`
 
 - Durable long-lived fact storage.
-- Persists to `controldata/memory_store.json`.
+- Persists to `datacontrol/memory_store.json`.
 - Separate from scratchpad:
   - scratchpad = session-scoped working memory
   - memory skill = durable fact memory across runs
@@ -385,7 +385,7 @@ Key built-in skill families:
 
 ### `code/scheduler/scheduler.py`
 
-- Loads task JSON files from `controldata/schedules/`.
+- Loads task JSON files from `datacontrol/schedules/`.
 - Determines whether a task is due.
 - Enqueues background runs onto the shared task queue.
 - The queue serializes work that should not overlap.
@@ -401,7 +401,6 @@ Everything mutable lives under the configured control-data root. In this checkou
 | Path | Purpose |
 |---|---|
 | `default.json` | persisted startup defaults |
-| `datacontrol/chathistory.json` | UI input history |
 | `datacontrol/memory_store.json` | durable memory facts |
 | `datacontrol/conversations/koreconversation.db` | canonical persisted conversation state for webchat and external channels |
 | `datacontrol/logs/YYYY-MM-DD/` | runtime evidence logs |

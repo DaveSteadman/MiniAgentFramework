@@ -12,15 +12,14 @@
 #
 # Well-known directory accessors (all cached):
 #   get_workspace_root()       ->  <repo_root>/
-#   get_controldata_dir()      ->  <repo_root>/controldata/
-#   get_logs_dir()             ->  <repo_root>/controldata/logs/
-#   get_schedules_dir()        ->  <repo_root>/controldata/schedules/
-#   get_test_prompts_dir()     ->  <repo_root>/controldata/test_prompts/
-#   get_test_results_dir()     ->  <repo_root>/controldata/test_results/
-#   get_chatsessions_dir()       ->  <repo_root>/controldata/chatsessions/
-#   get_chatsessions_named_dir()  ->  <repo_root>/controldata/chatsessions/named/
-#   get_chatsessions_day_dir()    ->  <repo_root>/controldata/chatsessions/<YYYY-MM-DD>/
-#   get_chathistory_file()        ->  <repo_root>/controldata/chathistory.json
+#   get_controldata_dir()      ->  <repo_root>/datacontrol/
+#   get_logs_dir()             ->  <repo_root>/datacontrol/logs/
+#   get_schedules_dir()        ->  <repo_root>/datacontrol/schedules/
+#   get_test_prompts_dir()     ->  <repo_root>/datacontrol/test_prompts/
+#   get_test_results_dir()     ->  <repo_root>/datacontrol/test_results/
+#   get_chatsessions_dir()       ->  <repo_root>/datacontrol/chatsessions/
+#   get_chatsessions_named_dir()  ->  <repo_root>/datacontrol/chatsessions/named/
+#   get_chatsessions_day_dir()    ->  <repo_root>/datacontrol/chatsessions/<YYYY-MM-DD>/
 #
 # Related modules:
 #   - file_access_skill.py  -- uses get_workspace_root() for path-safety checks
@@ -95,8 +94,8 @@ def _load_path_overrides() -> dict:
 # ====================================================================================================
 @lru_cache(maxsize=1)
 def get_controldata_dir() -> Path:
-    """Return the absolute path to the controldata/ directory."""
-    return _load_path_overrides().get("ControlDataFolder", get_workspace_root() / "controldata")
+    """Return the absolute path to the datacontrol/ directory."""
+    return _load_path_overrides().get("ControlDataFolder", get_workspace_root() / "datacontrol")
 
 
 @lru_cache(maxsize=1)
@@ -107,48 +106,42 @@ def get_user_data_dir() -> Path:
 
 @lru_cache(maxsize=1)
 def get_logs_dir() -> Path:
-    """Return the absolute path to the controldata/logs/ directory."""
+    """Return the absolute path to the datacontrol/logs/ directory."""
     return get_controldata_dir() / "logs"
 
 
 @lru_cache(maxsize=1)
 def get_schedules_dir() -> Path:
-    """Return the absolute path to the controldata/schedules/ directory."""
+    """Return the absolute path to the datacontrol/schedules/ directory."""
     return get_controldata_dir() / "schedules"
 
 
 @lru_cache(maxsize=1)
 def get_test_prompts_dir() -> Path:
-    """Return the absolute path to the controldata/test_prompts/ directory."""
+    """Return the absolute path to the datacontrol/test_prompts/ directory."""
     return get_controldata_dir() / "test_prompts"
 
 
 @lru_cache(maxsize=1)
 def get_test_results_dir() -> Path:
-    """Return the absolute path to the controldata/test_results/ directory."""
+    """Return the absolute path to the datacontrol/test_results/ directory."""
     return get_controldata_dir() / "test_results"
 
 
 @lru_cache(maxsize=1)
 def get_chatsessions_dir() -> Path:
-    """Return the absolute path to the controldata/chatsessions/ directory."""
+    """Return the absolute path to the datacontrol/chatsessions/ directory."""
     return get_controldata_dir() / "chatsessions"
 
 
 @lru_cache(maxsize=1)
 def get_chatsessions_named_dir() -> Path:
-    """Return the absolute path to the named sessions subdirectory (controldata/chatsessions/named/)."""
+    """Return the absolute path to the named sessions subdirectory (datacontrol/chatsessions/named/)."""
     return get_chatsessions_dir() / "named"
 
 
-@lru_cache(maxsize=1)
-def get_chathistory_file() -> Path:
-    """Return the absolute path to chathistory.json inside the controldata directory."""
-    return get_controldata_dir() / "chathistory.json"
-
-
 def get_chatsessions_day_dir() -> Path:
-    """Return the absolute path to today's chatsessions subdirectory (controldata/chatsessions/YYYY-MM-DD/)."""
+    """Return the absolute path to today's chatsessions subdirectory (datacontrol/chatsessions/YYYY-MM-DD/)."""
     return get_chatsessions_dir() / datetime.now().strftime("%Y-%m-%d")
 
 

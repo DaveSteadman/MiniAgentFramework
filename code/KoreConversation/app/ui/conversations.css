@@ -456,6 +456,37 @@ html, body {
 }
 
 /* ============================================================
+   INPUT HISTORY
+   ============================================================ */
+
+.history-list {
+    list-style:  none;
+    margin:      0;
+    padding:     0;
+    max-height:  220px;
+    overflow-y:  auto;
+    background:  var(--bg-panel2);
+}
+
+.history-item {
+    padding:     5px 12px;
+    font-size:   11px;
+    color:       var(--text);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow:    hidden;
+    text-overflow: ellipsis;
+}
+
+.history-item:first-child {
+    color: var(--text-hi);
+}
+
+.history-item:last-child {
+    border-bottom: 0;
+}
+
+/* ============================================================
    MESSAGES
    ============================================================ */
 

@@ -452,23 +452,37 @@ def _run(args, logger, log_path) -> None:
         except Exception:
             return False
 
-    # Start KoreConversation before status probe so it shows reachable.
-    _mcp_client.start(DEFAULTS_FILE)
-    _koreconv_client.start(DEFAULTS_FILE)
-
-    if _koredata_url:
-        _kd_ok = _service_reachable(_koredata_url)
-        logger.log(f"KoreData:        {_koredata_url} {_tick if _kd_ok else _cross}")
-    else:
-        logger.log("KoreData:        (not configured)")
-
-    if _koreconv_url:
-        _kc_ok = _service_reachable(_koreconv_url)
-        logger.log(f"KoreConversation:{_koreconv_url} {_tick if _kc_ok else _cross}")
-    else:
-        logger.log("KoreConversation:(not configured)")
-
+    # Detect sequence mode early so sidecars are not started unnecessarily.
+    # In sequence mode the sidecars are started then immediately stopped, wasting
+    # several seconds per subprocess when MCP servers are not reachable.
     sequence_file_path = Path(os.environ["CHAT_SEQUENCE_FILE"]) if os.environ.get("CHAT_SEQUENCE_FILE") else None
+
+    if sequence_file_path:
+        # Sidecars are not used in sequence/test mode - skip startup entirely.
+        if _koredata_url:
+            logger.log(f"KoreData:        {_koredata_url} (skipped in sequence mode)")
+        else:
+            logger.log("KoreData:        (not configured)")
+        if _koreconv_url:
+            logger.log(f"KoreConversation:{_koreconv_url} (skipped in sequence mode)")
+        else:
+            logger.log("KoreConversation:(not configured)")
+    else:
+        # Start KoreConversation before status probe so it shows reachable.
+        _mcp_client.start(DEFAULTS_FILE)
+        _koreconv_client.start(DEFAULTS_FILE)
+
+        if _koredata_url:
+            _kd_ok = _service_reachable(_koredata_url)
+            logger.log(f"KoreData:        {_koredata_url} {_tick if _kd_ok else _cross}")
+        else:
+            logger.log("KoreData:        (not configured)")
+
+        if _koreconv_url:
+            _kc_ok = _service_reachable(_koreconv_url)
+            logger.log(f"KoreConversation:{_koreconv_url} {_tick if _kc_ok else _cross}")
+        else:
+            logger.log("KoreConversation:(not configured)")
     mode_label = (
         f"chat-sequence:{sequence_file_path.name}" if sequence_file_path else
         "api"
@@ -484,8 +498,6 @@ def _run(args, logger, log_path) -> None:
     logger.log(f"Log file:        {log_path.as_posix()}")
 
     if sequence_file_path:
-        _koreconv_client.stop()
-        _mcp_client.stop()
         run_chat_sequence_mode(sequence_file=sequence_file_path, config=config, logger=logger, log_path=log_path)
         return
 

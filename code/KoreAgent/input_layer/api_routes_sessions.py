@@ -1,4 +1,5 @@
 import queue
+import threading
 import uuid
 
 from fastapi import HTTPException
@@ -43,6 +44,9 @@ def register_session_routes(
     run_queues_lock,
     sse,
     delete_session_state,
+    kc_save_turn,
+    get_session_turns,
+    kc_set_session_name=None,
 ) -> None:
     @app.post("/sessions/{session_id}/prompt")
     def post_prompt(session_id: str, body: PromptRequest):
@@ -104,6 +108,8 @@ def register_session_routes(
                         streamed_output = True
 
                     def _do_switch_session(new_session_id: str, name: str) -> None:
+                        if kc_set_session_name and name:
+                            kc_set_session_name(new_session_id, name)
                         queue_run_event(run_q, {"type": "switch_session", "run_id": run_id, "session_id": new_session_id, "name": name}, priority=True)
 
                     def _do_rename_session(new_session_id: str, name: str) -> None:
@@ -119,9 +125,11 @@ def register_session_routes(
                         rename_session=_do_rename_session,
                     )
                     handled = handle_slash(_prompt, slash_ctx)
+                    slash_response = "\n".join(output_lines) if output_lines else ("(done)" if handled else f"Unknown command: {_prompt.split()[0]}")
                     if not streamed_output:
-                        response = "\n".join(output_lines) if output_lines else ("(done)" if handled else f"Unknown command: {_prompt.split()[0]}")
-                        queue_run_event(run_q, {"type": "response", "run_id": run_id, "response": response, "tokens": 0, "tps": "0"}, priority=True)
+                        queue_run_event(run_q, {"type": "response", "run_id": run_id, "response": slash_response, "tokens": 0, "tps": "0"}, priority=True)
+                    # Record the slash command and its output in the KC conversation thread (background).
+                    threading.Thread(target=kc_save_turn, args=(session_id, _prompt, slash_response), daemon=True).start()
                 else:
                     log_path = create_log_file_path(log_dir=log_dir)
                     set_latest_log_path(log_path)
@@ -137,11 +145,15 @@ def register_session_routes(
                             session_context=session_context,
                             quiet=True,
                             conversation_summary=summary_block or None,
-                            on_tool_round_complete=lambda: flush_scratch_session(session_id),
+                            on_tool_round_complete=lambda: threading.Thread(
+                                target=flush_scratch_session, args=(session_id,), daemon=True
+                            ).start(),
                         )
                         history.add(_prompt, response)
                         summaries = save_session(session_id, history, summaries, p_tokens, get_active_num_ctx())
                         queue_run_event(run_q, {"type": "response", "run_id": run_id, "response": response, "tokens": p_tokens, "tps": f'{tps:.1f}' if tps > 0 else '0'}, priority=True)
+                        # Persist the turn to KC asynchronously - response is already queued.
+                        threading.Thread(target=kc_save_turn, args=(session_id, _prompt, response), daemon=True).start()
             except Exception as exc:
                 queue_run_event(run_q, {"type": "error", "run_id": run_id, "message": str(exc)}, priority=True)
             finally:
@@ -153,8 +165,8 @@ def register_session_routes(
     @app.get("/sessions/{session_id}/history")
     def get_session_history(session_id: str):
         validate_session_id(session_id)
-        history, _summaries = load_session(session_id)
-        return {"session_id": session_id, "turns": history.as_list()}
+        turns = get_session_turns(session_id)
+        return {"session_id": session_id, "turns": turns}
 
     @app.delete("/sessions/{session_id}")
     def delete_session(session_id: str):
