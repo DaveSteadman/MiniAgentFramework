@@ -23,16 +23,17 @@
 # MARK: IMPORTS
 # ====================================================================================================
 import json
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from KoreAgent.context_manager import format_context_map as _context_manager_format_context_map
 from KoreAgent.context_manager import store_last_run_state
-from KoreAgent.delegate_runner import get_delegate_runtime_tls
-from KoreAgent.delegate_runner import pop_delegate_runtime
-from KoreAgent.delegate_runner import push_delegate_runtime
-from KoreAgent.delegate_runner import run_delegate_subrun
+from KoreAgent.system_skills.Delegate.delegate_runner import get_delegate_runtime_tls
+from KoreAgent.system_skills.Delegate.delegate_runner import pop_delegate_runtime
+from KoreAgent.system_skills.Delegate.delegate_runner import push_delegate_runtime
+from KoreAgent.system_skills.Delegate.delegate_runner import run_delegate_subrun
 from KoreAgent.llm_client import call_llm_chat
 from KoreAgent.llm_client import get_active_backend
 from KoreAgent.llm_client import is_explicit_model_name
@@ -44,8 +45,10 @@ from KoreAgent.scratchpad import scratch_list as _scratch_list
 from KoreAgent.prompt_builder import build_system_message as _prompt_builder_build_system_message
 from KoreAgent.session_runtime import bind_session
 from KoreAgent.skill_executor import build_catalog_gates
-from KoreAgent.skills.Memory.memory_skill import recall_relevant_memories
-from KoreAgent.skills.Memory.memory_skill import store_prompt_memories
+from KoreAgent.system_skills.Memory.memory_skill import get_top_facts
+from KoreAgent.system_skills.Memory.memory_skill import recall_relevant_memories
+from KoreAgent.system_skills.Memory.memory_skill import store_exchange_memories
+from KoreAgent.system_skills.Memory.memory_skill import store_prompt_memories
 from KoreAgent.skills.SystemInfo.system_info_skill import get_static_system_info_string
 from KoreAgent.skills_catalog_builder import build_tool_definitions
 from KoreAgent.tool_loop import extract_result_fields as _tool_loop_extract_result_fields
@@ -118,9 +121,18 @@ _delegate_tls = get_delegate_runtime_tls()
 # Stop event: set by /stoprun to request early termination of the active run.
 _stop_event: threading.Event = threading.Event()
 
+# Per-session stop events registered by each orchestrate_prompt call.
+# Allows /stoprun to target only the active session rather than all concurrent runs.
+# The global _stop_event is retained for callers that use is_stop_requested() directly.
+_active_stop_events: dict[str, threading.Event] = {}
+_active_stop_lock:   threading.Lock             = threading.Lock()
+
 
 def request_stop() -> None:
     _stop_event.set()
+    with _active_stop_lock:
+        for ev in _active_stop_events.values():
+            ev.set()
 
 
 def is_stop_requested() -> bool:
@@ -156,7 +168,11 @@ class ConversationHistory:
     # ----------------------------------------------------------------------------------------------------
 
     def add(self, user: str, assistant: str) -> None:
-        assert len(self._turns) % 2 == 0, "ConversationHistory is misaligned (odd turn count)"
+        if len(self._turns) % 2 != 0:
+            raise RuntimeError(
+                f"ConversationHistory is misaligned - expected even turn count, "
+                f"got {len(self._turns)}. A prior add() call is missing its assistant response."
+            )
         self._turns.append({"role": "user",      "content": user})
         self._turns.append({"role": "assistant", "content": assistant})
         if self._max_turns > 0:
@@ -207,6 +223,7 @@ class SessionContext:
     def __init__(self, session_id: str, persist_path: Path | None = None) -> None:
         self._session_id = session_id
         self._path       = persist_path
+        self._lock       = threading.Lock()
         self._turns: list[dict] = []
         if persist_path and persist_path.exists():
             try:
@@ -216,7 +233,7 @@ class SessionContext:
                     # API session history files also use a top-level "turns" key but store
                     # plain conversation pairs without the structured session-context schema.
                     # Ignore those entries here instead of crashing on missing keys like "turn".
-                    self._turns = [
+                    valid_turns = [
                         turn for turn in raw_turns
                         if isinstance(turn, dict)
                         and "turn" in turn
@@ -224,8 +241,12 @@ class SessionContext:
                         and "assistant_response" in turn
                         and "skill_outputs" in turn
                     ]
-            except Exception:
-                pass
+                    dropped = len(raw_turns) - len(valid_turns)
+                    if dropped:
+                        log_to_session(f"[session_context] WARNING: {dropped} turn(s) dropped from {persist_path} - missing required keys")
+                    self._turns = valid_turns
+            except Exception as exc:
+                log_to_session(f"[session_context] WARNING: could not load session context from {persist_path}: {exc} - starting with empty context")
 
     @property
     def session_id(self) -> str:
@@ -240,28 +261,32 @@ class SessionContext:
         skill_outputs: list[dict],
     ) -> None:
         """Append a completed turn with its compact skill-output summary."""
-        turn_num = len(self._turns) + 1
-        compact  = [self._compact_output(o) for o in skill_outputs]
-        self._turns.append({
-            "turn":               turn_num,
-            "user_prompt":        user_prompt,
-            "assistant_response": assistant_response,
-            "skill_outputs":      compact,
-        })
-        self._save()
+        compact = [self._compact_output(o) for o in skill_outputs]
+        with self._lock:
+            turn_num = len(self._turns) + 1
+            self._turns.append({
+                "turn":               turn_num,
+                "user_prompt":        user_prompt,
+                "assistant_response": assistant_response,
+                "skill_outputs":      compact,
+            })
+            self._save()
 
     # --------------------------------------------------------------------------
 
     def clear(self) -> None:
-        self._turns = []
-        self._save()
+        with self._lock:
+            self._turns = []
+            self._save()
 
     def turn_count(self) -> int:
-        return len(self._turns)
+        with self._lock:
+            return len(self._turns)
 
     def get_turns(self) -> list[dict]:
         """Return a snapshot of all stored turns, safe for external inspection."""
-        return list(self._turns)
+        with self._lock:
+            return list(self._turns)
 
     # --------------------------------------------------------------------------
 
@@ -271,8 +296,9 @@ class SessionContext:
         Covers the last *max_turns* turns (default: MAX_INJECT_TURNS).  Returns an
         empty string when there are no prior turns to inject.
         """
-        n      = max_turns if max_turns is not None else self.MAX_INJECT_TURNS
-        recent = self._turns[-n:] if n else list(self._turns)
+        n = max_turns if max_turns is not None else self.MAX_INJECT_TURNS
+        with self._lock:
+            recent = self._turns[-n:] if n else list(self._turns)
         if not recent:
             return ""
 
@@ -342,13 +368,17 @@ class SessionContext:
     def _save(self) -> None:
         if not self._path:
             return
+        tmp_path = self._path.with_suffix(".tmp")
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            data = {"session_id": self._session_id, "turns": self._turns}
-            self._path.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            data    = {"session_id": self._session_id, "turns": self._turns}
+            payload = json.dumps(data, indent=2, ensure_ascii=False)
+            # Write atomically: write to a sibling temp file, then os.replace() so a
+            # crash during the write leaves the previous file intact.
+            tmp_path.write_text(payload, encoding="utf-8")
+            os.replace(tmp_path, self._path)
         except Exception as exc:
+            tmp_path.unlink(missing_ok=True)
             log_to_session(f"[session_context] Warning: failed to persist context to {self._path}: {exc}")
 
 
@@ -462,11 +492,14 @@ def orchestrate_prompt(
         else:
             memory_store_result = store_prompt_memories(user_prompt=user_prompt)
         _log_file_only("[progress] Recalling relevant memories...")
-        recalled_memories   = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
+        recalled_memories = recall_relevant_memories(user_prompt=user_prompt, limit=5, min_score=0.2)
+        top_facts         = get_top_facts(limit=6)
 
         _log_section("MEMORY")
         _log(memory_store_result)
         _log(recalled_memories)
+        if top_facts:
+            _log_file_only(f"[memory] Top facts injected ({top_facts.count(chr(10)) + 1} entries).")
 
         ambient_system_info = get_static_system_info_string()
         _log_section("AMBIENT SYSTEM INFO")
@@ -488,6 +521,8 @@ def orchestrate_prompt(
             sandbox_enabled=_SANDBOX_ENABLED,
             scratchpad_visible_keys=scratchpad_visible_keys,
             conversation_summary=conversation_summary,
+            top_facts=top_facts or None,
+            recalled_memories=recalled_memories if "No" not in recalled_memories[:3] else None,
         )
 
         messages: list[dict] = [{"role": "system", "content": system_message}]
@@ -505,6 +540,12 @@ def orchestrate_prompt(
         _prev_delegate_runtime = push_delegate_runtime(logger=logger, delegate_depth=delegate_depth, config=config)
         catalog_gates = build_catalog_gates(active_payload)
 
+        # Register a per-run stop event so that /stoprun only affects this session.
+        _run_id         = f"{active_session_id}_{id(messages)}"
+        _run_stop_event = threading.Event()
+        with _active_stop_lock:
+            _active_stop_events[_run_id] = _run_stop_event
+
         try:
             final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs = _tool_loop_run_tool_loop(
                 config        = config,
@@ -516,8 +557,8 @@ def orchestrate_prompt(
                 logger        = logger,
                 quiet         = quiet,
                 call_llm_chat = call_llm_chat,
-                stop_requested = is_stop_requested,
-                clear_stop    = clear_stop,
+                stop_requested = _run_stop_event.is_set,
+                clear_stop    = _run_stop_event.clear,
                 on_tool_round_complete = on_tool_round_complete,
             )
 
@@ -533,6 +574,16 @@ def orchestrate_prompt(
             _log_file_only(_scratch_list())
             _log(f"Total: {prompt_tokens:,} prompt tokens | {completion_tokens:,} completion tokens")
 
+            # Store facts from the assistant response side of the exchange.
+            # This captures agent-confirmed actions and entities stated in the reply.
+            if final_response and run_success and not user_prompt.startswith("/"):
+                _log_file_only("[progress] Storing exchange memories (response side)...")
+                exchange_result = store_exchange_memories(
+                    user_prompt        = user_prompt,
+                    assistant_response = final_response,
+                )
+                _log_file_only(f"[memory] {exchange_result}")
+
             store_last_run_state(_context_map, messages)
 
             if session_context is not None and run_success and tool_outputs:
@@ -544,6 +595,8 @@ def orchestrate_prompt(
 
             return final_response, prompt_tokens, completion_tokens, run_success, final_tps
         finally:
+            with _active_stop_lock:
+                _active_stop_events.pop(_run_id, None)
             pop_delegate_runtime(_prev_delegate_runtime)
 
 

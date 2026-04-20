@@ -19,6 +19,7 @@
 import json
 import re
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -30,6 +31,12 @@ from KoreAgent.utils.workspace_utils import trunc
 # ====================================================================================================
 # MARK: HEALTH CHECK
 # ====================================================================================================
+# Serialises the check-then-start sequence so concurrent callers cannot both see
+# is_ollama_running()==False and both invoke start_ollama_server().
+_ollama_start_lock: threading.Lock = threading.Lock()
+_ollama_proc: subprocess.Popen | None = None
+
+
 def is_ollama_running(host: str | None = None) -> bool:
     host = host or _core.get_active_host()
     try:
@@ -41,6 +48,7 @@ def is_ollama_running(host: str | None = None) -> bool:
 
 # ----------------------------------------------------------------------------------------------------
 def start_ollama_server() -> None:
+    global _ollama_proc
     # Build platform-specific flags to fully detach the server process from this parent.
     creation_flags = 0
     if hasattr(subprocess, "DETACHED_PROCESS"):
@@ -49,7 +57,7 @@ def start_ollama_server() -> None:
         creation_flags |= subprocess.CREATE_NEW_PROCESS_GROUP
 
     try:
-        subprocess.Popen(
+        _ollama_proc = subprocess.Popen(
             ["ollama", "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -76,17 +84,20 @@ def ensure_ollama_running(
     if _core.is_host_health_cached(host):
         return
 
-    if is_ollama_running(host=host):
-        _core.mark_host_healthy(host)
-        return
+    with _ollama_start_lock:
+        # Re-check inside the lock - another thread may have just started it.
+        if is_ollama_running(host=host):
+            _core.mark_host_healthy(host)
+            return
 
-    if not start_if_needed or not _core._is_local_host(host):
-        raise RuntimeError(f"Ollama is not reachable at {host}")
+        if not start_if_needed or not _core._is_local_host(host):
+            raise RuntimeError(f"Ollama is not reachable at {host}")
 
-    if verbose:
-        print(f"Starting Ollama at {host}...", flush=True)
-    start_ollama_server()
-    # Poll until the server responds or the deadline expires, then raise if still unreachable.
+        if verbose:
+            print(f"Starting Ollama at {host}...", flush=True)
+        start_ollama_server()
+
+    # Poll outside the lock so other threads can proceed with their own health checks.
     deadline = time.time() + wait_seconds
     while time.time() < deadline:
         if is_ollama_running(host=host):

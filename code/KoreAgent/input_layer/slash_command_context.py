@@ -13,3 +13,4 @@ class SlashCommandContext:
     session_id: str | None = None
     switch_session: Callable[[str, str], None] | None = None
     rename_session: Callable[[str, str], None] | None = None
+    delete_session_state: Callable[[str], None] | None = None

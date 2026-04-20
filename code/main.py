@@ -214,7 +214,7 @@ _DEFAULTS_KEYS = {"model", "ctx", "agentport", "llmhost"}
 # All valid keys in default.json - superset of _DEFAULTS_KEYS.
 # Keys here that are not in _DEFAULTS_KEYS are read directly by skills or slash commands
 # and are not passed through argparse.
-_KNOWN_KEYS = _DEFAULTS_KEYS | {"koreconvurl", "koredataurl", "korecommsurl", "korecomms_poll_secs", "ControlDataFolder", "UserDataFolder", "mcp_servers"}
+_KNOWN_KEYS = _DEFAULTS_KEYS | {"koreconvurl", "korecommsurl", "korecomms_poll_secs", "ControlDataFolder", "UserDataFolder", "mcp_servers"}
 
 
 # ====================================================================================================
@@ -442,7 +442,6 @@ def _run(args, logger, log_path) -> None:
     except Exception:
         _raw_defaults  = {}
     _koreconv_url = str(_raw_defaults.get("koreconvurl", "")).strip().rstrip("/")
-    _koredata_url = str(_raw_defaults.get("koredataurl", "")).strip().rstrip("/")
 
     def _service_reachable(base_url: str) -> bool:
         try:
@@ -459,24 +458,27 @@ def _run(args, logger, log_path) -> None:
 
     if sequence_file_path:
         # Sidecars are not used in sequence/test mode - skip startup entirely.
-        if _koredata_url:
-            logger.log(f"KoreData:        {_koredata_url} (skipped in sequence mode)")
-        else:
-            logger.log("KoreData:        (not configured)")
+        _seq_mcp = _raw_defaults.get("mcp_servers") or []
+        for _srv in _seq_mcp:
+            _srv_name = _srv.get("name") or _srv.get("url", "?")
+            logger.log(f"MCP [{_srv_name}]: {_srv.get('url', '?')} (skipped in sequence mode)")
+        if not _seq_mcp:
+            logger.log("MCP servers:     (none configured)")
         if _koreconv_url:
             logger.log(f"KoreConversation:{_koreconv_url} (skipped in sequence mode)")
         else:
             logger.log("KoreConversation:(not configured)")
     else:
-        # Start KoreConversation before status probe so it shows reachable.
+        # Start MCP client and KoreConversation before status probe so they show reachable.
         _mcp_client.start(DEFAULTS_FILE)
         _koreconv_client.start(DEFAULTS_FILE)
 
-        if _koredata_url:
-            _kd_ok = _service_reachable(_koredata_url)
-            logger.log(f"KoreData:        {_koredata_url} {_tick if _kd_ok else _cross}")
-        else:
-            logger.log("KoreData:        (not configured)")
+        _mcp_status = _mcp_client.get_server_status()
+        for _srv in _mcp_status:
+            _ok_str = f"({_srv['tool_count']} tool(s))" if _srv["ok"] else "(failed to connect)"
+            logger.log(f"MCP [{_srv['name']}]: {_srv['url']} {_ok_str} {_tick if _srv['ok'] else _cross}")
+        if not _mcp_status:
+            logger.log("MCP servers:     (none configured)")
 
         if _koreconv_url:
             _kc_ok = _service_reachable(_koreconv_url)

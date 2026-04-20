@@ -59,6 +59,15 @@ def compact_context(context_map: list[dict], messages: list[dict], idx: int) -> 
 
 
 def assess_compact(context_map: list[dict], messages: list[dict], round_num: int, num_ctx: int) -> tuple[int, int]:
+    # Guard against context_map/messages index drift caused by callers adding one without the other.
+    if context_map and messages:
+        max_idx = max((e["msg_idx"] for e in context_map if e.get("msg_idx") is not None), default=-1)
+        if max_idx != len(messages) - 1:
+            raise RuntimeError(
+                f"[assess_compact] context_map/messages index misalignment: "
+                f"max msg_idx={max_idx} but len(messages)={len(messages)} - "
+                "this indicates a message was added without a matching context_map entry"
+            )
     thread_chars = estimate_thread_chars(messages)
     budget_chars = num_ctx * 4
     usage_fraction = thread_chars / budget_chars if budget_chars else 0.0

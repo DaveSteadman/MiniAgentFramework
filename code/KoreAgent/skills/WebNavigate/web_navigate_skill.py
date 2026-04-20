@@ -18,7 +18,7 @@
 # Related modules:
 #   - skills/WebSearch/web_search_skill.py  -- upstream: produces candidate URLs
 #   - skills/WebFetch/web_fetch_skill.py    -- downstream: reads chosen pages
-#   - skills/Scratchpad/scratchpad_skill.py -- semantic filtering of parked link lists
+#   - system_skills/Scratchpad/scratchpad_skill.py -- semantic filtering of parked link lists
 #   - webpage_utils.py                      -- shared HTTP fetch utility
 # ====================================================================================================
 

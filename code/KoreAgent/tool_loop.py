@@ -5,6 +5,8 @@ from pathlib import Path
 from KoreAgent.context_manager import COMPACT_THRESHOLD
 from KoreAgent.context_manager import assess_compact
 from KoreAgent.scratchpad import scratch_save as scratch_auto_save
+from KoreAgent.scratchpad import scratch_pin
+from KoreAgent.scratchpad import scratch_unpin_all
 from KoreAgent.skill_executor import execute_tool_call
 from KoreAgent.tool_result import ToolCallResult
 from KoreAgent.utils.workspace_utils import get_workspace_root
@@ -161,7 +163,7 @@ def strip_cot_preamble(text: str) -> str:
 
 def write_file_blocks(response: str, *, log_to_session) -> list[str]:
     workspace_root = get_workspace_root()
-    data_dir = workspace_root / "data"
+    data_dir       = (workspace_root / "data").resolve()
     written: list[str] = []
     for match in _WRITE_FILE_BLOCK_RE.finditer(response):
         raw_path = match.group(1).strip()
@@ -215,148 +217,157 @@ def run_tool_loop(
     prev_round_tc_fingerprints: frozenset = frozenset()
 
     clear_stop()
-    for round_num in range(1, config.max_iterations + 1):
-        if stop_requested():
-            clear_stop()
-            _log(f"[/stoprun] Stop requested - halting before round {round_num}.")
-            final_response = "[Run stopped by /stoprun. The previous response may be incomplete.]"
-            break
+    try:
+        for round_num in range(1, config.max_iterations + 1):
+            if stop_requested():
+                clear_stop()
+                _log(f"[/stoprun] Stop requested - halting before round {round_num}.")
+                final_response = "[Run stopped by /stoprun. The previous response may be incomplete.]"
+                break
 
-        _log_section(f"TOOL ROUND {round_num}")
-        _log_file_only(f"[progress] Round {round_num}: calling model...")
-        thread_chars, compact_count = assess_compact(context_map, messages, round_num, config.num_ctx)
-        if compact_count:
-            _log_file_only(f"[context] compacted {compact_count} message(s) (threshold {COMPACT_THRESHOLD:.0%} exceeded)")
-        _log_file_only(f"[context] thread: {thread_chars:,} chars (~{thread_chars // 4:,} tok est.) | window: {config.num_ctx:,} | remaining est.: ~{config.num_ctx - thread_chars // 4:,}")
+            _log_section(f"TOOL ROUND {round_num}")
+            _log_file_only(f"[progress] Round {round_num}: calling model...")
+            thread_chars, compact_count = assess_compact(context_map, messages, round_num, config.num_ctx)
+            if compact_count:
+                _log_file_only(f"[context] compacted {compact_count} message(s) (threshold {COMPACT_THRESHOLD:.0%} exceeded)")
+            _log_file_only(f"[context] thread: {thread_chars:,} chars (~{thread_chars // 4:,} tok est.) | window: {config.num_ctx:,} | remaining est.: ~{config.num_ctx - thread_chars // 4:,}")
 
-        try:
-            result = call_llm_chat(model_name=config.resolved_model, messages=messages, tools=tool_defs if tool_defs else None, num_ctx=config.num_ctx)
-        except Exception as error:
-            error_str = str(error)
-            if "error parsing tool call" in error_str:
-                correction = (
-                    "Your previous tool call could not be executed because the argument JSON was truncated or malformed. "
-                    "Do not embed large multi-line strings directly in a tool call argument. Instead: (1) build the content using "
-                    "code_execute and print() it, (2) save the output to the scratchpad with scratch_save, then (3) pass the scratchpad reference to write_file."
-                )
-                _log(f"[error] Tool call JSON parse error in round {round_num} - injecting correction message.")
-                messages.append({"role": "user", "content": correction})
-                context_map.append({"round": round_num, "role": "user", "label": "[tool-call correction injected]", "chars": len(correction), "auto_key": None, "msg_idx": len(messages) - 1})
-                continue
-            _log(f"[error] LLM call failed in round {round_num}: {error}")
-            final_response = f"(LLM call failed: {error})"
-            break
-
-        prompt_tokens += result.prompt_tokens
-        completion_tokens += result.completion_tokens
-        final_tps = result.tokens_per_second
-        _log(f"Round {round_num} TPS: {final_tps:.1f} tok/s  ({result.completion_tokens} completion | {result.prompt_tokens:,} prompt tokens)")
-        _log_file_only(f"[context] actual prompt tokens used: {result.prompt_tokens:,} | remaining: ~{config.num_ctx - result.prompt_tokens:,}")
-        thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
-        if thinking:
-            _log_file_only(f"[thinking]\n{thinking}\n[/thinking]")
-
-        if not result.tool_calls:
-            final_response = strip_cot_preamble(result.response)
-            run_success = bool(final_response)
-            _log(final_response)
-            _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
-            messages.append({"role": "assistant", "content": final_response})
-            context_map.append({"round": round_num, "role": "asst", "label": "final answer", "chars": len(final_response), "auto_key": None, "msg_idx": len(messages) - 1})
-            break
-
-        _log(f"Round {round_num}: model requested {len(result.tool_calls)} tool call(s).")
-        _log_file_only("[progress] Executing tool calls...")
-        current_tc_fingerprints = frozenset((tc.get("function", {}).get("name", ""), tc.get("function", {}).get("arguments", "{}")) for tc in result.tool_calls)
-        if current_tc_fingerprints and current_tc_fingerprints == prev_round_tc_fingerprints:
-            correction = (
-                "You have requested the exact same tool call(s) as the previous round. "
-                "The results will not change. Please use the information you already have "
-                "to answer the question, or try a different approach (different query, different tool, or synthesize an answer from existing results)."
-            )
-            _log(f"[warn] Round {round_num}: identical tool calls repeated from previous round - injecting correction.")
-            messages.append({"role": "user", "content": correction})
-            context_map.append({"round": round_num, "role": "user", "label": "[duplicate tool-call correction]", "chars": len(correction), "auto_key": None, "msg_idx": len(messages) - 1})
-            prev_round_tc_fingerprints = frozenset()
-            continue
-        prev_round_tc_fingerprints = current_tc_fingerprints
-
-        # Strip planning text when tool calls are present - the spec allows empty content
-        # alongside tool_calls, and the planning prose adds tokens to every subsequent round
-        # without providing information the model needs.
-        assistant_content = "" if result.tool_calls else (result.response or "")
-        messages.append({"role": "assistant", "content": assistant_content, "tool_calls": result.tool_calls})
-        context_map.append({"round": round_num, "role": "asst", "label": f"(tool calls x{len(result.tool_calls)})", "chars": len(assistant_content), "auto_key": None, "msg_idx": len(messages) - 1})
-
-        round_outputs: list[ToolCallResult] = []
-        for tool_call in result.tool_calls:
-            tc_id = tool_call.get("id", "")
-            tc_func = tool_call.get("function", {})
-            func_name = tc_func.get("name", "")
-            raw_args = tc_func.get("arguments", "{}")
             try:
-                arguments = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
-            except json.JSONDecodeError as exc:
-                _log(f"  [warn] Could not parse arguments for {func_name}: {exc} - raw: {raw_args!r}")
-                arguments = {}
-            func_name, arguments, normalization_note = normalize_tool_request(func_name, arguments)
-            _log(f"  -> {func_name}({', '.join(f'{k}={v!r}' for k, v in arguments.items())})")
-            if normalization_note:
-                _log_file_only(f"[tool-normalize] {normalization_note}")
-            try:
-                output = execute_tool_call(func_name, arguments, config.skills_payload, user_prompt, catalog_gates)
-                result_content = output["result"]
-                if not isinstance(result_content, str):
-                    result_content = json.dumps(result_content, default=str)
-                if output.get("is_error"):
-                    result_content = f"[SKILL_ERROR] {result_content}"
-            except Exception as exc:
-                result_content = f"[SKILL_ERROR] Error executing {func_name}: {exc}"
-                output = ToolCallResult(tool=func_name, function=func_name, module="", arguments=arguments, result=result_content, status="error", error=str(exc))
+                result = call_llm_chat(model_name=config.resolved_model, messages=messages, tools=tool_defs if tool_defs else None, num_ctx=config.num_ctx)
+            except Exception as error:
+                error_str = str(error)
+                if "error parsing tool call" in error_str:
+                    correction = (
+                        "Your previous tool call could not be executed because the argument JSON was truncated or malformed. "
+                        "Do not embed large multi-line strings directly in a tool call argument. Instead: (1) build the content using "
+                        "code_execute and print() it, (2) save the output to the scratchpad with scratch_save, then (3) pass the scratchpad reference to write_file."
+                    )
+                    _log(f"[error] Tool call JSON parse error in round {round_num} - injecting correction message.")
+                    messages.append({"role": "user", "content": correction})
+                    context_map.append({"round": round_num, "role": "user", "label": "[tool-call correction injected]", "chars": len(correction), "auto_key": None, "msg_idx": len(messages) - 1})
+                    continue
+                _log(f"[error] LLM call failed in round {round_num}: {error}")
+                final_response = f"(LLM call failed: {error})"
+                break
 
-            is_scratch_reader = func_name.lower().startswith("scratch_")
-            auto_scratch_key = None
-            if not output.get("is_error") and not is_scratch_reader and isinstance(result_content, str) and len(result_content) >= TOOL_MSG_AUTO_SCRATCH_MIN:
-                safe_name = func_name.lower()[:24]
-                auto_scratch_key = f"_tc_r{round_num}_{safe_name}"
-                scratch_auto_save(auto_scratch_key, result_content)
-                if len(result_content) > TOOL_MSG_MAX_CHARS:
-                    result_content = result_content[:TOOL_MSG_MAX_CHARS] + f"\n... [truncated - full content auto-saved to scratchpad key: {auto_scratch_key}]"
-
-            _log(f"     {trunc(str(result_content), 120)}")
-            round_outputs.append(output)
-            tool_outputs.append(output)
-            messages.append({"role": "tool", "tool_call_id": tc_id, "name": func_name, "content": result_content})
-            context_map.append({"round": round_num, "role": "tool", "label": func_name, "chars": len(result_content), "auto_key": auto_scratch_key, "msg_idx": len(messages) - 1})
-
-        if on_tool_round_complete is not None:
-            try:
-                on_tool_round_complete()
-            except Exception:
-                pass
-
-        _log_file_only(f"TOOL ROUND {round_num} - EXECUTION FLOW")
-        _log_file_only(format_tool_outputs(round_outputs))
-    else:
-        _log("[warn] Max tool rounds exhausted - requesting final synthesis.")
-        try:
-            synthesis_messages = messages + [{"role": "user", "content": "Based on the tool results above, please answer my original question now."}]
-            result = call_llm_chat(model_name=config.resolved_model, messages=synthesis_messages, tools=None, num_ctx=config.num_ctx)
-            final_response = strip_cot_preamble(result.response)
             prompt_tokens += result.prompt_tokens
             completion_tokens += result.completion_tokens
             final_tps = result.tokens_per_second
-            _log_section("FINAL RESPONSE")
+            _log(f"Round {round_num} TPS: {final_tps:.1f} tok/s  ({result.completion_tokens} completion | {result.prompt_tokens:,} prompt tokens)")
+            _log_file_only(f"[context] actual prompt tokens used: {result.prompt_tokens:,} | remaining: ~{config.num_ctx - result.prompt_tokens:,}")
             thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
             if thinking:
                 _log_file_only(f"[thinking]\n{thinking}\n[/thinking]")
-            _log(final_response)
-            if not final_response and tool_outputs:
-                _log_file_only("[warn] Synthesis returned empty - falling back to tool-output summary.")
-                final_response = build_fallback_answer(user_prompt, tool_outputs)
-                _log(final_response)
-            run_success = bool(final_response)
-        except Exception as error:
-            final_response = f"(synthesis failed: {error})"
 
+            if not result.tool_calls:
+                final_response = strip_cot_preamble(result.response)
+                run_success = bool(final_response)
+                _log(final_response)
+                _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
+                messages.append({"role": "assistant", "content": final_response})
+                context_map.append({"round": round_num, "role": "asst", "label": "final answer", "chars": len(final_response), "auto_key": None, "msg_idx": len(messages) - 1})
+                break
+
+            _log(f"Round {round_num}: model requested {len(result.tool_calls)} tool call(s).")
+            _log_file_only("[progress] Executing tool calls...")
+            current_tc_fingerprints = frozenset((tc.get("function", {}).get("name", ""), tc.get("function", {}).get("arguments", "{}")) for tc in result.tool_calls)
+            if current_tc_fingerprints and current_tc_fingerprints == prev_round_tc_fingerprints:
+                correction = (
+                    "You have requested the exact same tool call(s) as the previous round. "
+                    "The results will not change. Please use the information you already have "
+                    "to answer the question, or try a different approach (different query, different tool, or synthesize an answer from existing results)."
+                )
+                _log(f"[warn] Round {round_num}: identical tool calls repeated from previous round - injecting correction.")
+                messages.append({"role": "user", "content": correction})
+                context_map.append({"round": round_num, "role": "user", "label": "[duplicate tool-call correction]", "chars": len(correction), "auto_key": None, "msg_idx": len(messages) - 1})
+                prev_round_tc_fingerprints = frozenset()
+                continue
+            prev_round_tc_fingerprints = current_tc_fingerprints
+
+            # Strip planning text when tool calls are present - the spec allows empty content
+            # alongside tool_calls, and the planning prose adds tokens to every subsequent round
+            # without providing information the model needs.
+            assistant_content = "" if result.tool_calls else (result.response or "")
+            messages.append({"role": "assistant", "content": assistant_content, "tool_calls": result.tool_calls})
+            context_map.append({"round": round_num, "role": "asst", "label": f"(tool calls x{len(result.tool_calls)})", "chars": len(assistant_content), "auto_key": None, "msg_idx": len(messages) - 1})
+
+            round_outputs: list[ToolCallResult] = []
+            for tool_call in result.tool_calls:
+                tc_id = tool_call.get("id", "")
+                tc_func = tool_call.get("function", {})
+                func_name = tc_func.get("name", "")
+                raw_args = tc_func.get("arguments", "{}")
+                try:
+                    arguments = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+                except json.JSONDecodeError as exc:
+                    _log(f"  [warn] Could not parse arguments for {func_name}: {exc} - raw: {raw_args!r}")
+                    error_content = f"[SKILL_ERROR] Malformed tool call - could not parse JSON arguments for {func_name}: {exc}"
+                    error_output = ToolCallResult(tool=func_name, function=func_name, module="", arguments={}, result=error_content, status="error", error=str(exc))
+                    round_outputs.append(error_output)
+                    tool_outputs.append(error_output)
+                    messages.append({"role": "tool", "tool_call_id": tc_id, "name": func_name, "content": error_content})
+                    context_map.append({"round": round_num, "role": "tool", "label": func_name, "chars": len(error_content), "auto_key": None, "msg_idx": len(messages) - 1})
+                    continue
+                func_name, arguments, normalization_note = normalize_tool_request(func_name, arguments)
+                _log(f"  -> {func_name}({', '.join(f'{k}={v!r}' for k, v in arguments.items())})")
+                if normalization_note:
+                    _log_file_only(f"[tool-normalize] {normalization_note}")
+                try:
+                    output = execute_tool_call(func_name, arguments, config.skills_payload, user_prompt, catalog_gates)
+                    result_content = output["result"]
+                    if not isinstance(result_content, str):
+                        result_content = json.dumps(result_content, default=str)
+                    if output.get("is_error"):
+                        result_content = f"[SKILL_ERROR] {result_content}"
+                except Exception as exc:
+                    result_content = f"[SKILL_ERROR] Error executing {func_name}: {exc}"
+                    output = ToolCallResult(tool=func_name, function=func_name, module="", arguments=arguments, result=result_content, status="error", error=str(exc))
+
+                is_scratch_reader = func_name.lower().startswith("scratch_")
+                auto_scratch_key = None
+                if not output.get("is_error") and not is_scratch_reader and isinstance(result_content, str) and len(result_content) >= TOOL_MSG_AUTO_SCRATCH_MIN:
+                    safe_name = func_name.lower()[:24]
+                    auto_scratch_key = f"_tc_r{round_num}_{safe_name}"
+                    scratch_auto_save(auto_scratch_key, result_content)
+                    scratch_pin(auto_scratch_key)
+                    if len(result_content) > TOOL_MSG_MAX_CHARS:
+                        result_content = result_content[:TOOL_MSG_MAX_CHARS] + f"\n... [truncated - full content auto-saved to scratchpad key: {auto_scratch_key}]"
+
+                _log(f"     {trunc(str(result_content), 120)}")
+                round_outputs.append(output)
+                tool_outputs.append(output)
+                messages.append({"role": "tool", "tool_call_id": tc_id, "name": func_name, "content": result_content})
+                context_map.append({"round": round_num, "role": "tool", "label": func_name, "chars": len(result_content), "auto_key": auto_scratch_key, "msg_idx": len(messages) - 1})
+
+            if on_tool_round_complete is not None:
+                try:
+                    on_tool_round_complete()
+                except Exception as exc:
+                    _log_file_only(f"[error] on_tool_round_complete callback failed: {exc}")
+
+            _log_file_only(f"TOOL ROUND {round_num} - EXECUTION FLOW")
+            _log_file_only(format_tool_outputs(round_outputs))
+        else:
+            _log("[warn] Max tool rounds exhausted - requesting final synthesis.")
+            try:
+                synthesis_messages = messages + [{"role": "user", "content": "Based on the tool results above, please answer my original question now."}]
+                result = call_llm_chat(model_name=config.resolved_model, messages=synthesis_messages, tools=None, num_ctx=config.num_ctx)
+                final_response = strip_cot_preamble(result.response)
+                prompt_tokens += result.prompt_tokens
+                completion_tokens += result.completion_tokens
+                final_tps = result.tokens_per_second
+                _log_section("FINAL RESPONSE")
+                thinking = (result.message.get("thinking") or result.message.get("reasoning") or "").strip()
+                if thinking:
+                    _log_file_only(f"[thinking]\n{thinking}\n[/thinking]")
+                _log(final_response)
+                if not final_response and tool_outputs:
+                    _log_file_only("[warn] Synthesis returned empty - falling back to tool-output summary.")
+                    final_response = build_fallback_answer(user_prompt, tool_outputs)
+                    _log(final_response)
+                run_success = bool(final_response)
+            except Exception as error:
+                final_response = f"(synthesis failed: {error})"
+    finally:
+        scratch_unpin_all()
     return final_response, prompt_tokens, completion_tokens, run_success, final_tps, tool_outputs

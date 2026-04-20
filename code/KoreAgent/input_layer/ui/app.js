@@ -25,13 +25,16 @@ const CSS_WRAP_ACTIVE = "wrap-active";
 const _ALL_COMMANDS = [
     "/help", "/llmserver", "/llmserverconfig", "/ctx", "/rounds", "/timeout",
     "/stopmodel", "/stoprun",
-    "/newchat", "/clearmemory", "/reskill", "/sandbox", "/tools",
+    "/clearmemory", "/reskill", "/sandbox", "/tools",
     "/deletelogs", "/test", "/testtrend", "/tasks", "/task",
-    "/version", "/defaults", "/session",
+    "/version", "/defaults", "/session", "/kccompress",
 ];
 
 // Sub-commands for /session.
 const _SESSION_SUBS = ["name", "list", "resume", "resumecopy", "park", "delete", "info"];
+
+// Sub-commands for /llmserverconfig.
+const _LLMSERVERCFG_SUBS = ["model", "ctx"];
 
 // Pre-compiled log line classification patterns.
 const RE_LOG_TOOL_ROUND = /^TOOL ROUND\s+\d+/i;
@@ -1185,6 +1188,21 @@ function _parseSuggestContext(value) {
             }
             // Second arg is a new name - no completion.
             return null;
+        }
+        return null;
+    }
+
+    if (cmd === "/llmserverconfig") {
+        const subSpace = rest.indexOf(" ");
+        if (subSpace === -1) {
+            // Slot 1: completing the sub-command name.
+            return { pool: _LLMSERVERCFG_SUBS, prefix: rest, base: "/llmserverconfig " };
+        }
+        const sub      = rest.slice(0, subSpace);
+        const arg1Base = value.slice(0, firstSpace + 1 + subSpace + 1);
+        const arg1Text = value.slice(arg1Base.length);
+        if (sub === "model" && !arg1Text.includes(" ")) {
+            return { pool: ["list", ..._completions.models], prefix: arg1Text.trimEnd(), base: arg1Base };
         }
         return null;
     }

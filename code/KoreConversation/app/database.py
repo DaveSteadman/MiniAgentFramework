@@ -485,12 +485,20 @@ def conversation_has_unanswered_inbound(conversation_id: int) -> bool:
 
 
 # ----------------------------------------------------------------------------------------------------
-def event_has_open_response_needed(conversation_id: int) -> bool:
+def ensure_response_needed_event(conversation_id: int) -> bool:
+    """Atomically create a response_needed event if one does not already exist.
+
+    Uses BEGIN IMMEDIATE to prevent a race between the existence check and the insert
+    when two inbound messages arrive concurrently. Returns True if an event was created.
+    """
+    now = _now()
     with _conn() as c:
+        c.execute("BEGIN IMMEDIATE")
         latest = _latest_message_tx(c, conversation_id)
         if latest is None or latest["direction"] != "inbound":
+            c.execute("COMMIT")
             return False
-        row = c.execute(
+        existing = c.execute(
             """
             SELECT 1 FROM events
             WHERE conversation_id = ?
@@ -501,7 +509,18 @@ def event_has_open_response_needed(conversation_id: int) -> bool:
             """,
             (conversation_id, latest["created_at"]),
         ).fetchone()
-    return row is not None
+        if existing:
+            c.execute("COMMIT")
+            return False
+        c.execute(
+            """
+            INSERT INTO events (conversation_id, event_type, status, priority, payload, created_at)
+            VALUES (?, 'response_needed', 'pending', 0, '{}', ?)
+            """,
+            (conversation_id, now),
+        )
+        c.execute("COMMIT")
+    return True
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -743,3 +762,27 @@ def conversation_counts() -> dict:
             "SELECT status, COUNT(*) as n FROM conversations GROUP BY status"
         ).fetchall()
     return {row["status"]: row["n"] for row in rows}
+
+
+# ----------------------------------------------------------------------------------------------------
+def clear_stale_outbound_ready(max_age_hours: int = 24) -> int:
+    """Complete pending outbound_ready events older than max_age_hours.
+
+    These accumulate when KoreComms is not running. Clearing them prevents the
+    events table from growing unboundedly.
+    """
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    cutoff_str = cutoff.isoformat()
+    with _conn() as c:
+        cur = c.execute(
+            """
+            UPDATE events
+            SET status = 'completed', completed_at = ?
+            WHERE event_type = 'outbound_ready'
+              AND status = 'pending'
+              AND created_at < ?
+            """,
+            (_now(), cutoff_str),
+        )
+    return cur.rowcount

@@ -97,7 +97,7 @@ The system is divided into two layers with a clean interface between them.
 
 ## Server - Context control
 
-**Files:** `code/KoreAgent/scratchpad.py`, `code/KoreAgent/skills/Delegate/`, `code/KoreAgent/prompt_tokens.py`
+**Files:** `code/KoreAgent/scratchpad.py`, `code/KoreAgent/system_skills/Delegate/`, `code/KoreAgent/prompt_tokens.py`
 
 **Intent:** Three complementary mechanisms for keeping large data out of the LLM context window and for isolating sub-task reasoning.
 
@@ -161,15 +161,18 @@ The system is divided into two layers with a clean interface between them.
 
 ### Available skills (current)
 
+System skills (bundled in `system_skills/`, woven into the framework):
 - `CodeExecute` - Python sandbox execution
-- `DateTime` - current date/time
 - `Delegate` - isolated child orchestration
 - `FileAccess` - read/write workspace files
-- `KoreData` - search and retrieve from local KoreData services (feeds, encyclopedia, library, documents)
 - `Memory` - persistent cross-session key-value memory
 - `Scratchpad` - session-scoped named-value store
-- `SystemInfo` - host hardware and OS info
 - `TaskManagement` - scheduled task queue control
+
+External skills (bolt-on, in `skills/`):
+- `DateTime` - current date/time
+- `KoreData` - search and retrieve from local KoreData services (feeds, encyclopedia, library, documents)
+- `SystemInfo` - host hardware and OS info
 - `WebFetch` - single-page fetch and extraction
 - `WebNavigate` - multi-step browser-like page traversal
 - `WebResearch` - multi-source research traversal

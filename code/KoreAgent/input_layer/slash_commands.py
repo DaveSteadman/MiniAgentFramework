@@ -31,13 +31,14 @@ from KoreAgent.orchestration import request_stop
 from KoreAgent.orchestration import get_sandbox_enabled
 from KoreAgent.orchestration import set_sandbox_enabled
 from KoreAgent.orchestration import set_skill_guidance_enabled
-from KoreAgent.skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
-from KoreAgent.skills.Memory.memory_skill import MEMORY_STORE_PATH
+from KoreAgent.system_skills.Memory.memory_skill import MEMORY_STORE_LEGACY_PATH
+from KoreAgent.system_skills.Memory.memory_skill import MEMORY_STORE_PATH
 from KoreAgent.input_layer.slash_command_context import SlashCommandContext
 from KoreAgent.input_layer.slash_command_handlers_models import register_model_slash_commands
 from KoreAgent.input_layer.slash_command_handlers_sessions import register_session_slash_commands
 from KoreAgent.input_layer.slash_command_handlers_tasks import register_task_slash_commands
 from KoreAgent.input_layer.slash_command_handlers_testing import register_testing_slash_commands
+from KoreAgent import mcp_client
 from KoreAgent.utils.workspace_utils import get_bootstrap_defaults_file
 from KoreAgent.utils.workspace_utils import get_controldata_dir
 from KoreAgent.utils.workspace_utils import get_logs_dir
@@ -200,6 +201,8 @@ def _cmd_timeout(arg: str, ctx: SlashCommandContext) -> None:
 
 
 def _cmd_newchat(arg: str, ctx: SlashCommandContext) -> None:
+    # Retired - use /session new [name] instead.
+    ctx.output("Note: /newchat is retired. Use '/session new [name]' instead.", "dim")
     name = arg.strip()
     new_session_id = f"web_{int(time.time() * 1000)}"
     if ctx.switch_session:
@@ -366,13 +369,16 @@ def _cmd_tools(arg: str, ctx: SlashCommandContext) -> None:
     if not get_web_skills_enabled():
         payload = _filter_web_skills(payload)
 
-    tool_defs = build_tool_definitions(payload)
+    skill_tool_defs = build_tool_definitions(payload)
+    mcp_tool_defs   = mcp_client.get_mcp_tool_definitions()
+    tool_defs       = skill_tool_defs + mcp_tool_defs
     if not tool_defs:
         ctx.output("No tools available.", "dim")
         return
 
     web_off = not get_web_skills_enabled()
-    ctx.output(f"{len(tool_defs)} tool(s) active{' (web skills off)' if web_off else ''}:", "info")
+    mcp_count = len(mcp_tool_defs)
+    ctx.output(f"{len(tool_defs)} tool(s) active{' (web skills off)' if web_off else ''}{f', {mcp_count} via MCP' if mcp_count else ''}:", "info")
     for tool in tool_defs:
         fn   = tool["function"]
         name = fn["name"]
@@ -397,7 +403,7 @@ def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
     if sub == "set":
         existing = _load()
         new_cfg = {"model": ctx.config.resolved_model, "ctx": ctx.config.num_ctx, "llmhost": get_active_host()}
-        for key in ("agentport", "ControlDataFolder", "UserDataFolder", "koredataurl", "korecommsurl", "korecomms_poll_secs", "mcp_servers"):
+        for key in ("agentport", "ControlDataFolder", "UserDataFolder", "korecommsurl", "korecomms_poll_secs", "mcp_servers"):
             if key in existing:
                 new_cfg[key] = existing[key]
         try:
@@ -424,6 +430,31 @@ def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output("Usage: /defaults | /defaults set", "dim")
 
 
+# ----------------------------------------------------------------------------------------------------
+def _cmd_mcp(arg: str, ctx: SlashCommandContext) -> None:
+    sub = arg.strip().lower()
+
+    if sub in ("", "status"):
+        statuses = mcp_client.get_server_status()
+        if not statuses:
+            ctx.output("No MCP servers configured.", "dim")
+            return
+        for srv in statuses:
+            ok_str = f"({srv['tool_count']} tool(s))" if srv["ok"] else "(no tools - server may be down)"
+            ctx.output(f"  {'OK  ' if srv['ok'] else 'FAIL'}  {srv['name']}  {srv['url']}  {ok_str}", "item")
+        return
+
+    if sub == "reconnect":
+        ctx.output("Reconnecting to MCP servers...", "dim")
+        count, lines = mcp_client.reconnect()
+        for line in lines:
+            ctx.output(line, "info" if count > 0 else "error")
+        ctx.output(f"{count} MCP tool(s) now registered.", "success" if count > 0 else "error")
+        return
+
+    ctx.output("Usage: /mcp [status | reconnect]", "dim")
+
+
 _REGISTRY: dict[str, Callable] = {
     "/help": _cmd_help,
     "/ctx": _cmd_ctx,
@@ -438,6 +469,7 @@ _REGISTRY: dict[str, Callable] = {
     "/tools": _cmd_tools,
     "/deletelogs": _cmd_deletelogs,
     "/defaults": _cmd_defaults,
+    "/mcp":      _cmd_mcp,
 }
 
 _DESCRIPTIONS: dict[str, str] = {
@@ -446,7 +478,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/rounds": "<n>  Set max tool-call rounds per prompt (e.g. /rounds 6)",
     "/timeout": "<seconds>  Set LLM generation timeout (e.g. /timeout 1800 for heavy analysis)",
     "/stoprun": "Cancel the active LLM run (after its current round) and clear all pending queued prompts",
-    "/newchat": "Clear conversation history and start a fresh chat  (optional: /newchat <name>)",
+    "/newchat": "(retired - use /session new [name])",
     "/clearmemory": "Delete the memory store file, starting with a blank memory next session",
     "/reskill": "[min|max]  Rebuild skills catalog and set system prompt guidance mode (default: min)",
     "/version": "Show framework version, active model, and context size",
@@ -454,6 +486,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "/tools": "List all tools currently exposed to the model (respects web skills toggle)",
     "/deletelogs": "<days>  Delete log, chatsession, and test_results date-folders older than N days (e.g. /deletelogs 10)",
     "/defaults": "Show current default.json settings and file path; /defaults set saves current model/ctx/host to the file",
+    "/mcp":      "[status | reconnect]  Show MCP server status or re-enumerate tools from all configured servers",
 }
 
 register_model_slash_commands(_REGISTRY, _DESCRIPTIONS)

@@ -209,6 +209,17 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
     rest = sub_parts[1].strip() if len(sub_parts) > 1 else ""
 
     try:
+        if sub == "new":
+            new_session_id = f"web_{int(time.time() * 1000)}"
+            name = rest.strip()
+            if ctx.switch_session:
+                ctx.switch_session(new_session_id, name)
+                label = f"'{name}'" if name else "a new chat"
+                ctx.output(f"Conversation history cleared - starting {label}.", "success")
+            else:
+                ctx.output("Session switching is not available in this mode.", "error")
+            return
+
         if sub == "name":
             if not rest:
                 ctx.output("Usage: /session name <alias>", "dim")
@@ -296,7 +307,10 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
                     session_id = _session_id_from_external_id(str(conv.get("external_id") or ""))
                     if session_id == ctx.session_id:
                         deleted_current = True
-                    _kc_delete(f"/conversations/{conv['id']}")
+                    if ctx.delete_session_state:
+                        ctx.delete_session_state(session_id)
+                    else:
+                        _kc_delete(f"/conversations/{conv['id']}")
                     ctx.output(f"  Deleted '{_display_name(conv)}'.", "item")
                 ctx.output(f"{len(conversations)} conversation(s) deleted.", "success")
                 if deleted_current and ctx.switch_session:
@@ -307,7 +321,10 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
                 ctx.output(f"No conversation named '{rest}' found.", "error")
                 return
             session_id = _session_id_from_external_id(str(conv.get("external_id") or ""))
-            _kc_delete(f"/conversations/{conv['id']}")
+            if ctx.delete_session_state:
+                ctx.delete_session_state(session_id)
+            else:
+                _kc_delete(f"/conversations/{conv['id']}")
             ctx.output(f"Deleted conversation '{_display_name(conv)}'.", "success")
             if session_id == ctx.session_id and ctx.switch_session:
                 ctx.switch_session(f"web_{int(time.time() * 1000)}", "")
@@ -334,7 +351,8 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
         ctx.output(str(exc), "error")
         return
 
-    ctx.output("Usage: /session <name|list|resume|resumecopy|park|delete|info>", "dim")
+    ctx.output("Usage: /session <new|name|list|resume|resumecopy|park|delete|info>", "dim")
+    ctx.output("  /session new [name]                  - clear history and start a fresh chat (optional name)", "item")
     ctx.output("  /session name <alias>                - rename the current KoreConversation", "item")
     ctx.output("  /session list                        - list webchat KoreConversations", "item")
     ctx.output("  /session resume <name>               - switch to a named KoreConversation", "item")
@@ -345,6 +363,48 @@ def _cmd_session(arg: str, ctx: SlashCommandContext) -> None:
     ctx.output("  /session info                        - show current KoreConversation details", "item")
 
 
+# ----------------------------------------------------------------------------------------------------
+def _cmd_kccompress(arg: str, ctx: SlashCommandContext) -> None:
+    # /kccompress          -> queue a compress_needed event for the current conversation
+    # /kccompress <name>   -> queue for a named conversation
+    try:
+        if arg.strip():
+            conv = _find_conversation_by_name(arg.strip())
+            if conv is None:
+                ctx.output(f"No conversation named '{arg.strip()}' found.", "error")
+                return
+        else:
+            if not ctx.session_id:
+                ctx.output("No active session.", "error")
+                return
+            conv = _find_conversation_by_session(ctx.session_id)
+            if conv is None:
+                ctx.output("No KoreConversation found for the current session.", "error")
+                return
+
+        conv_id = conv.get("id")
+        unsummarised = _kc_get(f"/conversations/{conv_id}/messages?summarised=0&limit=1") or []
+        if not unsummarised:
+            ctx.output("No unsummarised messages - nothing to compress.", "dim")
+            return
+
+        _kc_post("/events", {
+            "conversation_id": conv_id,
+            "event_type":      "compress_needed",
+            "priority":        10,
+            "payload":         {},
+        })
+        ctx.output(
+            f"compress_needed event queued for '{_display_name(conv)}' (conv {conv_id}).",
+            "success",
+        )
+        ctx.output("Check the log panel - compression will run on the next agent poll.", "dim")
+    except RuntimeError as exc:
+        ctx.output(str(exc), "error")
+
+
 def register_session_slash_commands(registry: dict[str, Callable], descriptions: dict[str, str]) -> None:
-    registry["/session"] = _cmd_session
-    descriptions["/session"] = "name <alias> | list | resume <name> | park | delete <name|all> | info  - manage KoreConversation webchat sessions"
+    registry["/session"]    = _cmd_session
+    registry["/kccompress"] = _cmd_kccompress
+    descriptions["/session"]    = "new [name] | name <alias> | list | resume <name> | park | delete <name|all> | info  - manage sessions and KoreConversation"
+    descriptions["/kccompress"] = "[<name>]  Queue a compress_needed event for the current (or named) KoreConversation"

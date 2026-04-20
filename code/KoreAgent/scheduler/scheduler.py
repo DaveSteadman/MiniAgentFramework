@@ -177,8 +177,12 @@ class TaskQueue:
             from KoreAgent.utils.workspace_utils import get_controldata_dir
             path = get_controldata_dir() / "task_queue.json"
             path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            try:
+                from KoreAgent.llm_client import log_to_session
+                log_to_session(f"[scheduler] Could not delete task queue state file: {exc}")
+            except Exception:
+                pass
 
     # ----------------------------------------------------------------------------------------------------
     def _write_state(self) -> None:
@@ -189,8 +193,12 @@ class TaskQueue:
                 json.dumps(self.get_state(), indent=2),
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            try:
+                from KoreAgent.llm_client import log_to_session
+                log_to_session(f"[scheduler] Could not write task queue state file: {exc}")
+            except Exception:
+                pass
 
     # ----------------------------------------------------------------------------------------------------
     def _worker_loop(self) -> None:

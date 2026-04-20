@@ -212,14 +212,12 @@ def finish_run_event_queue(run_id: str) -> None:
     Does NOT pop the queue entry here - stream_run's _generate() does that when it receives
     the sentinel. This is critical: fast runs (e.g. slash commands completing in milliseconds)
     must keep the queue entry alive so the SSE client can still connect and read all events.
+    Uses the same priority-drain logic as _queue_run_event so the sentinel is never silently lost.
     """
     with _run_queues_lock:
         q = _run_event_queues.get(run_id)
     if q:
-        try:
-            q.put_nowait(None)
-        except queue.Full:
-            pass
+        _queue_run_event(q, None, priority=True)
 
 
 # ====================================================================================================
@@ -461,22 +459,16 @@ def _handle_stoprun_immediate(run_id: str, run_q: "queue.Queue") -> None:
 
     # Push a cancellation response + sentinel to each pending run's SSE client.
     cancel_msg = "Cancelled by /stoprun."
-    with _run_queues_lock:
-        for rid in cancelled_ids:
+    for rid in cancelled_ids:
+        with _run_queues_lock:
             q = _run_event_queues.get(rid)
-            if q is None:
-                continue
-            try:
-                q.put_nowait({"type": "response", "run_id": rid, "response": cancel_msg, "tokens": 0, "tps": "0"})
-            except queue.Full:
-                pass
-            try:
-                q.put_nowait(None)
-            except queue.Full:
-                pass
+        if q is None:
+            continue
+        _queue_run_event(q, {"type": "response", "run_id": rid, "response": cancel_msg, "tokens": 0, "tps": "0"}, priority=True)
+        _queue_run_event(q, None, priority=True)
 
     n = len(cancelled_ids)
-    active_note = "Active run will halt after its current LLM round. " if True else ""
+    active_note = "Active run will halt after its current LLM round. "
     summary = (
         f"{active_note}{n} pending prompt{'s' if n != 1 else ''} cancelled."
         if n else
@@ -624,7 +616,7 @@ def _load_session(session_id: str) -> tuple["ConversationHistory", list[dict]]:
         summaries = [{"text": thread_summary, "turn_range": [1, 1]}]
 
     try:
-        messages = _kc_get(f"/conversations/{conv['id']}/messages?limit=1000") or []
+        messages = _kc_get(f"/conversations/{conv['id']}/messages?summarised=0&limit=1000") or []
     except HTTPException:
         messages = []
 

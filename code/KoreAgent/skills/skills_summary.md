@@ -1,4 +1,4 @@
-﻿# Skills Summary
+# Skills Summary
 
 Single JSON payload for orchestration planning.
 
@@ -6,52 +6,6 @@ Single JSON payload for orchestration planning.
   "schema_version": "1.0",
   "skills_root": "KoreAgent/skills",
   "skills": [
-    {
-      "skill_name": "CodeExecute Skill",
-      "relative_path": "KoreAgent/skills/CodeExecute/skill.md",
-      "purpose": "- Execute a self-contained Python code snippet and return the captured stdout.\n- **Always prefer code over a direct answer for any calculation, sequence, table, string operation, or data generation task** - even when the answer seems obvious from training knowledge. Running code is more reliable and verifiable than recall.\n- Only Python stdlib is available; third-party packages (numpy, pandas, sympy) are not.\n- When sandbox is off (`/sandbox off`), all modules are accessible. To install and use a third-party package, use `subprocess` to pip-install it first, then import normally:\n  ```python\n  import subprocess, sys\n  subprocess.run([sys.executable, \"-m\", \"pip\", \"install\", \"numpy\"], check=True)\n  import numpy as np\n  print(np.array([1,2,3]).mean())\n  ```\n- When paired with FileAccess, call this skill first to generate the content, then park the output with `scratch_save`, and pass `{scratch:key}` as the content argument to `file_write` - this avoids carrying the full output string as an inline argument through the tool-calling loop.\n- Code must use `print()` for all output. Favour simple linear code - avoid complex class hierarchies or deeply nested call stacks.",
-      "module": "code/KoreAgent/skills/CodeExecute/code_execute_skill.py",
-      "trigger_keyword": "calculate",
-      "triggers": [
-        "calculate",
-        "compute",
-        "what is X",
-        "evaluate",
-        "Powers, factorials, primes, fibonacci, sequences, series",
-        "Sum, product, average, mean, median, mode, standard deviation",
-        "Compound interest, percentage, ratio, conversion between units",
-        "Multiplication tables, squares/cubes tables, truth tables, lookup tables",
-        "print a table",
-        "generate a list",
-        "produce a list",
-        "list all X",
-        "first N of",
-        "Identity matrix, Pascal's triangle, any structured numeric output",
-        "how many times",
-        "count the",
-        "Reverse, sort, check for palindromes, anagram detection",
-        "Any prompt asking to inspect or transform a string value",
-        "convert X to binary/hex/octal/decimal",
-        "ASCII codes, encoding lookups",
-        "Collatz sequence, any recurrence relation",
-        "first N",
-        "up to N",
-        "for each",
-        "from 1 to N"
-      ],
-      "functions": [
-        "run_python_snippet(code: str)"
-      ],
-      "inputs": [],
-      "outputs": [
-        "`run_python_snippet(...)` - returns captured stdout as a plain string. Returns `\"Error: ...\"` if the snippet raises an exception, times out, or produces no output."
-      ],
-      "param_descriptions": {
-        "run_python_snippet": {
-          "code": "a complete, self-contained Python snippet as a string. Must use `print()` for all output."
-        }
-      }
-    },
     {
       "skill_name": "DateTime Skill",
       "relative_path": "KoreAgent/skills/DateTime/skill.md",
@@ -86,39 +40,6 @@ Single JSON payload for orchestration planning.
         "`get_month_name()` - returns the full name of the current month, e.g. `\"March\"`"
       ],
       "param_descriptions": {}
-    },
-    {
-      "skill_name": "Delegate Skill",
-      "relative_path": "KoreAgent/skills/Delegate/skill.md",
-      "purpose": "Create a fresh child orchestration context for a focused sub-task. The child gets its own\nisolated reasoning and tool-calling loop, runs independently, and returns a compact answer\nto the parent. Use this when a sub-problem would benefit from multi-step investigation\nwithout polluting the parent context with intermediate tool chatter.",
-      "module": "code/KoreAgent/skills/Delegate/delegate_skill.py",
-      "trigger_keyword": "delegate",
-      "triggers": [
-        "the task contains a clear sub-problem that should be solved independently",
-        "intermediate tool chatter from the sub-problem would pollute the parent context",
-        "you want a focused, isolated sub-investigation before final synthesis"
-      ],
-      "functions": [
-        "delegate(prompt: str, instructions: str = \"\", max_iterations: int = 3, output_key: str = \"\", scratchpad_visible_keys: list[str] | None = None, tools_allowlist: list[str] | None = None)"
-      ],
-      "inputs": [],
-      "outputs": [
-        "`status` - \"ok\" or \"error\"",
-        "`answer` - compact final answer from the child run",
-        "`delegate_prompt` - the child prompt actually used",
-        "`depth` - delegation depth of the child run",
-        "`max_iterations` - child iteration budget used"
-      ],
-      "param_descriptions": {
-        "delegate": {
-          "prompt": "the child task to execute. Must be a complete, self-contained question or instruction.",
-          "instructions": "extra steering prepended to the child prompt, e.g. \"research thoroughly and return a concise answer with evidence\".",
-          "max_iterations": "maximum tool-calling rounds for the child run, 1-8 recommended.",
-          "output_key": "scratchpad key name to save the child's final answer under automatically.",
-          "scratchpad_visible_keys": "list of scratchpad key names the child can see in its system prompt.",
-          "tools_allowlist": "list of function names the child is permitted to call."
-        }
-      }
     },
     {
       "skill_name": "FileAccess Skill",
@@ -207,7 +128,7 @@ Single JSON payload for orchestration planning.
     {
       "skill_name": "KoreData Skill",
       "relative_path": "KoreAgent/skills/KoreData/skill.md",
-      "purpose": "Search and retrieve content from the local KoreData system via the KoreDataGateway. KoreData\naggregates three services behind a single search API:\n- **KoreFeeds** - a repackaged RSS archive with full article text\n- **KoreReference** - a local encyclopedia (Wikipedia clone)\n- **KoreLibrary** - a local book repository\n\nUse this skill to search recent news, look up encyclopedia articles, or find books - all in\none call. Follow up with the appropriate get function to retrieve full content.",
+      "purpose": "Search and retrieve content from the local KoreData system via the KoreDataGateway. KoreData\naggregates four services behind a single search API:\n- **KoreFeeds** - a repackaged RSS archive with full article text\n- **KoreReference** - a local encyclopedia (Wikipedia clone)\n- **KoreLibrary** - a local book repository\n- **KoreRAG** - an FTS5-indexed store of internal user documents (company process docs, project\n  data files, ad hoc notes)\n\nUse this skill to search recent news, look up encyclopedia articles, find books, or retrieve\ninternal documents - all in one call. Follow up with the appropriate get function for full content.",
       "module": "code/KoreAgent/skills/KoreData/koredata_skill.py",
       "trigger_keyword": "koredata",
       "triggers": [],
@@ -216,6 +137,7 @@ Single JSON payload for orchestration planning.
         "koredata_get_article(title)",
         "koredata_get_entry(domain, entry_id)",
         "koredata_get_book(book_id)",
+        "koredata_get_chunk(chunk_id)",
         "koredata_status()"
       ],
       "inputs": [],
@@ -223,7 +145,7 @@ Single JSON payload for orchestration planning.
       "param_descriptions": {
         "koredata_search": {
           "query": "natural-language or keyword query string matched across all requested",
-          "domains": "list of services to search: `\"feeds\"`, `\"reference\"`, `\"library\"`.",
+          "domains": "list of services to search: `\"feeds\"`, `\"reference\"`, `\"library\"`,",
           "since": "ISO 8601 date `YYYY-MM-DD` - earliest published-date filter, applied",
           "until": "ISO 8601 date `YYYY-MM-DD` - latest published-date filter, applied to",
           "limit": "maximum results per domain."
@@ -237,136 +159,9 @@ Single JSON payload for orchestration planning.
         },
         "koredata_get_book": {
           "book_id": "numeric book ID from a library search result."
-        }
-      }
-    },
-    {
-      "skill_name": "Memory Skill",
-      "relative_path": "KoreAgent/skills/Memory/skill.md",
-      "purpose": "Persist and recall durable user-stated facts across sessions - identity, preferences, project context, and environment facts. A newer fact on the same subject supersedes the older one. Do not store questions, commands, or ephemeral data such as current time or system stats. Facts persist in `memory_store.json` with category, timestamps, and access tracking.",
-      "module": "code/KoreAgent/skills/Memory/memory_skill.py",
-      "trigger_keyword": "memory",
-      "triggers": [
-        "remember",
-        "store this",
-        "save this fact",
-        "note that",
-        "recall",
-        "what do you know about",
-        "do you remember",
-        "my name is",
-        "I prefer",
-        "our project is",
-        "the default model is",
-        "show memory",
-        "memory store",
-        "what have you stored"
-      ],
-      "functions": [
-        "store_prompt_memories(user_prompt: str)",
-        "recall_relevant_memories(user_prompt: str, limit: int = 5, min_score: float = 0.25)",
-        "extract_environment_facts(user_prompt: str)",
-        "get_memory_store_text()"
-      ],
-      "inputs": [],
-      "outputs": [
-        "`store_prompt_memories(...)` - returns `\"Stored N new memory fact(s).\"` or `\"Updated N existing memory fact(s).\"`.",
-        "`recall_relevant_memories(...)` - returns a formatted ranked list of memories with category and relevance score.",
-        "`extract_environment_facts(...)` - returns a list of candidate environment facts extracted from the prompt.",
-        "`get_memory_store_text()` - returns the full pretty-printed JSON of the memory store."
-      ],
-      "param_descriptions": {
-        "store_prompt_memories": {
-          "user_prompt": "raw user text to extract facts from and store."
         },
-        "recall_relevant_memories": {
-          "user_prompt": "current prompt used as the relevance query.",
-          "limit": "maximum number of memories to return.",
-          "min_score": "minimum token-overlap relevance threshold; lower values return more results."
-        },
-        "extract_environment_facts": {
-          "user_prompt": "raw user text to inspect for environment-specific facts only."
-        }
-      }
-    },
-    {
-      "skill_name": "Scratchpad Skill",
-      "relative_path": "KoreAgent/skills/Scratchpad/skill.md",
-      "purpose": "Store and retrieve named working values within a session so that bulk data returned by other skills\n(web pages, file content, computation results) can be parked under a short key and referenced later\nwithout consuming context window space.  Use this skill whenever the plan involves multi-step tool\nchains where an intermediate result is needed again in a later step.  Do not use it for durable\nfacts that should survive across sessions - use the Memory skill for that.",
-      "module": "code/KoreAgent/skills/Scratchpad/scratchpad_skill.py",
-      "trigger_keyword": "scratchpad",
-      "triggers": [
-        "save to scratchpad",
-        "store in scratchpad",
-        "park this result",
-        "load from scratchpad",
-        "retrieve from scratchpad",
-        "get scratchpad value",
-        "list scratchpad",
-        "what is in the scratchpad",
-        "dump scratchpad",
-        "show scratchpad contents",
-        "inspect scratchpad",
-        "debug scratchpad",
-        "delete from scratchpad",
-        "clear scratchpad key",
-        "search scratchpad",
-        "find scratchpad keys containing",
-        "which scratchpad keys have",
-        "peek at scratchpad",
-        "show context around",
-        "find text in scratchpad key",
-        "query scratchpad",
-        "ask scratchpad",
-        "extract from scratchpad",
-        "filter scratchpad",
-        "run query on scratchpad key"
-      ],
-      "functions": [
-        "scratch_save(key: str, value: str)",
-        "scratch_load(key: str)",
-        "scratch_list()",
-        "scratch_dump()",
-        "scratch_delete(key: str)",
-        "scratch_search(substring: str)",
-        "scratch_peek(key: str, substring: str, context_chars: int = 250)",
-        "scratch_query(key: str, query: str, save_result_key: str = \"\", instructions: str = \"\")"
-      ],
-      "inputs": [],
-      "outputs": [
-        "`scratch_save(...)` - returns `\"Saved to scratchpad key '<key>' (N chars)\"` on success, or `\"Error: ...\"`.",
-        "`scratch_load(...)` - returns the stored string value, or an error message if the key is not found.",
-        "`scratch_list()` - returns a formatted list of active keys and their sizes, or `\"Scratchpad is empty.\"`.",
-        "`scratch_dump()` - returns every key followed by its full stored value. Use to inspect scratchpad contents for debugging.",
-        "`scratch_delete(...)` - returns confirmation or `\"Scratchpad key '<key>' not found - nothing deleted.\"`.",
-        "`scratch_search(...)` - returns a formatted list of matching key names and sizes, or `\"No scratchpad keys contain the substring '<text>'.\"` when no match is found.",
-        "`scratch_peek(...)` - returns `[Match in 'key' at char N / M total]` followed by the surrounding text with `>>>match<<<` highlighting, or an error string when the key or substring is not found.",
-        "`scratch_query(...)` - returns the compact extracted answer from the isolated LLM call, or `\"Not found in content.\"` when the query cannot be answered from the stored value.  When `save_result_key` is provided, prepends `[Result saved to '<key>']` to the output."
-      ],
-      "param_descriptions": {
-        "scratch_save": {
-          "key": "short alphanumeric identifier for the value, e.g. `\"webresult\"` or `\"step1_output\"`. Letters, digits, and underscores only. Stored lowercased.",
-          "value": "the string content to store. Overwrites any previous value at that key."
-        },
-        "scratch_load": {
-          "key": "the key to retrieve. Returns an error message when the key does not exist."
-        },
-        "scratch_delete": {
-          "key": "the key to remove from the scratchpad."
-        },
-        "scratch_search": {
-          "substring": "case-insensitive text to search for within stored values. Returns all keys whose value contains the substring."
-        },
-        "scratch_peek": {
-          "key": "the scratchpad key to inspect.",
-          "substring": "case-insensitive text to locate within the stored value.",
-          "context_chars": "characters to include before and after the match."
-        },
-        "scratch_query": {
-          "key": "the scratchpad key whose full content will be used as input.",
-          "query": "natural-language question or instruction to apply to the stored content.",
-          "save_result_key": "if provided, the extracted answer is also saved to this scratchpad key.",
-          "instructions": "if provided, replaces the default \"precise extractor\" system prompt entirely."
+        "koredata_get_chunk": {
+          "chunk_id": "numeric chunk ID from a RAG search result."
         }
       }
     },
@@ -640,6 +435,250 @@ Single JSON payload for orchestration planning.
           "max_chars_per_result": "maximum characters of snippet text per result, 0-2000. Set to 0 to disable truncation.",
           "offset": "skip this many results; use to retrieve page 2+ when the first page was exhausted.",
           "prefer_article_urls": "same behavior as `search_web(...)`; when enabled the formatted output also includes each result's `page_kind` tag."
+        }
+      }
+    },
+    {
+      "skill_name": "WebWikipedia Skill",
+      "relative_path": "KoreAgent/skills/WebWikipedia/skill.md",
+      "purpose": "Look up a topic on the live Wikipedia REST API and return a plain-text article summary. Use this for authoritative factual reference data about a person, place, concept, event, or technology. For current news or live data, use WebSearch instead.",
+      "module": "code/KoreAgent/skills/WebWikipedia/wikipedia_skill.py",
+      "trigger_keyword": "wikipedia",
+      "triggers": [
+        "what is",
+        "tell me about",
+        "who is",
+        "look up on Wikipedia",
+        "Wikipedia article",
+        "background on",
+        "history of",
+        "definition of",
+        "bio",
+        "biography",
+        "life of",
+        "biography of"
+      ],
+      "functions": [
+        "lookup_wikipedia(topic: str, timeout: int = 15)"
+      ],
+      "inputs": [],
+      "outputs": [
+        "`lookup_wikipedia(...)` - returns a plain-text block starting with `\"Wikipedia - <article title>\"` followed by the article extract (up to 400 words). Returns `\"No Wikipedia data found for '<topic>'\"` when no matching article is found. Skips disambiguation pages automatically and tries the next candidate."
+      ],
+      "param_descriptions": {
+        "lookup_wikipedia": {
+          "topic": "subject to look up: a name, term, acronym, or short phrase.",
+          "timeout": "network timeout in seconds."
+        }
+      }
+    },
+    {
+      "skill_name": "CodeExecute Skill",
+      "relative_path": "KoreAgent/system_skills/CodeExecute/skill.md",
+      "purpose": "- Execute a self-contained Python code snippet and return the captured stdout.\n- **Always prefer code over a direct answer for any calculation, sequence, table, string operation, or data generation task** - even when the answer seems obvious from training knowledge. Running code is more reliable and verifiable than recall.\n- Only Python stdlib is available; third-party packages (numpy, pandas, sympy) are not.\n- When sandbox is off (`/sandbox off`), all modules are accessible. To install and use a third-party package, use `subprocess` to pip-install it first, then import normally:\n  ```python\n  import subprocess, sys\n  subprocess.run([sys.executable, \"-m\", \"pip\", \"install\", \"numpy\"], check=True)\n  import numpy as np\n  print(np.array([1,2,3]).mean())\n  ```\n- When paired with FileAccess, call this skill first to generate the content, then park the output with `scratch_save`, and pass `{scratch:key}` as the content argument to `file_write` - this avoids carrying the full output string as an inline argument through the tool-calling loop.\n- Code must use `print()` for all output. Favour simple linear code - avoid complex class hierarchies or deeply nested call stacks.",
+      "module": "code/KoreAgent/system_skills/CodeExecute/code_execute_skill.py",
+      "trigger_keyword": "calculate",
+      "triggers": [
+        "calculate",
+        "compute",
+        "what is X",
+        "evaluate",
+        "Powers, factorials, primes, fibonacci, sequences, series",
+        "Sum, product, average, mean, median, mode, standard deviation",
+        "Compound interest, percentage, ratio, conversion between units",
+        "Multiplication tables, squares/cubes tables, truth tables, lookup tables",
+        "print a table",
+        "generate a list",
+        "produce a list",
+        "list all X",
+        "first N of",
+        "Identity matrix, Pascal's triangle, any structured numeric output",
+        "how many times",
+        "count the",
+        "Reverse, sort, check for palindromes, anagram detection",
+        "Any prompt asking to inspect or transform a string value",
+        "convert X to binary/hex/octal/decimal",
+        "ASCII codes, encoding lookups",
+        "Collatz sequence, any recurrence relation",
+        "first N",
+        "up to N",
+        "for each",
+        "from 1 to N"
+      ],
+      "functions": [
+        "run_python_snippet(code: str)"
+      ],
+      "inputs": [],
+      "outputs": [
+        "`run_python_snippet(...)` - returns captured stdout as a plain string. Returns `\"Error: ...\"` if the snippet raises an exception, times out, or produces no output."
+      ],
+      "param_descriptions": {
+        "run_python_snippet": {
+          "code": "a complete, self-contained Python snippet as a string. Must use `print()` for all output."
+        }
+      }
+    },
+    {
+      "skill_name": "Delegate Skill",
+      "relative_path": "KoreAgent/system_skills/Delegate/skill.md",
+      "purpose": "Create a fresh child orchestration context for a focused sub-task. The child gets its own\nisolated reasoning and tool-calling loop, runs independently, and returns a compact answer\nto the parent. Use this when a sub-problem would benefit from multi-step investigation\nwithout polluting the parent context with intermediate tool chatter.",
+      "module": "code/KoreAgent/system_skills/Delegate/delegate_skill.py",
+      "trigger_keyword": "delegate",
+      "triggers": [
+        "the task contains a clear sub-problem that should be solved independently",
+        "intermediate tool chatter from the sub-problem would pollute the parent context",
+        "a sub-problem needs its own multi-step tool-calling loop (more than one tool in sequence)",
+        "you want a focused, isolated sub-investigation before final synthesis"
+      ],
+      "functions": [
+        "delegate(prompt: str, instructions: str = \"\", max_iterations: int = 3, output_key: str = \"\", scratchpad_visible_keys: list[str] | None = None, tools_allowlist: list[str] | None = None)"
+      ],
+      "inputs": [],
+      "outputs": [
+        "`status` - \"ok\" or \"error\"",
+        "`answer` - compact final answer from the child run",
+        "`delegate_prompt` - the child prompt actually used",
+        "`depth` - delegation depth of the child run",
+        "`max_iterations` - child iteration budget used"
+      ],
+      "param_descriptions": {
+        "delegate": {
+          "prompt": "the child task to execute. Must be a complete, self-contained question or instruction.",
+          "instructions": "extra steering prepended to the child prompt, e.g. \"research thoroughly and return a concise answer with evidence\".",
+          "max_iterations": "maximum tool-calling rounds for the child run, 1-8 recommended.",
+          "output_key": "scratchpad key name to save the child's final answer under automatically.",
+          "scratchpad_visible_keys": "list of scratchpad key names the child can see in its system prompt.",
+          "tools_allowlist": "list of function names the child is permitted to call."
+        }
+      }
+    },
+    {
+      "skill_name": "Memory Skill",
+      "relative_path": "KoreAgent/system_skills/Memory/skill.md",
+      "purpose": "Persist and recall durable user-stated facts across sessions - identity, preferences, project context, and environment facts. A newer fact on the same subject supersedes the older one. Do not store questions, commands, or ephemeral data such as current time or system stats. Facts persist in `memory_store.json` with category, timestamps, and access tracking.",
+      "module": "code/KoreAgent/system_skills/Memory/memory_skill.py",
+      "trigger_keyword": "memory",
+      "triggers": [
+        "remember",
+        "store this",
+        "save this fact",
+        "note that",
+        "recall",
+        "what do you know about",
+        "do you remember",
+        "my name is",
+        "I prefer",
+        "our project is",
+        "the default model is",
+        "show memory",
+        "memory store",
+        "what have you stored"
+      ],
+      "functions": [
+        "store_prompt_memories(user_prompt: str)",
+        "recall_relevant_memories(user_prompt: str, limit: int = 5, min_score: float = 0.25)",
+        "extract_environment_facts(user_prompt: str)",
+        "get_memory_store_text()"
+      ],
+      "inputs": [],
+      "outputs": [
+        "`store_prompt_memories(...)` - returns `\"Stored N new memory fact(s).\"` or `\"Updated N existing memory fact(s).\"`.",
+        "`recall_relevant_memories(...)` - returns a formatted ranked list of memories with category and relevance score.",
+        "`extract_environment_facts(...)` - returns a list of candidate environment facts extracted from the prompt.",
+        "`get_memory_store_text()` - returns the full pretty-printed JSON of the memory store."
+      ],
+      "param_descriptions": {
+        "store_prompt_memories": {
+          "user_prompt": "raw user text to extract facts from and store."
+        },
+        "recall_relevant_memories": {
+          "user_prompt": "current prompt used as the relevance query.",
+          "limit": "maximum number of memories to return.",
+          "min_score": "minimum token-overlap relevance threshold; lower values return more results."
+        },
+        "extract_environment_facts": {
+          "user_prompt": "raw user text to inspect for environment-specific facts only."
+        }
+      }
+    },
+    {
+      "skill_name": "Scratchpad Skill",
+      "relative_path": "KoreAgent/system_skills/Scratchpad/skill.md",
+      "purpose": "Store and retrieve named working values within a session so that bulk data returned by other skills\n(web pages, file content, computation results) can be parked under a short key and referenced later\nwithout consuming context window space.  Use this skill whenever the plan involves multi-step tool\nchains where an intermediate result is needed again in a later step.  Do not use it for durable\nfacts that should survive across sessions - use the Memory skill for that.",
+      "module": "code/KoreAgent/system_skills/Scratchpad/scratchpad_skill.py",
+      "trigger_keyword": "scratchpad",
+      "triggers": [
+        "save to scratchpad",
+        "store in scratchpad",
+        "park this result",
+        "load from scratchpad",
+        "retrieve from scratchpad",
+        "get scratchpad value",
+        "list scratchpad",
+        "what is in the scratchpad",
+        "dump scratchpad",
+        "show scratchpad contents",
+        "inspect scratchpad",
+        "debug scratchpad",
+        "delete from scratchpad",
+        "clear scratchpad key",
+        "search scratchpad",
+        "find scratchpad keys containing",
+        "which scratchpad keys have",
+        "peek at scratchpad",
+        "show context around",
+        "find text in scratchpad key",
+        "query scratchpad",
+        "ask scratchpad",
+        "extract from scratchpad",
+        "filter scratchpad",
+        "run query on scratchpad key"
+      ],
+      "functions": [
+        "scratch_save(key: str, value: str)",
+        "scratch_load(key: str)",
+        "scratch_list()",
+        "scratch_dump()",
+        "scratch_delete(key: str)",
+        "scratch_search(substring: str)",
+        "scratch_peek(key: str, substring: str, context_chars: int = 250)",
+        "scratch_query(key: str, query: str, save_result_key: str = \"\", instructions: str = \"\")"
+      ],
+      "inputs": [],
+      "outputs": [
+        "`scratch_save(...)` - returns `\"Saved to scratchpad key '<key>' (N chars)\"` on success, or `\"Error: ...\"`.",
+        "`scratch_load(...)` - returns the stored string value, or an error message if the key is not found.",
+        "`scratch_list()` - returns a formatted list of active keys and their sizes, or `\"Scratchpad is empty.\"`.",
+        "`scratch_dump()` - returns every key followed by its full stored value. Use to inspect scratchpad contents for debugging.",
+        "`scratch_delete(...)` - returns confirmation or `\"Scratchpad key '<key>' not found - nothing deleted.\"`.",
+        "`scratch_search(...)` - returns a formatted list of matching key names and sizes, or `\"No scratchpad keys contain the substring '<text>'.\"` when no match is found.",
+        "`scratch_peek(...)` - returns `[Match in 'key' at char N / M total]` followed by the surrounding text with `>>>match<<<` highlighting, or an error string when the key or substring is not found.",
+        "`scratch_query(...)` - returns the compact extracted answer from the isolated LLM call, or `\"Not found in content.\"` when the query cannot be answered from the stored value.  When `save_result_key` is provided, prepends `[Result saved to '<key>']` to the output."
+      ],
+      "param_descriptions": {
+        "scratch_save": {
+          "key": "short alphanumeric identifier for the value, e.g. `\"webresult\"` or `\"step1_output\"`. Letters, digits, and underscores only. Stored lowercased.",
+          "value": "the string content to store. Overwrites any previous value at that key."
+        },
+        "scratch_load": {
+          "key": "the key to retrieve. Returns an error message when the key does not exist."
+        },
+        "scratch_delete": {
+          "key": "the key to remove from the scratchpad."
+        },
+        "scratch_search": {
+          "substring": "case-insensitive text to search for within stored values. Returns all keys whose value contains the substring."
+        },
+        "scratch_peek": {
+          "key": "the scratchpad key to inspect.",
+          "substring": "case-insensitive text to locate within the stored value.",
+          "context_chars": "characters to include before and after the match."
+        },
+        "scratch_query": {
+          "key": "the scratchpad key whose full content will be used as input.",
+          "query": "natural-language question or instruction to apply to the stored content.",
+          "save_result_key": "if provided, the extracted answer is also saved to this scratchpad key.",
+          "instructions": "if provided, replaces the default \"precise extractor\" system prompt entirely."
         }
       }
     }

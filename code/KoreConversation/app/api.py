@@ -47,6 +47,12 @@ def _reaper_loop(stop_event: threading.Event) -> None:
                 logger.info("Reaper released %d stale claim(s)", released)
         except Exception as exc:
             logger.warning("Reaper error: %s", exc)
+        try:
+            cleared = db.clear_stale_outbound_ready()
+            if cleared:
+                logger.info("Reaper cleared %d stale outbound_ready event(s)", cleared)
+        except Exception as exc:
+            logger.warning("Reaper outbound_ready cleanup error: %s", exc)
 
 
 # ====================================================================================================
@@ -393,12 +399,7 @@ def append_message(conversation_id: int, req: MessageAppendRequest):
     )
     # Inbound messages need an agent response - create the event so the agent picks it up.
     if req.direction == "inbound":
-        if not db.event_has_open_response_needed(conversation_id):
-            db.event_create(
-                conversation_id = conversation_id,
-                event_type      = "response_needed",
-                priority        = 0,
-            )
+        db.ensure_response_needed_event(conversation_id)
         db.conversation_update(conversation_id=conversation_id, status="waiting_agent")
     elif req.direction == "outbound":
         db.clear_pending_response_needed_events(conversation_id)

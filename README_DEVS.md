@@ -52,7 +52,7 @@ flowchart TD
     R --> R1[prompt_builder.py]
     R --> R2[tool_loop.py]
     R --> R3[context_manager.py]
-    R --> R4[delegate_runner.py]
+    R --> R4[system_skills/Delegate/delegate_runner.py]
     R --> R5[session_runtime.py]
 
     R2 --> S[skill_executor.py]
@@ -113,7 +113,7 @@ scheduler.py
 ```text
 Parent tool loop
   -> Delegate skill
-  -> delegate_runner.run_delegate_subrun(...)
+  -> system_skills/Delegate/delegate_runner.run_delegate_subrun(...)
   -> child orchestrate_prompt(...)
   -> child answer returned to parent as tool result
 ```
@@ -130,7 +130,7 @@ code/
     context_manager.py
     prompt_builder.py
     tool_loop.py
-    delegate_runner.py
+    system_skills/Delegate/delegate_runner.py
     session_runtime.py
     run_helpers.py
     tool_result.py
@@ -221,7 +221,7 @@ The context map is the runtime’s internal “what is in context right now?” 
 - optional `auto_key`
 - optional `compacted`
 
-### `code/KoreAgent/delegate_runner.py`
+### `code/KoreAgent/system_skills/Delegate/delegate_runner.py`
 
 - Owns delegate runtime state and child-run execution.
 - Keeps a thread-local delegate runtime context:
@@ -275,8 +275,7 @@ The context map is the runtime’s internal “what is in context right now?” 
 - Runtime source of truth is now the generated JSON catalog, not `skills_summary.md`.
 
 Key built-in skill families:
-- system and utility: `SystemInfo`, `DateTime`, `Scratchpad`, `CodeExecute`
-- file/task/runtime: `FileAccess`, `TaskManagement`, `Delegate`
+- system and utility: `SystemInfo`, `DateTime`
 - memory and retrieval: `Memory`, `Wikipedia`
 - web stack: `WebSearch`, `WebFetch`, `WebNavigate`, `WebResearch`
 
@@ -294,13 +293,52 @@ Key built-in skill families:
   - intermediate state between tools
   - explicit user-controlled scratch storage
 
-### `code/KoreAgent/skills/Memory/`
+### `code/KoreAgent/system_skills/Memory/`
 
-- Durable long-lived fact storage.
-- Persists to `datacontrol/memory_store.json`.
-- Separate from scratchpad:
-  - scratchpad = session-scoped working memory
-  - memory skill = durable fact memory across runs
+Durable long-lived fact storage. Persists to `datacontrol/memory_store.json`. Separate from scratchpad:
+- scratchpad = session-scoped working memory
+- memory skill = durable fact memory across runs
+
+**How the memory pipeline works (per turn):**
+
+```
+Before tool loop:
+  store_prompt_memories(user_prompt)    -- extract and persist facts from the user's text
+  recall_relevant_memories(user_prompt) -- token-overlap scored recall against the prompt
+  get_top_facts()                       -- top 6 facts by access count
+
+System prompt assembly (prompt_builder.py):
+  "Known facts about this user and environment:"  <-- top_facts  (always present)
+  "Memories relevant to this prompt:"             <-- recalled_memories (per-turn relevance match)
+
+After tool loop (on success, non-slash):
+  store_exchange_memories(user_prompt, final_response) -- extract facts from the agent reply too
+```
+
+**Two memory injection slots:**
+
+| Slot | Source | When present |
+|---|---|---|
+| `Known facts about this user and environment` | `get_top_facts(limit=6)` - highest access-count entries | Always, once any facts are stored |
+| `Memories relevant to this prompt` | `recall_relevant_memories(limit=5, min_score=0.2)` | When at least one fact scores above threshold |
+
+The **top-facts block** is for identity/project/preference facts that are almost always relevant (workspace path, project name, preferred model). They persist across every turn without needing a relevance hit.
+
+The **recalled block** is for the long-tail store - facts that only matter for certain topics. Token-overlap scoring against the current prompt selects them.
+
+**Why extract from both sides of the exchange:**
+
+The user side captures stated facts ("our workspace is at X"). The agent reply captures confirmed facts ("I created the file at path Y", "The version is 3.2.1"). Extracting from both doubles coverage with no extra LLM calls - the same regex extraction runs on each text independently.
+
+**Access count tracking:**
+
+Every time a fact is recalled it increments `access_count` in the store. `get_top_facts()` sorts by this count, so facts the LLM has found useful rise naturally to the always-present block over time.
+
+**Limitations (known, acceptable at current scale):**
+
+- Extraction is regex/pattern-based, not LLM-extracted. Precise for explicit statements ("my name is", "our project is"), misses implicit context.
+- Recall is token-overlap scored (bag-of-words), not semantic. Works well under ~500 entries; degrades for larger stores.
+- Both issues are addressable if the store grows large enough to warrant an LLM extraction call or a BM25 index.
 
 ---
 
@@ -433,6 +471,6 @@ If you are coming back to the code after a refactor, this order should rebuild t
 6. [code/KoreAgent/prompt_builder.py](code/KoreAgent/prompt_builder.py)
 7. [code/KoreAgent/tool_loop.py](code/KoreAgent/tool_loop.py)
 8. [code/KoreAgent/context_manager.py](code/KoreAgent/context_manager.py)
-9. [code/KoreAgent/delegate_runner.py](code/KoreAgent/delegate_runner.py)
+9. [code/KoreAgent/system_skills/Delegate/delegate_runner.py](code/KoreAgent/system_skills/Delegate/delegate_runner.py)
 10. [code/KoreAgent/skill_executor.py](code/KoreAgent/skill_executor.py)
 

@@ -55,6 +55,7 @@ _active_num_ctx: int = 131072
 # Cache of last successful server health-check time per host.
 # Avoids an HTTP round-trip on every LLM call (many calls/prompt = unnecessary health hits).
 _ollama_health_cache: dict[str, float] = {}  # host -> monotonic time of last healthy check
+_ollama_health_lock:  threading.Lock   = threading.Lock()
 _OLLAMA_HEALTH_TTL_S: float = 30.0           # re-check if not confirmed healthy within this window
 
 
@@ -137,12 +138,14 @@ def get_active_num_ctx() -> int:
 # ====================================================================================================
 def mark_host_healthy(host: str) -> None:
     """Record that host was reachable and responding at the current monotonic time."""
-    _ollama_health_cache[host] = time.monotonic()
+    with _ollama_health_lock:
+        _ollama_health_cache[host] = time.monotonic()
 
 
 def is_host_health_cached(host: str) -> bool:
     """Return True when host was confirmed healthy within the cache TTL window."""
-    return time.monotonic() - _ollama_health_cache.get(host, 0.0) < _OLLAMA_HEALTH_TTL_S
+    with _ollama_health_lock:
+        return time.monotonic() - _ollama_health_cache.get(host, 0.0) < _OLLAMA_HEALTH_TTL_S
 
 
 # ====================================================================================================
@@ -285,11 +288,6 @@ class ChatCallResult:
 # MARK: HTTP
 # ====================================================================================================
 def _request_json(url: str, method: str = "GET", payload: dict | None = None, timeout: float = 10.0) -> dict:
-    # Thread-based timeout: urllib socket timeouts are unreliable on Windows loopback;
-    # wrapping the call in a daemon thread lets us enforce a hard deadline via join().
-    # The urllib call also sets a matching socket timeout so the underlying connection
-    # closes around the same time the join expires, bounding the leaked daemon thread's
-    # lifetime to roughly 2x the requested timeout rather than indefinitely.
     request_data = None
     headers      = {}
 
@@ -304,25 +302,14 @@ def _request_json(url: str, method: str = "GET", payload: dict | None = None, ti
         method=method,
     )
 
-    _result: list = [None]
-    _error:  list = [None]
-
-    def _worker() -> None:
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                _result[0] = json.loads(response.read().decode("utf-8"))
-        except Exception as exc:
-            _error[0] = exc
-
-    _thread = threading.Thread(target=_worker, daemon=True)
-    _thread.start()
-    _thread.join(timeout=timeout)
-
-    if _thread.is_alive():
-        raise TimeoutError(f"Request timed out after {timeout:.0f}s")
-    if _error[0] is not None:
-        raise _error[0]
-    return _result[0]
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, OSError) and "timed out" in str(reason).lower():
+            raise TimeoutError(f"Request timed out after {timeout:.0f}s") from exc
+        raise
 
 
 # ====================================================================================================

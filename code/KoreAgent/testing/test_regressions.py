@@ -25,10 +25,10 @@ from KoreAgent.scratchpad import scratch_save
 from KoreAgent.session_runtime import bind_session
 from KoreAgent.skills_catalog_builder import build_tool_definitions
 from KoreAgent.skills_catalog_builder import load_skills_payload
-from KoreAgent.skills.FileAccess import file_access_skill as file_access_module
-from KoreAgent.skills.FileAccess.file_access_skill import file_write
-from KoreAgent.skills.FileAccess.file_access_skill import file_read
-from KoreAgent.skills.FileAccess.file_access_skill import folder_create
+from KoreAgent.system_skills.FileAccess import file_access_skill as file_access_module
+from KoreAgent.system_skills.FileAccess.file_access_skill import file_write
+from KoreAgent.system_skills.FileAccess.file_access_skill import file_read
+from KoreAgent.system_skills.FileAccess.file_access_skill import folder_create
 from KoreAgent.skills.WebFetch.web_fetch_skill import fetch_page_text
 from KoreAgent.skills.WebSearch.web_search_skill import search_web
 from KoreAgent.skills.WebResearch.web_research_skill import research_traverse

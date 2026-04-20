@@ -50,14 +50,22 @@ def _load_callable_from_module_path(module_path: str, function_name: str):
     if not absolute_module_path.exists():
         raise RuntimeError(f"Module path does not exist: {module_path}")
 
-    cache_key = (str(absolute_module_path), function_name)
+    mtime_ns    = absolute_module_path.stat().st_mtime_ns
+    cache_key   = (str(absolute_module_path), function_name, mtime_ns)
+
+    # Evict stale cache entries and the registered sys.modules entry when mtime changes.
+    dynamic_module_name = f"skill_module_{absolute_module_path.stem}_{abs(hash(str(absolute_module_path)))}"
+    stale_keys = [k for k in _callable_cache if k[0] == str(absolute_module_path) and k[2] != mtime_ns]
+    if stale_keys:
+        for sk in stale_keys:
+            _callable_cache.pop(sk, None)
+        sys.modules.pop(dynamic_module_name, None)
+
     if cache_key in _callable_cache:
         return _callable_cache[cache_key]
 
     # Generate a stable canonical module name so that if any other importer has already
     # loaded this file, both references share the same module object and module-level state.
-    dynamic_module_name = f"skill_module_{absolute_module_path.stem}_{abs(hash(str(absolute_module_path)))}"
-
     # Re-use an already-registered module rather than exec_module-ing a second copy.
     if dynamic_module_name in sys.modules:
         module = sys.modules[dynamic_module_name]
@@ -147,7 +155,7 @@ def execute_tool_call(
         resolved_args = {
             k: (resolve_tokens(v) if isinstance(v, str) else v)
             for k, v in arguments.items()
-            if k != ""
+            if k != "" and v is not None and v != "None" and v != "null"
         }
         result = _mcp_client.call_mcp_tool(tool_name, resolved_args)
         return ToolCallResult(

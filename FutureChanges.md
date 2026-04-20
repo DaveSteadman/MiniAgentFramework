@@ -1,149 +1,388 @@
 # Future Changes
 
-Ideas requiring design thought before implementation. Not committed to, not prioritised.
+Confirmed improvements and longer-term design work. Last reviewed: 2026-04-20.
 
-Done items are removed; see ChangeLog.md for what shipped. Last reviewed: 2026-04-13.
-
----
-
-## Improvements
-
-### 1. System maturity
-
-Continue to review and polish the code, running the test prompts and controllably measure and
-improve capability and performance.
-Develop three READ_USECASE_XXXX files to discuss real world usage.
-
-
-### 2. Test assert auto-detection of no-results responses
-
-`test_web_prompts.json` already annotates research prompts with `not_contains|no results`,
-which catches the silent-block pattern for web tests. The gap is everywhere else: prompts in
-`default_prompts.json` and any future test file can silently pass with a "No results were
-found" response if no assert is supplied.
-
-Option A (done for web prompts, extend to others): audit remaining prompt files and add
-`not_contains|No results were found` to all research and Wikipedia prompts that lack
-an assert.
-
-Option B (systemic): teach `test_wrapper.py` to treat any response starting with
-"No results were found" or "Search failed" as a FAIL unless the prompt carries an explicit
-`allow_no_results` flag. Catches future regressions without per-prompt annotation.
-
-Option B is the more robust fix but needs the escape hatch to avoid false failures on prompts
-that legitimately test the no-results path.
+Done items are removed - see ChangeLog.md for what shipped.
 
 ---
 
-### 3. Scratchpad eviction / size limit
+## Top 10 Most Serious Issues (2026-04-20)
 
-The in-process scratchpad (`scratchpad.py`) grows without bound. A WebResearch run saves
-multiple `research_page_*` entries that are never cleaned unless the session is reset.
-Long scheduled runs or multi-research sessions accumulate stale data that inflates the
-key-name list injected into every system prompt.
+### 1. Scratchpad read/iterate operations are not lock-protected
 
-Option: simple LRU cap - reject `scratch_save` (or evict the oldest key) when the store
-exceeds, say, 30 entries. Alternatively, tag entries with a TTL at save time and lazily
-evict expired entries on `scratch_list`.
-
-Question to resolve: should the cap apply to all keys or only `research_page_*` style
-auto-generated ones?
+`scratch_load`, `scratch_list`, `scratch_dump`, `scratch_search`, and `scratch_clear` all call
+`_get_session_store()` then immediately access the returned dict without holding `_STORE_LOCK`.
+A concurrent write (`scratch_save`, `scratch_delete`) can cause `RuntimeError: dictionary changed
+size during iteration` in list/search/dump, or a stale/torn read in load.
+Fix: Wrap the read and iteration bodies of each function with `with _STORE_LOCK:`.
 
 ---
 
-### 4. Delegate transparency - sub-task timing
+### 2. `scratch_unpin_all()` is not called in a `try/finally` block
 
-Delegate tasks are the slowest category (19-64s in practice) with no visibility into which
-sub-prompts ran or how long each took. The only way to diagnose a slow delegate run is to
-read the raw log file.
-
-Option: have `delegate_skill.py` write a structured timing entry into the scratchpad
-(e.g. `delegate_timing_<n>`) after each sub-run, containing sub-prompt text and wall-clock
-duration. The orchestrator could then surface this on request.
-
-Minimal version: log sub-prompt durations to the session log at INFO level so they appear
-under `/logs` without any scratchpad overhead.
+In `tool_loop.py` the call sits just before the `return` statement outside any `finally` block.
+If an unhandled exception propagates out of the synthesis `except` block, or any future code is
+added between the loop and the return, pinned keys are never released. Over time (especially in
+the scheduler) this prevents auto-key eviction, allowing unbounded store growth.
+Fix: Move the call into a `try/finally` that wraps the entire `for round_num in range(...)` loop.
 
 ---
 
-## New Capabilities
+### 3. `SessionContext.add_turn()` is not thread-safe
 
-### 5. Self-performance skill (PerfInsight)
+`add_turn()` reads `len(self._turns)`, appends to it, and then calls `_save()` which iterates it
+- all without holding any lock. In API mode, two concurrent requests to the same session can
+interleave these operations, producing duplicate turn numbers, missing turns, or a corrupted JSON
+file on disk.
+Fix: Add a `threading.Lock` to `SessionContext.__init__` and take it in both `add_turn()` and
+`_save()`.
 
-The agent cannot reason about its own effectiveness. It has all the data - structured CSV test
-results under `controldata/test_results/` - but no skill to read them.
+---
 
-A `PerfInsight` skill (or extension to `FileAccess`) that can:
-- load and parse test_results CSVs
+### 4. Silent scratchpad restore failure in `koreconv_input.py`
+
+The loop that restores persisted scratchpad keys into the active session before orchestration
+swallows all exceptions silently (`except Exception: pass`). If any key fails validation or
+`scratch_save` raises for any reason, that key is silently dropped - the run proceeds without the
+expected scratchpad state and the loss is invisible in logs.
+File: `input_layer/koreconv_input.py`, inside `_handle_event`.
+Fix: Replace with `push_log_line(f"[KORECONV] Could not restore scratchpad key {scratch_key!r}: {exc}")`.
+
+---
+
+### 5. Temp file left on disk when `os.replace()` fails
+
+`SessionContext._save()` writes to a `.tmp` file then calls `os.replace()`. If `os.replace()`
+raises (e.g. cross-device link on some filesystems, permissions error), the except block logs
+the error but does not delete the `.tmp` file. Repeated failures accumulate `.session_context.tmp`
+files in the data directory.
+Fix: Add `tmp_path.unlink(missing_ok=True)` in the except handler.
+
+---
+
+### 6. `_request_json()` threading approach is redundant and leaks closures
+
+`llm_client_openai.py`'s `_request_json()` spawns a daemon thread solely to enforce a timeout on
+`urlopen`, but `urllib.request.urlopen(request, timeout=timeout)` already enforces a socket-level
+timeout without a thread. When the thread times out the function raises `TimeoutError` and returns,
+but the thread continues executing, holding `_result`/`_error` list references until it unblocks
+- accumulating closure references under sustained timeout conditions.
+Fix: Remove the thread wrapper entirely and rely on `urlopen`'s built-in timeout parameter.
+
+---
+
+### 7. `ensure_ollama_running()` has a TOCTOU race that spawns duplicate processes
+
+`is_ollama_running()` is checked and then `start_ollama_server()` is called without any
+serialization. Two threads (e.g. scheduler thread + API handler) can both observe `False` and
+both call `Popen(["ollama", "serve"])`. The second process fails to bind port 11434, causing
+subsequent LLM calls from that thread to fail. The spawned `Popen` object is also never stored,
+so neither process can be shut down cleanly on exit.
+Fix: Add a module-level `threading.Lock` around the check-and-spawn block in
+`ensure_ollama_running()`, and store the returned `Popen` so it can be `.terminate()`'d on exit.
+
+---
+
+### 8. `_build_prompt()` silently drops scratchpad context on JSON decode failure
+
+In `koreconv_input.py`, `_build_prompt()` tries to `json.loads()` the scratchpad string and falls
+back to `scratchpad = {}` on failure. If the KC-side scratchpad field is corrupted or partially
+written, the prompt is built without any scratchpad context and the model receives no indication
+that context was expected. The failure is never logged.
+Fix: Log a warning via `push_log_line` before falling back to `{}`.
+
+---
+
+### 9. `assess_compact()` does not validate index alignment between `messages` and `context_map`
+
+`assess_compact()` pops entries from `messages` using `msg_idx` values stored in `context_map`.
+If any caller adds a message without a corresponding `context_map` entry (or vice versa), the
+offsets become stale and subsequent pops remove the wrong messages silently, corrupting the
+conversation thread without any error.
+Fix: Add a `RuntimeError` check at the entry to `assess_compact()` verifying that
+`len(messages) - 1` equals `max(e["msg_idx"] for e in context_map)`, so misalignment is caught
+immediately.
+
+---
+
+### 10. `delegate_runner.py` does not check the stop state before launching a sub-run
+
+`run_delegate()` calls `orchestrate_prompt()` which creates its own per-run stop event. However,
+the outer run's stop event is not checked before the delegate call, so if `/stoprun` fires while
+a delegate is queued, the outer loop stops but the delegate run starts anyway - using stop state
+that has already been cleared by the inner `run_tool_loop`.
+Fix: Check `stop_requested()` at the top of `run_delegate()` before calling `orchestrate_prompt()`
+and short-circuit with a stopped message if set.
+
+---
+
+## Top 10 Actionable Items
+
+### 1. Non-atomic SessionContext write can corrupt the persisted file
+
+**File:** `code/KoreAgent/orchestration.py` (`SessionContext._save`, ~line 345)
+
+`Path.write_text()` is not atomic. If the process crashes or is killed while the file is
+being written (disk full, power loss), the JSON file is left partially written. On the
+next load, `json.loads` will raise, and the load path catches that with a bare
+`except Exception: pass` (see item 2), silently returning an empty session.
+
+Fix: write to a temp file in the same directory, then call `os.replace()` to rename
+atomically. One temp file per session ID to avoid collisions. Python stdlib `os.replace()`
+is atomic on POSIX and near-atomic on Windows (replaces in a single kernel call).
+
+---
+
+### 2. SessionContext load silently discards corrupt files with no log
+
+**File:** `code/KoreAgent/orchestration.py` (`SessionContext.__init__`, ~line 228)
+
+When `json.loads` raises on a corrupt or partially-written session file, the bare
+`except Exception: pass` block leaves `self._turns = []`. The user resumes the session
+with an empty context and no indication that anything was lost. Combined with the
+non-atomic write in item 1, this pair makes session state silently fragile.
+
+Fix: replace `pass` with at minimum `log_to_session(f"[session_context] WARNING: ...")`.
+Optionally rename the corrupt file to `*.corrupt` before starting fresh so it can be
+inspected. This also applies to the structural filter that silently drops turns with
+missing keys - log the count of dropped turns.
+
+---
+
+### 3. on_tool_round_complete callback failures are silently swallowed
+
+**File:** `code/KoreAgent/tool_loop.py` (~line 347)
+
+After each tool round, `on_tool_round_complete()` is called inside a bare
+`except Exception: pass`. The callback is used for session state flushing and UI updates.
+If it raises - for example because the session log path is suddenly read-only - the error
+vanishes and subsequent rounds proceed without knowing that state persistence has stopped.
+
+Fix: replace `pass` with `logger.log_file_only(f"[error] on_tool_round_complete: {exc}")`.
+No need to propagate - the tool loop should continue - but the failure must be visible
+in the session log.
+
+---
+
+### 4. _ollama_health_cache dict is accessed from multiple threads without a lock
+
+**File:** `code/KoreAgent/llm_client_openai.py` (lines 57, 140, 145)
+
+`_ollama_health_cache` is a plain `dict[str, float]` written by `mark_host_healthy()`
+and read by `is_host_health_cached()`. In API mode, concurrent request threads call both
+functions without synchronisation. Python's GIL does not protect against `RuntimeError`
+on dict resize during concurrent modification. Two threads can both see a stale cache hit
+and proceed to a failing LLM server, then both try to write the same key simultaneously.
+
+Fix: add `_health_cache_lock = threading.Lock()` and acquire it in both functions.
+The critical section is tiny (single dict read or write), so contention is negligible.
+
+---
+
+### 5. _stop_event is process-global - /stoprun affects all concurrent runs
+
+**File:** `code/KoreAgent/orchestration.py` (line 121)
+
+`_stop_event` is a module-level `threading.Event`. In API mode, a scheduler task and an
+interactive session run concurrently in different threads. A `/stoprun` from the user
+sets the global flag and stops both. Worse, `clear_stop()` is called at the start of
+every `run_tool_loop()` - so a scheduler task starting up can silently swallow a user's
+stop request that was intended for the interactive session.
+
+Fix: make stop signalling per-session. Pass a `stop_event: threading.Event` parameter to
+`orchestrate_prompt` and down into `run_tool_loop`. Each API session creates its own
+event. The slash command resolves to the current session's event only. Module-level
+`request_stop()` remains as a shutdown hook that sets all active events.
+
+---
+
+### 6. MCP event loop thread is not cleaned up on enumeration timeout
+
+**File:** `code/KoreAgent/mcp_client.py` (`start`, ~line 91)
+
+When `future.result(timeout=...)` raises `TimeoutError`, the function logs a warning and
+continues with empty tool lists. The background thread (`_loop_thread`) is never stopped.
+`_loop` and `_loop_thread` module globals still hold references to the running thread.
+In a long development session where `start()` is re-called (e.g., after a `/reload`),
+a new orphaned event loop thread accumulates each time an MCP server is unreachable.
+
+Fix: on timeout, call `_loop.call_soon_threadsafe(_loop.stop)`, then join `_loop_thread`
+with a short timeout, then set both globals back to `None` before returning.
+
+---
+
+### 7. ConversationHistory.add() uses assert - disabled by -O and masks root cause
+
+**File:** `code/KoreAgent/orchestration.py` (`ConversationHistory.add`, line 161)
+
+`assert len(self._turns) % 2 == 0` checks the turn parity invariant before adding a new
+pair. While the logic is correct, `assert` is silently removed when Python runs with
+`-O` optimisation. More critically, the assert fires at the `add()` call site where
+the misalignment is *detected*, not where it was *introduced* - making diagnosis hard.
+
+Fix: replace `assert` with an explicit `if` check raising `RuntimeError` with context
+(current turn count, the user/assistant strings being added). Add the same check in
+`as_list()` so any caller reading history also catches misalignment.
+
+---
+
+### 8. auto_scratch_key variable bleeds between tool calls within the same round
+
+**File:** `code/KoreAgent/tool_loop.py` (~line 335)
+
+`auto_scratch_key` is only assigned inside the `if len(result_content) >= TOOL_MSG_AUTO_SCRATCH_MIN:`
+block. When the next tool call's result is too short to trigger auto-saving, the variable
+still holds the value from the previous iteration. The `context_map.append(...)` on the
+following line then records the *previous* tool call's key as the `auto_key` for the
+*current* result. This silently links the wrong tool result to a scratchpad key.
+
+Fix: initialise `auto_scratch_key = None` at the top of the per-tool-call loop body,
+before the conditional block. One-line fix with zero functional overhead.
+
+---
+
+### 9. koreconv_input.py bare except:pass on event-completion HTTP calls
+
+**File:** `code/KoreAgent/input_layer/koreconv_input.py` (lines 237, 250, 258, 295)
+
+When the handler for a `compress`, `summarise`, or `respond` event finishes, it calls
+`_http_post(.../events/{id}/complete)` to signal the KoreConversation server. Four of
+these calls are wrapped in bare `except Exception: pass`. If the HTTP call fails (server
+restart, network blip), the event stays in `pending` state permanently. Future polls
+pick up the same event repeatedly; the agent processes the same conversation turn in an
+infinite loop.
+
+Fix: log the failure with the event ID and status at WARNING level. For completion calls,
+implement a best-effort retry (1 retry after 2s). If both attempts fail, log at ERROR
+and leave the event for manual cleanup - but never silently discard the failure.
+
+---
+
+### 10. Auto-saved scratchpad keys can be evicted while still referenced in the message thread
+
+**File:** `code/KoreAgent/scratchpad.py` (`scratch_save` eviction), `code/KoreAgent/tool_loop.py` (~line 330)
+
+When a tool result is truncated, the message sent to the LLM reads:
+`"full content auto-saved to scratchpad key: _tc_r2_web_search"`. That key is now part of
+the active message thread. The eviction algorithm (MAX_AUTO_KEYS=40) evicts oldest keys
+on subsequent auto-saves, with no check on whether a key is still referenced in the live
+message context. After 40 more large tool results, `_tc_r2_web_search` is evicted. When
+the LLM later calls `scratch_load("_tc_r2_web_search")`, it gets an error - with no
+explanation in the truncated message.
+
+Fix: when evicting a key, consult the active `context_map` entries (passed in or via
+module-level state) to check whether any `auto_key` field matches. If so, skip eviction
+for that key. Alternatively, raise the eviction threshold significantly or reference-count
+active keys so they are protected until the round is complete.
+
+---
+
+## Longer-Term Design Work
+
+### Search result disk cache
+
+Repeated test runs and scheduler jobs re-fetch the same search queries and URLs. Relevant
+because DuckDuckGo rate-limits on repeated calls.
+
+Step 1 - measure waste: instrument `web_search_skill.py` to log how many URLs are returned
+per query versus how many are actually fetched in the same session. The ratio establishes
+a baseline before any caching is built.
+
+Step 2 - cache: file-based store in `datacontrol/search_cache/` keyed by
+`sha256(query_normalised + date)`, stored as JSON, configurable TTL (default 24h).
+Time-sensitive queries (containing "today", "latest", "current") use a shorter TTL.
+
+---
+
+### Per-skill retry configuration
+
+Network-bound skills (WebSearch, WebFetch, WebResearch, Wikipedia) fail transiently
+but the framework never retries automatically. The DuckDuckGo retry was added directly
+to `web_search_skill.py` with no general mechanism.
+
+Design: add `retries` and `retry_delay_seconds` to the `skill.md` spec. When
+`execute_tool_call` in `skill_executor.py` receives a recognised error sentinel and the
+skill declares retries, re-call the function after the delay before surfacing failure to
+the LLM. Makes retry policy per-skill rather than baked into each skill file.
+
+Depends on: item 10 (routing metadata schema extension) establishes the precedent for
+adding structured metadata fields to skill.md.
+
+---
+
+### MCP server integration
+
+All tools must currently be written as local Python skill modules with a `skill.md`
+descriptor. The agent has no way to consume tools from an external MCP server.
+
+Design: additive, not a replacement. MCP tools are a second source alongside local skills
+with their definitions merged before sending to the LLM.
+
+Changes required:
+- `mcp_client.py` - connect to configured MCP server, query tool list at startup,
+  dispatch tool calls, return `ToolCallResult` objects.
+- `skills_catalog_builder.py` - merge MCP tool definitions into the catalog.
+- `skill_executor.py` / `tool_loop.py` - check whether a tool name belongs to an MCP
+  server and dispatch via `mcp_client.py`; otherwise use the existing importlib path.
+
+MCP servers are configured in `default.json`. Local Python skills are unchanged.
+The existing allow-list security model is extended to cover MCP tool names.
+
+Note: `mcp_client.py` already exists in the codebase as a stub - review before starting.
+
+---
+
+### PerfInsight - agent self-assessment skill
+
+The agent cannot reason about its own effectiveness. Test results live under
+`datacontrol/test_results/` as structured CSVs with per-prompt pass/fail and timing, but
+no skill reads them.
+
+A `PerfInsight` skill that can:
+- load and parse test result CSVs
 - compute per-suite PASS rates and median/p95 durations
 - surface the five slowest prompts and any failure clusters
 - answer prompts like "how did the last test run go?" or "which skill is the slowest?"
 
-The CSV schema is already stable. A lightweight `GET /test-summary` API route for the web UI
-would complement this - surfacing recent run stats without starting a chat session.
+The CSV schema is already stable. Candidate implementation: extend `FileAccess` with a
+`csv_summarise(path)` function rather than a new skill folder.
 
 ---
 
-### 6. Search result disk cache
+### KC - thread summary bounding
 
-DuckDuckGo results fetched during one test run are thrown away and re-fetched in the next.
-Repeated test runs on identical prompts hammer the same queries and contribute to rate-limiting.
-Note: `webpage_utils.py` has an in-process URL LRU cache, but that does not survive across
-runs and does not cover search query results.
+**File:** `code/KoreConversation/...` (conversation summary logic)
 
-Step 1 - measure waste before caching: instrument `web_search_skill.py` and `webpage_utils.py`
-to log how many URLs are returned per query versus how many are actually fetched by a subsequent
-WebFetch or WebResearch call in the same session. The ratio of fetched-to-returned is a concrete
-"unused result" metric - a complement to pass/fail that shows how much network work was
-discarded. Aggregate this across a standard test run to establish a baseline waste figure before
-any cache is built.
+Each compression cycle appends the new summary to the existing `thread_summary` with no
+max length. After many rounds the summary itself becomes a significant fraction of the
+context budget.
 
-Step 2 - cache: a file-based cache in `controldata/search_cache/` keyed by
-`sha256(query_normalised + date)`, stored as JSON, with a configurable TTL (default 24h).
-Cache hits skip the network entirely - preventing rate-limit accumulation and making research
-reproducible across runs on the same day. The waste metric from Step 1 becomes the before/after
-measure of cache effectiveness.
-
-Questions: share cache across scheduler and interactive sessions? Invalidate earlier for
-time-sensitive queries (prompts containing "today", "latest", "current")?
+Options:
+- Cap `thread_summary` at a fixed character limit and discard the oldest portion.
+- Run a meta-compression pass when the summary crosses a threshold.
+- Store summary segments as separate records rather than a single growing text field.
 
 ---
 
-### 7. Per-skill retry configuration in skill.md
+### KC - SSE subscriber cleanup
 
-Network-bound skills (WebSearch, WebFetch, WebResearch, Wikipedia) fail transiently but the
-framework never retries them automatically - the LLM has to re-invoke the tool. The
-DuckDuckGo empty-result retry was added directly to `web_search_skill.py` with no general
-mechanism behind it.
+**File:** `code/KoreConversation/app/api.py`
 
-Option: add `retries` and `retry_delay_seconds` fields to the `skill.md` spec, read by
-`execute_tool_call` in `skill_executor.py`. When a skill returns a recognised error sentinel
-and declares retries, `execute_tool_call` re-calls the function after the delay before
-surfacing the failure to the LLM.
+Dead SSE clients are only removed from `_kc_subscribers` when their queue fills to
+capacity. Subscribers with slow proxies or closed browser tabs sit in the list
+indefinitely until they accumulate enough missed events to trigger eviction.
 
-This makes retry policy per-skill rather than baked into individual skill files, and combines
-naturally with item 2 (consistent error sentinel detection).
+Fix options:
+- Heartbeat write - detect send failure and remove immediately.
+- WeakRef-based subscriber list - garbage-collected clients are removed automatically.
+- Reduce queue `maxsize` so stale subscribers are evicted sooner.
 
 ---
 
-### 8. MCP server integration
+### KC - polling backoff on idle
 
-The agent has no way to consume tools exposed by an external MCP (Model Context Protocol)
-server. All tools must currently be written as local Python skill modules with a `skill.md`
-descriptor.
+The `korecomms_input` polling loop calls `GET /events/next` every 3 seconds regardless
+of queue state. Under idle conditions this is unnecessary HTTP traffic.
 
-Design: additive, not a replacement for the existing skill system. MCP tools would be a
-second source alongside local skills, with the same tool definitions merged before being sent
-to the LLM.
-
-Changes required:
-- New `mcp_client.py` module - connects to a configured MCP server and queries its tool list
-  at startup; dispatches tool calls and returns results as `ToolCallResult` objects.
-- `skills_catalog_builder.py` - add a step that fetches MCP tool definitions and merges them
-  into the catalog sent to the LLM.
-- `skill_executor.py` / `tool_loop.py` - when a tool call is returned by the LLM, check
-  whether the tool name belongs to an MCP server; if yes, dispatch via `mcp_client.py`;
-  if no, continue with the existing `importlib` Python dispatch path.
-
-MCP servers are configured in `default.json`. Local Python skills are completely unchanged.
-The existing allow-list security model is extended to cover MCP tool names.
+Fix: exponential backoff on empty-poll responses (3s -> 6s -> 12s, capped at 30s),
+resetting to 3s immediately on a successful claim.

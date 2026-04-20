@@ -65,6 +65,9 @@ _CONFIG_KEY        = "koreconvurl"
 _DEFAULT_POLL_SECS = 3
 _DEFAULT_TIMEOUT   = 8
 _SESSION_PREFIX    = "kc_conv_"
+# Fraction of config.num_ctx at which a compress_needed event is raised.
+# Scales automatically when the user changes context size via /ctx size.
+_COMPRESS_THRESHOLD = 0.70
 
 
 # ====================================================================================================
@@ -148,7 +151,7 @@ def _http_patch(base: str, path: str, payload: dict, timeout: int = _DEFAULT_TIM
 # ====================================================================================================
 
 # ----------------------------------------------------------------------------------------------------
-def _build_prompt(conv: dict, messages: list[dict]) -> str:
+def _build_prompt(conv: dict, messages: list[dict], push_log_line=None) -> str:
     """Build an LLM user prompt from a KoreConversation conversation record and its messages."""
     thread_summary    = (conv.get("thread_summary") or "").strip()
     background        = (conv.get("background_context") or "").strip()
@@ -156,12 +159,10 @@ def _build_prompt(conv: dict, messages: list[dict]) -> str:
     if isinstance(scratchpad, str):
         try:
             scratchpad = json.loads(scratchpad)
-        except Exception:
+        except Exception as exc:
+            if push_log_line:
+                push_log_line(f"[KORECONV] Conv {conv.get('id', '?')}: scratchpad JSON decode failed - prompt built without scratchpad: {exc}")
             scratchpad = {}
-
-    channel  = conv.get("channel_type", "unknown")
-    conv_id  = conv.get("id", "?")
-    subject  = (conv.get("subject") or "").strip()
 
     # Unsummarised messages only - summarised ones are already in thread_summary.
     unsummarised = [m for m in messages if not m.get("summarised")]
@@ -192,12 +193,6 @@ def _build_prompt(conv: dict, messages: list[dict]) -> str:
             lines.append(f"[{ts}] {label}: {content}")
         parts.append("--- Conversation ---\n" + "\n\n".join(lines))
 
-    header = f"You are handling a conversation (id={conv_id}, channel={channel}"
-    if subject:
-        header += f", subject: {subject}"
-    header += ")."
-    parts.insert(0, header)
-
     # The last inbound message is the one to respond to.
     last_inbound = next(
         (m for m in reversed(unsummarised) if m.get("direction") == "inbound"),
@@ -208,6 +203,129 @@ def _build_prompt(conv: dict, messages: list[dict]) -> str:
         parts.append(f"--- Respond to this message ---\n{content}")
 
     return "\n\n".join(parts)
+
+
+# ====================================================================================================
+# MARK: COMPRESSION
+# ====================================================================================================
+
+_COMPRESS_PROMPT_TEMPLATE = """\
+Summarise the following conversation thread into a concise paragraph that preserves
+all facts, decisions, and context needed to continue the conversation. Keep it under
+200 words. Output only the summary - no preamble or explanation.
+
+--- Messages to summarise ---
+{messages}
+"""
+
+# ----------------------------------------------------------------------------------------------------
+def _handle_compress_needed(
+    event:        dict,
+    config:       OrchestratorConfig,
+    log_dir:      Path,
+    session_logger_cls,
+    create_log_file_path,
+    push_log_line,
+) -> None:
+    base     = _get_base_url()
+    event_id = event.get("id")
+    conv     = event.get("conversation") or {}
+    conv_id  = conv.get("id")
+
+    if not conv_id:
+        push_log_line(f"[KORECONV] compress event {event_id} has no conversation - completing as failed")
+        try:
+            _http_post(base, f"/events/{event_id}/complete", {"status": "failed"})
+        except Exception as exc:
+            push_log_line(f"[KORECONV] Event {event_id}: complete call failed: {exc}")
+        return
+
+    push_log_line(f"[KORECONV] Compressing conv {conv_id}")
+
+    # Fetch all unsummarised messages.
+    try:
+        raw = _http_get(base, f"/conversations/{conv_id}/messages?summarised=0&limit=500") or []
+    except Exception as exc:
+        push_log_line(f"[KORECONV] Conv {conv_id}: could not fetch messages for compression: {exc}")
+        try:
+            _http_post(base, f"/events/{event_id}/complete", {"status": "failed"})
+        except Exception as exc:
+            push_log_line(f"[KORECONV] Event {event_id}: complete call failed: {exc}")
+        return
+
+    if not raw:
+        push_log_line(f"[KORECONV] Conv {conv_id}: no unsummarised messages - nothing to compress")
+        try:
+            _http_post(base, f"/events/{event_id}/complete", {"status": "completed"})
+        except Exception as exc:
+            push_log_line(f"[KORECONV] Event {event_id}: complete call failed: {exc}")
+        return
+
+    lines = []
+    for m in raw:
+        ts        = (m.get("created_at") or "")[:16]
+        direction = m.get("direction", "?")
+        content   = (m.get("content") or "").strip()
+        label     = "User" if direction == "inbound" else "Agent"
+        lines.append(f"[{ts}] {label}: {content}")
+    messages_text = "\n\n".join(lines)
+
+    compress_prompt = _COMPRESS_PROMPT_TEMPLATE.format(messages=messages_text)
+
+    run_log_path = create_log_file_path(log_dir=log_dir)
+    with session_logger_cls(run_log_path) as run_logger:
+        session_id = f"{_SESSION_PREFIX}{conv_id}_compress"
+        _, session_ctx = make_task_session(
+            session_id   = session_id,
+            persist_path = None,
+            max_turns    = 3,
+        )
+
+        summary, prompt_tokens, _ct, ok, _ = orchestrate_prompt(
+            user_prompt          = compress_prompt,
+            config               = config,
+            logger               = run_logger,
+            conversation_history = None,
+            session_context      = session_ctx,
+            quiet                = True,
+        )
+
+    if not ok or not summary.strip():
+        push_log_line(f"[KORECONV] Conv {conv_id}: compression run failed - leaving messages unsummarised")
+        try:
+            _http_post(base, f"/events/{event_id}/complete", {"status": "failed"})
+        except Exception as exc:
+            push_log_line(f"[KORECONV] Event {event_id}: complete call failed: {exc}")
+        return
+
+    # Append new summary to existing thread_summary.
+    existing_summary = (conv.get("thread_summary") or "").strip()
+    new_summary = (existing_summary + "\n\n" + summary.strip()).strip() if existing_summary else summary.strip()
+
+    # Mark messages as summarised.
+    message_ids = [m["id"] for m in raw if m.get("id")]
+    for msg_id in message_ids:
+        try:
+            _http_patch(base, f"/messages/{msg_id}", {"summarised": 1})
+        except Exception as exc:
+            push_log_line(f"[KORECONV] Conv {conv_id}: could not mark message {msg_id} summarised: {exc}")
+
+    # Patch conversation - reset token_estimate to rough summary size only.
+    summary_tokens = len(new_summary) // 4
+    try:
+        _http_patch(base, f"/conversations/{conv_id}", {
+            "thread_summary": new_summary,
+            "token_estimate": summary_tokens,
+        })
+    except Exception as exc:
+        push_log_line(f"[KORECONV] Conv {conv_id}: failed to patch summary after compression: {exc}")
+
+    push_log_line(f"[KORECONV] Conv {conv_id}: compressed {len(message_ids)} message(s), summary ~{summary_tokens} tok")
+
+    try:
+        _http_post(base, f"/events/{event_id}/complete", {"status": "completed"})
+    except Exception as exc:
+        push_log_line(f"[KORECONV] Event {event_id}: complete failed: {exc}")
 
 
 # ====================================================================================================
@@ -223,15 +341,26 @@ def _handle_event(
     create_log_file_path,
     push_log_line,
 ) -> None:
-    """Full lifecycle for one KoreConversation response_needed event."""
+    """Dispatch one KoreConversation event to the appropriate handler."""
     base    = _get_base_url()
     if not base:
         return
 
-    event_id = event.get("id")
+    event_id   = event.get("id")
     event_type = (event.get("event_type") or "").strip()
-    conv     = event.get("conversation") or {}
-    conv_id  = conv.get("id")
+    conv       = event.get("conversation") or {}
+    conv_id    = conv.get("id")
+
+    if event_type == "compress_needed":
+        _handle_compress_needed(
+            event                = event,
+            config               = config,
+            log_dir              = log_dir,
+            session_logger_cls   = session_logger_cls,
+            create_log_file_path = create_log_file_path,
+            push_log_line        = push_log_line,
+        )
+        return
 
     if event_type != "response_needed":
         push_log_line(f"[KORECONV] Skipping unsupported event {event_id} ({event_type or 'unknown'})")
@@ -245,12 +374,12 @@ def _handle_event(
         push_log_line(f"[KORECONV] Event {event_id} has no conversation - completing as failed")
         try:
             _http_post(base, f"/events/{event_id}/complete", {"status": "failed"})
-        except Exception:
-            pass
+        except Exception as exc:
+            push_log_line(f"[KORECONV] Event {event_id}: complete call failed: {exc}")
         return
 
-    session_id   = f"{_SESSION_PREFIX}{conv_id}"
-    turn_count   = conv.get("turn_count", 0)
+    session_id = f"{_SESSION_PREFIX}{conv_id}"
+    turn_count = conv.get("turn_count", 0)
     push_log_line(f"[KORECONV] Handling event {event_id} (conv {conv_id}, turn {turn_count + 1})")
 
     run_log_path = create_log_file_path(log_dir=log_dir)
@@ -266,6 +395,23 @@ def _handle_event(
                 push_log_line(f"[KORECONV] Conv {conv_id}: could not fetch messages: {exc}")
                 messages = []
 
+        # Guard against duplicate processing: if the most recent message is already outbound,
+        # the web API path already handled this turn (via _kc_save_turn). Mark the event
+        # complete and skip orchestration to avoid running the same prompt twice.
+        # Fetch fresh messages here (rather than trusting the event payload snapshot) because
+        # _kc_save_turn posts the outbound asynchronously - the payload may be stale.
+        try:
+            fresh_messages = _http_get(base, f"/conversations/{conv_id}/messages?limit=10") or []
+        except Exception:
+            fresh_messages = messages
+        if fresh_messages and (fresh_messages[-1].get("direction") or "") == "outbound":
+            push_log_line(f"[KORECONV] Conv {conv_id}: event {event_id} skipped - turn already answered by web API path")
+            try:
+                _http_post(base, f"/events/{event_id}/complete", {"status": "completed"})
+            except Exception as exc:
+                push_log_line(f"[KORECONV] Event {event_id}: complete call failed: {exc}")
+            return
+
         # Restore persisted scratchpad state into the active session before orchestration
         # so scratchpad tool calls operate on the KC-backed conversation state.
         conv_scratchpad = conv.get("scratchpad") or {}
@@ -278,10 +424,10 @@ def _handle_event(
         for scratch_key, scratch_value in conv_scratchpad.items():
             try:
                 scratch_save(scratch_key, str(scratch_value), session_id=session_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                push_log_line(f"[KORECONV] Conv {conv_id}: could not restore scratchpad key {scratch_key!r}: {exc}")
 
-        user_prompt = _build_prompt(conv, messages)
+        user_prompt = _build_prompt(conv, messages, push_log_line=push_log_line)
 
         # KC owns the persisted conversation state. The agent keeps only transient
         # per-run session context in memory for this turn.
@@ -291,7 +437,7 @@ def _handle_event(
             max_turns    = 10,
         )
 
-        response, prompt_tokens, _ct, ok, tps = orchestrate_prompt(
+        response, prompt_tokens, completion_tokens, ok, tps = orchestrate_prompt(
             user_prompt          = user_prompt,
             config               = config,
             logger               = run_logger,
@@ -305,10 +451,14 @@ def _handle_event(
             f"[KORECONV] Conv {conv_id}: [{prompt_tokens:,} tok, {tps_str} tok/s, ok={ok}]"
         )
 
-        reply = response.strip()
+        reply              = response.strip()
         current_scratchpad = get_store(session_id=session_id)
 
-        # Write outbound message
+        # token_estimate reflects what the next turn will start from: prompt consumed
+        # this turn plus the completion tokens (which become part of the thread next turn).
+        new_token_estimate = prompt_tokens + completion_tokens
+
+        # Write outbound message first - if this fails the event is not completed.
         try:
             _http_post(base, f"/conversations/{conv_id}/messages", {
                 "direction":      "outbound",
@@ -319,24 +469,28 @@ def _handle_event(
         except Exception as exc:
             push_log_line(f"[KORECONV] Conv {conv_id}: failed to write outbound message: {exc}")
 
-        # Patch conversation metadata
+        # Patch conversation metadata including scratchpad.
+        # This is the durable write - we log failures loudly but still complete the event
+        # so the conversation does not stay in agent_processing indefinitely.
         try:
             _http_patch(base, f"/conversations/{conv_id}", {
                 "status":         "active",
-                "token_estimate": prompt_tokens,
+                "token_estimate": new_token_estimate,
                 "turn_count":     turn_count + 1,
                 "scratchpad":     current_scratchpad,
             })
         except Exception as exc:
-            push_log_line(f"[KORECONV] Conv {conv_id}: failed to patch conversation: {exc}")
+            push_log_line(
+                f"[KORECONV] Conv {conv_id}: WARN - conversation patch failed (scratchpad may be stale): {exc}"
+            )
 
-        # Complete the event
+        # Complete the event.
         try:
             _http_post(base, f"/events/{event_id}/complete", {"status": "completed"})
         except Exception as exc:
             push_log_line(f"[KORECONV] Event {event_id}: complete failed: {exc}")
 
-        # Raise outbound_ready for KoreComms delivery if needed
+        # Raise outbound_ready for KoreComms delivery if needed.
         channel = conv.get("channel_type", "webchat")
         if channel not in {"webchat", "manual"}:
             try:
@@ -348,6 +502,25 @@ def _handle_event(
                 })
             except Exception as exc:
                 push_log_line(f"[KORECONV] Conv {conv_id}: outbound_ready event failed: {exc}")
+
+        # Check whether the running token estimate has crossed the compression threshold.
+        # Uses config.num_ctx so /ctx size in the UI controls the trigger point directly.
+        compress_at = int(config.num_ctx * _COMPRESS_THRESHOLD)
+        if new_token_estimate >= compress_at:
+            push_log_line(
+                f"[KORECONV] Conv {conv_id}: token_estimate {new_token_estimate:,} >= "
+                f"compress threshold {compress_at:,} (ctx {config.num_ctx:,} * {_COMPRESS_THRESHOLD}) "
+                f"- queuing compress_needed"
+            )
+            try:
+                _http_post(base, "/events", {
+                    "conversation_id": conv_id,
+                    "event_type":      "compress_needed",
+                    "priority":        10,
+                    "payload":         {},
+                })
+            except Exception as exc:
+                push_log_line(f"[KORECONV] Conv {conv_id}: could not queue compress_needed: {exc}")
 
 
 # ====================================================================================================

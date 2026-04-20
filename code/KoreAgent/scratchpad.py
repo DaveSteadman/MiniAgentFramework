@@ -42,12 +42,26 @@ from KoreAgent.session_runtime import get_active_session_id
 # ====================================================================================================
 _KEY_RE = re.compile(r"^[a-zA-Z0-9_]+$")
 
+# Maximum number of auto-saved keys per session before the oldest is evicted.
+# Auto keys are prefixed with _tc_ (tool call round outputs) or research_page_ (WebResearch pages).
+# Named keys set by the user or skills are never evicted.
+MAX_AUTO_KEYS:         int            = 40
+_AUTO_KEY_PREFIXES:    tuple[str, ...] = ("_tc_", "research_page_")
+
+
+def _is_auto_key(key: str) -> bool:
+    return any(key.startswith(prefix) for prefix in _AUTO_KEY_PREFIXES)
+
 
 # ====================================================================================================
 # MARK: STORE
 # ====================================================================================================
 _SESSION_STORES: dict[str, dict[str, str]] = {}
 _STORE_LOCK: threading.RLock = threading.RLock()
+
+# Keys pinned by the active tool-loop run; pinned keys are skipped during auto-key eviction.
+_SESSION_PINNED: dict[str, set[str]] = {}
+_PINNED_LOCK:    threading.Lock      = threading.Lock()
 
 
 def _resolve_session_id(session_id: str | None = None) -> str:
@@ -102,9 +116,33 @@ def scratch_save(key: str, value: str, session_id: str | None = None) -> str:
     validated = _validate_key(key)
     store = _get_session_store(session_id)
     with _STORE_LOCK:
+        # Evict oldest auto keys before inserting a new one so the store stays bounded.
+        if _is_auto_key(validated) and validated not in store:
+            with _PINNED_LOCK:
+                _pinned = frozenset(_SESSION_PINNED.get(_resolve_session_id(session_id), set()))
+            auto_keys = [k for k in store if _is_auto_key(k) and k not in _pinned]
+            while len(auto_keys) >= MAX_AUTO_KEYS:
+                del store[auto_keys.pop(0)]
         store[validated] = str(value)
     result = f"Saved to scratchpad key '{validated}' ({len(str(value))} chars)"
     return result
+
+
+# ----------------------------------------------------------------------------------------------------
+def scratch_pin(key: str, session_id: str | None = None) -> None:
+    # Mark an auto-saved key as pinned so it is skipped during eviction for the duration
+    # of the current tool-loop run.  Call scratch_unpin_all() when the run ends.
+    resolved = _resolve_session_id(session_id)
+    with _PINNED_LOCK:
+        _SESSION_PINNED.setdefault(resolved, set()).add(key)
+
+
+# ----------------------------------------------------------------------------------------------------
+def scratch_unpin_all(session_id: str | None = None) -> None:
+    # Remove all pin records for the session after a tool-loop run completes.
+    resolved = _resolve_session_id(session_id)
+    with _PINNED_LOCK:
+        _SESSION_PINNED.pop(resolved, None)
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -112,20 +150,20 @@ def scratch_load(key: str, session_id: str | None = None) -> str:
     """Retrieve a stored value by key.  Returns an error string when the key does not exist."""
     validated = _validate_key(key)
     store = _get_session_store(session_id)
-    if validated not in store:
-        return f"Scratchpad key '{validated}' not found.  Use scratch_list() to see available keys."
-    return store[validated]
+    with _STORE_LOCK:
+        if validated not in store:
+            return f"Scratchpad key '{validated}' not found.  Use scratch_list() to see available keys."
+        return store[validated]
 
 
 # ----------------------------------------------------------------------------------------------------
 def scratch_list(session_id: str | None = None) -> str:
     """Return a formatted list of all current scratchpad keys and their sizes."""
     store = _get_session_store(session_id)
-    if not store:
-        return "Scratchpad is empty."
-    lines = []
-    for key in sorted(store):
-        lines.append(f"  {key}  ({len(store[key])} chars)")
+    with _STORE_LOCK:
+        if not store:
+            return "Scratchpad is empty."
+        lines = [f"  {key}  ({len(store[key])} chars)" for key in sorted(store)]
     return "Scratchpad keys:\n" + "\n".join(lines)
 
 
@@ -133,11 +171,10 @@ def scratch_list(session_id: str | None = None) -> str:
 def scratch_dump(session_id: str | None = None) -> str:
     """Return every key and its full stored value.  Intended for debugging."""
     store = _get_session_store(session_id)
-    if not store:
-        return "Scratchpad is empty."
-    sections = []
-    for key in sorted(store):
-        sections.append(f"[{key}]\n{store[key]}")
+    with _STORE_LOCK:
+        if not store:
+            return "Scratchpad is empty."
+        sections = [f"[{key}]\n{store[key]}" for key in sorted(store)]
     return "Scratchpad dump:\n\n" + "\n\n".join(sections)
 
 
@@ -146,9 +183,9 @@ def scratch_delete(key: str, session_id: str | None = None) -> str:
     """Remove one key from the scratchpad."""
     validated = _validate_key(key)
     store = _get_session_store(session_id)
-    if validated not in store:
-        return f"Scratchpad key '{validated}' not found - nothing deleted."
     with _STORE_LOCK:
+        if validated not in store:
+            return f"Scratchpad key '{validated}' not found - nothing deleted."
         del store[validated]
     return f"Deleted scratchpad key '{validated}'."
 
@@ -158,10 +195,11 @@ def scratch_search(substring: str, session_id: str | None = None) -> str:
     """Return a list of keys whose stored value contains *substring* (case-insensitive)."""
     store = _get_session_store(session_id)
     needle = substring.lower()
-    matches = [key for key, val in store.items() if needle in val.lower()]
+    with _STORE_LOCK:
+        matches = [(key, len(val)) for key, val in store.items() if needle in val.lower()]
     if not matches:
         return f"No scratchpad keys contain the substring '{substring}'."
-    lines = [f"  {key}  ({len(store[key])} chars)" for key in sorted(matches)]
+    lines = [f"  {key}  ({size} chars)" for key, size in sorted(matches)]
     return f"Keys matching '{substring}':\n" + "\n".join(lines)
 
 
@@ -175,9 +213,10 @@ def scratch_peek(key: str, substring: str, context_chars: int = 250, session_id:
     """
     validated = _validate_key(key)
     store = _get_session_store(session_id)
-    if validated not in store:
-        return f"Scratchpad key '{validated}' not found. Use scratch_list() to see available keys."
-    value = store[validated]
+    with _STORE_LOCK:
+        if validated not in store:
+            return f"Scratchpad key '{validated}' not found. Use scratch_list() to see available keys."
+        value = store[validated]
     pos   = value.lower().find(substring.lower())
     if pos == -1:
         return f"Substring '{substring}' not found in scratchpad key '{validated}'."
@@ -213,12 +252,12 @@ def scratch_query(
     except ValueError as exc:
         return f"Error: {exc}"
     store = _get_session_store(session_id)
-    if validated not in store:
-        return f"Scratchpad key '{validated}' not found.  Use scratch_list() to see available keys."
     if not query or not query.strip():
         return "Error: query cannot be empty."
-
-    content = store[validated]
+    with _STORE_LOCK:
+        if validated not in store:
+            return f"Scratchpad key '{validated}' not found.  Use scratch_list() to see available keys."
+        content = store[validated]
 
     # Lazy imports to avoid circular deps at module load time.
     # Must use the fully-qualified package path so we share the same module
@@ -279,9 +318,9 @@ def scratch_query(
 def scratch_clear(session_id: str | None = None) -> str:
     """Remove all keys from the scratchpad (called at session reset or /clear)."""
     resolved = _resolve_session_id(session_id)
-    store = _get_session_store(resolved)
-    count = len(store)
+    _get_session_store(resolved)  # ensure the session entry exists before taking the lock
     with _STORE_LOCK:
+        count = len(_SESSION_STORES.get(resolved, {}))
         _SESSION_STORES[resolved] = {}
     return f"Scratchpad cleared ({count} key(s) removed)."
 
@@ -291,10 +330,14 @@ def scratch_clear(session_id: str | None = None) -> str:
 # ====================================================================================================
 def get_store(session_id: str | None = None) -> dict[str, str]:
     """Return a shallow copy of the store dict.  Used by prompt_tokens for {scratch:key} resolution."""
-    return dict(_get_session_store(session_id))
+    store = _get_session_store(session_id)
+    with _STORE_LOCK:
+        return dict(store)
 
 
 # ----------------------------------------------------------------------------------------------------
 def get_key_names(session_id: str | None = None) -> list[str]:
     """Return a sorted list of active key names.  Used by orchestration to inject into system prompt."""
-    return sorted(_get_session_store(session_id).keys())
+    store = _get_session_store(session_id)
+    with _STORE_LOCK:
+        return sorted(store.keys())

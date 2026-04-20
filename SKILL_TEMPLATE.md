@@ -35,6 +35,26 @@ Invoke this skill when the prompt contains any of these concepts or phrases:
 - `phrase or concept`
 - `another phrase`
 
+## Routing metadata
+Optional fields that sharpen how the catalog router selects this skill.
+Include only the fields that are relevant; omit any that do not apply.
+
+- `routing_priority` - integer (default 0). Higher values make the router prefer this skill
+  when multiple candidates score equally. Use for skills that should almost always win a tie
+  (e.g. a dedicated weather skill should beat a generic web-fetch skill on weather queries).
+
+- `requires_lookup` - `true` | `false` (default false). Set to `true` when the skill must
+  resolve a dynamic value (API key, URL, file path) before it can run. The router uses this
+  to surface lookup-dependent skills only when the lookup can actually succeed.
+
+- `triggers_exact` - list of verbatim phrases that, if present in the prompt, are a definitive
+  signal to invoke this skill (not just soft evidence). Use sparingly. Example:
+  `["run_code", "execute_code"]`.
+
+- `url_filter` - regex pattern. When set, the router only considers this skill for prompts
+  that contain a URL matching the pattern. Useful for narrowing broad web skills to a specific
+  domain. Example: `"wikipedia\\.org"`.
+
 ## Scratchpad integration
 <Describe whether and how this skill interacts with the scratchpad.
 If outputs are large or reused in downstream steps, show the park-then-reference pattern.

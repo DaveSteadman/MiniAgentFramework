@@ -1,5 +1,6 @@
 ﻿import copy
 import threading
+import time
 
 from KoreAgent.scratchpad import scratch_save as scratch_auto_save
 from KoreAgent.session_runtime import get_active_session_id
@@ -98,7 +99,24 @@ def run_delegate_subrun(
     )
 
     logger.log_file_only(f"[delegate] spawning child run: depth={depth + 1} max_iter={child_iterations} prompt={trunc(child_prompt, 80)}")
+
+    # Check stop state before starting the child run - the parent may have been stopped
+    # while this delegate was queued.  Use a lazy import to avoid a circular dependency.
+    try:
+        from KoreAgent.orchestration import is_stop_requested as _is_stop_requested
+        if _is_stop_requested():
+            return {
+                "status": "error",
+                "answer": "[Run stopped by /stoprun - delegate did not execute.]",
+                "delegate_prompt": child_prompt,
+                "depth": depth + 1,
+                "max_iterations": child_iterations,
+            }
+    except ImportError:
+        pass
+
     previous = push_delegate_runtime(logger=logger, delegate_depth=depth + 1, config=child_config)
+    _start = time.monotonic()
     try:
         answer, _, _, run_success, _ = orchestrate_prompt_fn(
             user_prompt=child_prompt,
@@ -117,6 +135,8 @@ def run_delegate_subrun(
         status = "error"
     finally:
         pop_delegate_runtime(previous)
+    elapsed = time.monotonic() - _start
+    logger.log_file_only(f"[delegate] child done: depth={depth + 1} status={status} elapsed={elapsed:.1f}s prompt={trunc(child_prompt, 80)}")
 
     if output_key and status == "ok":
         try:

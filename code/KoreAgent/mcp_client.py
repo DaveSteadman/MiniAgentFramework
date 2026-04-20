@@ -47,8 +47,9 @@ except ImportError:
 _loop:        asyncio.AbstractEventLoop | None = None
 _loop_thread: threading.Thread | None          = None
 
-_mcp_tool_defs:  list[dict] = []
-_mcp_tool_index: dict[str, dict] = {}   # tool_name -> {"url": str, "server": str}
+_mcp_tool_defs:      list[dict] = []
+_mcp_tool_index:     dict[str, dict] = {}   # tool_name -> {"url": str, "server": str}
+_configured_servers: list[dict] = []        # raw server entries from config, populated by start()
 
 _CALL_TIMEOUT   = 30.0  # seconds applied to call_tool
 _CONNECT_TIMEOUT = 5.0  # seconds to wait for list_tools during startup
@@ -68,12 +69,13 @@ def start(config_path: Path) -> None:
 
     No-op when the mcp package is not installed or no servers are configured.
     """
-    global _loop, _loop_thread, _mcp_tool_defs, _mcp_tool_index
+    global _loop, _loop_thread, _mcp_tool_defs, _mcp_tool_index, _configured_servers
 
     if not _MCP_AVAILABLE:
         return
 
-    servers = _load_server_config(config_path)
+    servers             = _load_server_config(config_path)
+    _configured_servers = servers
     if not servers:
         return
 
@@ -91,7 +93,13 @@ def start(config_path: Path) -> None:
         defs, index = future.result(timeout=_CONNECT_TIMEOUT * len(servers) + 2)
     except TimeoutError:
         print(f"[mcp] Warning: tool enumeration timed out after {_CONNECT_TIMEOUT}s per server - continuing without MCP tools", flush=True)
-        defs, index = [], {}
+        # Stop the event loop thread to avoid accumulating orphaned threads across restarts.
+        _loop.call_soon_threadsafe(_loop.stop)
+        if _loop_thread is not None:
+            _loop_thread.join(timeout=2.0)
+        _loop        = None
+        _loop_thread = None
+        defs, index  = [], {}
     _mcp_tool_defs  = defs
     _mcp_tool_index = index
 
@@ -111,6 +119,56 @@ def stop() -> None:
         _loop_thread = None
 
 
+# ----------------------------------------------------------------------------------------------------
+def reconnect() -> tuple[int, list[str]]:
+    """Re-enumerate tools from all configured servers without restarting MAF.
+
+    Starts the event loop thread if it was never started or died after a timeout.
+    Returns (total_tool_count, [status_line, ...]) so the caller can report results.
+    """
+    global _loop, _loop_thread, _mcp_tool_defs, _mcp_tool_index
+
+    if not _MCP_AVAILABLE:
+        return 0, ["mcp package not installed"]
+
+    servers = _configured_servers
+    if not servers:
+        return 0, ["No servers configured in default.json"]
+
+    if _loop is None or _loop_thread is None or not _loop_thread.is_alive():
+        _loop        = asyncio.new_event_loop()
+        _loop_thread = threading.Thread(
+            target = _run_loop,
+            args   = (_loop,),
+            daemon = True,
+            name   = "mcp-event-loop",
+        )
+        _loop_thread.start()
+
+    future = asyncio.run_coroutine_threadsafe(_enumerate_all_servers(servers), _loop)
+    try:
+        defs, index = future.result(timeout=_CONNECT_TIMEOUT * len(servers) + 2)
+    except TimeoutError:
+        return 0, [f"Reconnect timed out after {_CONNECT_TIMEOUT:.0f}s per server"]
+
+    _mcp_tool_defs  = defs
+    _mcp_tool_index = index
+
+    registered_urls: dict[str, int] = {}
+    for info in index.values():
+        registered_urls[info["url"]] = registered_urls.get(info["url"], 0) + 1
+
+    lines = []
+    for srv in servers:
+        name  = srv.get("name") or srv.get("url", "?")
+        url   = srv.get("url", "?")
+        count = registered_urls.get(url, 0)
+        ok    = count > 0
+        lines.append(f"  {'OK  ' if ok else 'FAIL'}  {name}  {url}  ({count} tool(s))")
+
+    return len(defs), lines
+
+
 # ====================================================================================================
 # MARK: PUBLIC API
 # ====================================================================================================
@@ -121,6 +179,23 @@ def is_mcp_tool(tool_name: str) -> bool:
 # ----------------------------------------------------------------------------------------------------
 def get_mcp_tool_definitions() -> list[dict]:
     return list(_mcp_tool_defs)
+
+
+# ----------------------------------------------------------------------------------------------------
+def get_server_status() -> list[dict]:
+    """Return [{name, url, tool_count, ok}] for each configured server."""
+    registered_urls: dict[str, int] = {}
+    for info in _mcp_tool_index.values():
+        registered_urls[info["url"]] = registered_urls.get(info["url"], 0) + 1
+    return [
+        {
+            "name":       srv.get("name") or srv.get("url", "?"),
+            "url":        srv.get("url", "?"),
+            "tool_count": registered_urls.get(srv.get("url", ""), 0),
+            "ok":         registered_urls.get(srv.get("url", ""), 0) > 0,
+        }
+        for srv in _configured_servers
+    ]
 
 
 # ----------------------------------------------------------------------------------------------------

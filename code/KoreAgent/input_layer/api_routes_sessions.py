@@ -123,6 +123,7 @@ def register_session_routes(
                         session_id=session_id,
                         switch_session=_do_switch_session,
                         rename_session=_do_rename_session,
+                        delete_session_state=delete_session_state,
                     )
                     handled = handle_slash(_prompt, slash_ctx)
                     slash_response = "\n".join(output_lines) if output_lines else ("(done)" if handled else f"Unknown command: {_prompt.split()[0]}")

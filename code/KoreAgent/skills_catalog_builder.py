@@ -44,10 +44,11 @@ from KoreAgent.utils.workspace_utils import normalize_module_path
 # ====================================================================================================
 # MARK: CONSTANTS
 # ====================================================================================================
-SKILLS_SCHEMA_VERSION = "1.0"
-DEFAULT_SKILLS_ROOT   = Path(__file__).resolve().parent / "skills"
-DEFAULT_OUTPUT_FILE   = DEFAULT_SKILLS_ROOT / "skills_catalog.json"
-DEFAULT_SUMMARY_FILE  = DEFAULT_SKILLS_ROOT / "skills_summary.md"
+SKILLS_SCHEMA_VERSION        = "1.0"
+DEFAULT_SKILLS_ROOT          = Path(__file__).resolve().parent / "skills"
+DEFAULT_SYSTEM_SKILLS_ROOT   = Path(__file__).resolve().parent / "system_skills"
+DEFAULT_OUTPUT_FILE          = DEFAULT_SKILLS_ROOT / "skills_catalog.json"
+DEFAULT_SUMMARY_FILE         = DEFAULT_SKILLS_ROOT / "skills_summary.md"
 DEFAULT_SUMMARY_MODEL = "gpt-oss:20b"
 _LOADED_PAYLOAD_CACHE: dict[tuple[str, float, int], dict] = {}
 _TOOL_DEFS_CACHE: dict[str, list[dict]] = {}
@@ -126,7 +127,10 @@ def parse_catalog_args() -> argparse.Namespace:
 
 # ----------------------------------------------------------------------------------------------------
 def find_skill_files(skills_root: Path) -> list[Path]:
-    return sorted(skills_root.rglob("skill.md"))
+    found = list(skills_root.rglob("skill.md"))
+    if DEFAULT_SYSTEM_SKILLS_ROOT.exists() and DEFAULT_SYSTEM_SKILLS_ROOT.resolve() != skills_root.resolve():
+        found.extend(DEFAULT_SYSTEM_SKILLS_ROOT.rglob("skill.md"))
+    return sorted(found)
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -414,27 +418,40 @@ def _rebuild_skills_catalog_if_stale(catalog_path: Path) -> None:
     else:
         summary_mtime = catalog_path.stat().st_mtime
         skill_files   = list(skills_root.rglob("skill.md"))
+        if DEFAULT_SYSTEM_SKILLS_ROOT.exists():
+            skill_files.extend(DEFAULT_SYSTEM_SKILLS_ROOT.rglob("skill.md"))
+
+        # Detect a count mismatch first - catches deleted skill folders where no
+        # remaining file has a newer mtime than the catalog.
         needs_rebuild = False
-        for sf in skill_files:
-            if sf.stat().st_mtime > summary_mtime:
+        try:
+            existing = json.loads(catalog_path.read_text(encoding="utf-8-sig"))
+            if len(existing.get("skills", [])) != len(skill_files):
                 needs_rebuild = True
-                break
-            try:
-                skill_text = sf.read_text(encoding="utf-8-sig")
-            except Exception:
-                continue
-            module_match = re.search(r"-\s*Module:\s*`([^`]+)`", skill_text)
-            if not module_match:
-                module_match = re.search(r"##\s+Module\s*\n+`([^`]+)`", skill_text)
-            if not module_match:
-                continue
-            try:
-                module_path = _workspace_abspath(module_match.group(1))
-            except Exception:
-                continue
-            if module_path.exists() and module_path.stat().st_mtime > summary_mtime:
-                needs_rebuild = True
-                break
+        except Exception:
+            needs_rebuild = True
+
+        if not needs_rebuild:
+            for sf in skill_files:
+                if sf.stat().st_mtime > summary_mtime:
+                    needs_rebuild = True
+                    break
+                try:
+                    skill_text = sf.read_text(encoding="utf-8-sig")
+                except Exception:
+                    continue
+                module_match = re.search(r"-\s*Module:\s*`([^`]+)`", skill_text)
+                if not module_match:
+                    module_match = re.search(r"##\s+Module\s*\n+`([^`]+)`", skill_text)
+                if not module_match:
+                    continue
+                try:
+                    module_path = _workspace_abspath(module_match.group(1))
+                except Exception:
+                    continue
+                if module_path.exists() and module_path.stat().st_mtime > summary_mtime:
+                    needs_rebuild = True
+                    break
 
     if not needs_rebuild:
         return
