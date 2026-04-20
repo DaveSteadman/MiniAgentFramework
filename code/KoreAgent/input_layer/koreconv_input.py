@@ -240,8 +240,6 @@ def _handle_compress_needed(
             push_log_line(f"[KORECONV] Event {event_id}: complete call failed: {exc}")
         return
 
-    push_log_line(f"[KORECONV] Compressing conv {conv_id}")
-
     # Fetch all unsummarised messages.
     try:
         raw = _http_get(base, f"/conversations/{conv_id}/messages?summarised=0&limit=500") or []
@@ -269,6 +267,10 @@ def _handle_compress_needed(
         label     = "User" if direction == "inbound" else "Agent"
         lines.append(f"[{ts}] {label}: {content}")
     messages_text = "\n\n".join(lines)
+    input_chars    = len(messages_text)
+    input_tok_est  = input_chars // 4
+
+    push_log_line(f"[KORECONV] Compressing conv {conv_id}: {len(raw)} messages, ~{input_tok_est:,} tok input")
 
     compress_prompt = _COMPRESS_PROMPT_TEMPLATE.format(messages=messages_text)
 
@@ -320,7 +322,11 @@ def _handle_compress_needed(
     except Exception as exc:
         push_log_line(f"[KORECONV] Conv {conv_id}: failed to patch summary after compression: {exc}")
 
-    push_log_line(f"[KORECONV] Conv {conv_id}: compressed {len(message_ids)} message(s), summary ~{summary_tokens} tok")
+    reduction_pct = int(100 * (1 - summary_tokens / input_tok_est)) if input_tok_est > 0 else 0
+    push_log_line(
+        f"[KORECONV] Conv {conv_id}: compressed {len(message_ids)} message(s) "
+        f"~{input_tok_est:,} tok -> ~{summary_tokens:,} tok ({reduction_pct}% reduction)"
+    )
 
     try:
         _http_post(base, f"/events/{event_id}/complete", {"status": "completed"})

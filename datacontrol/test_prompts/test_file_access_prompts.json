@@ -1,5 +1,5 @@
 [
-    "write hello world to file greeting.txt",
+    "write hello world to file ./data/greeting.txt",
     "write the current date and time to file ./data/timestamp.txt",
     "write the system information to ./data/sysinfo.txt",
     "write the system information to ./data/sysinfo.csv",

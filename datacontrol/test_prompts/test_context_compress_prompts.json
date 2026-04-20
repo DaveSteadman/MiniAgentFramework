@@ -2,7 +2,7 @@
     {
         "exchange": "compression flow - ctx set plus all conversation turns",
         "turns": [
-            { "user": "/llmserverconfig ctx 512", "assert": "contains|512" },
+            { "user": "/ctx size 512", "assert": "contains|512" },
             {
                 "user": "Remember this: my favourite colour is cobalt blue. Acknowledge it and give me one sentence about the history of cobalt blue as a pigment.",
                 "assert": "contains|cobalt"
@@ -23,7 +23,8 @@
             {
                 "user": "Recall: what are the three preferences I told you at the start of our conversation?",
                 "assert": "contains|cobalt"
-            }
+            },
+            { "user": "/ctx size 128000", "assert": "contains|128000" }
         ]
     }
 ]
