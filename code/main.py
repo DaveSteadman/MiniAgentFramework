@@ -185,6 +185,8 @@ from KoreAgent.llm_client import register_llm_call_logger
 from KoreAgent.orchestration import OrchestratorConfig
 from KoreAgent.orchestration import orchestrate_prompt
 from KoreAgent.orchestration import resolve_execution_model
+from KoreAgent.run_helpers import build_summary_block
+from KoreAgent.run_helpers import compact_turns
 from KoreAgent.run_helpers import make_task_session
 from KoreAgent.scratchpad import scratch_clear
 from KoreAgent.skills_catalog_builder import load_skills_payload
@@ -328,6 +330,25 @@ def run_chat_sequence_mode(
         persist_path = None,
     )
 
+    summaries: list[dict] = []
+
+    def _compress_in_memory() -> str:
+        nonlocal summaries
+        messages = history.as_list()
+        if not messages:
+            return "No conversation history to compress."
+        remaining, updated = compact_turns(messages, summaries)
+        if len(updated) <= len(summaries):
+            return "Compression could not produce a summary."
+        turn_count = len(messages) // 2
+        summaries  = updated
+        history.clear()
+        for i in range(0, len(remaining) - 1, 2):
+            u = remaining[i].get("content") or ""
+            a = remaining[i + 1].get("content") or "" if i + 1 < len(remaining) else ""
+            history.add(u, a)
+        return f"Compressed {turn_count} turn(s) into summary block."
+
     for turn_idx, user_prompt in enumerate(prompts, start=1):
         print(f"[TURN {turn_idx}] User: {user_prompt}")
         logger.log_section_file_only(f"SEQUENCE TURN {turn_idx}")
@@ -335,10 +356,12 @@ def run_chat_sequence_mode(
 
         slash_lines: list[str] = []
         seq_ctx = SlashCommandContext(
-            config          = config,
-            output          = lambda text, level="info", _buf=slash_lines: _buf.append(text),
-            clear_history   = lambda: [history.clear(), session_ctx.clear(), scratch_clear(session_ctx.session_id)],
-            session_context = session_ctx,
+            config           = config,
+            output           = lambda text, level="info", _buf=slash_lines: _buf.append(text),
+            clear_history    = lambda: [history.clear(), session_ctx.clear(), scratch_clear(session_ctx.session_id)],
+            session_context  = session_ctx,
+            session_id       = session_ctx.session_id,
+            compress_history = _compress_in_memory,
         )
         if handle_slash(user_prompt, seq_ctx):
             slash_response = "\n".join(slash_lines)
@@ -354,6 +377,7 @@ def run_chat_sequence_mode(
             logger=logger,
             conversation_history=history.as_list() or None,
             session_context=session_ctx,
+            conversation_summary=build_summary_block(summaries) or None,
             quiet=True,
         )
 

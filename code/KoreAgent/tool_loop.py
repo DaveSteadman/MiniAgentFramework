@@ -137,6 +137,39 @@ def build_fallback_answer(user_prompt: str, tool_outputs: list[ToolCallResult]) 
     return "\n".join(lines).strip()
 
 
+def _extract_raw_json_tool_call(text: str) -> dict | None:
+    # Returns a synthetic tool_calls entry if the text is a bare JSON tool-call object,
+    # i.e. {"tool": "<name>", "arguments": {...}} or {"name": "<name>", "arguments": {...}}.
+    # Returns None for all other text (normal final answers).
+    stripped = (text or "").strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        obj = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    tool_name = obj.get("tool") or obj.get("name") or obj.get("function")
+    arguments  = obj.get("arguments") or obj.get("parameters") or obj.get("args") or {}
+    if not tool_name or not isinstance(tool_name, str):
+        return None
+    if not isinstance(arguments, dict):
+        return None
+    # Must look like an intentional tool invocation: name must be non-trivial and alphanumeric.
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", tool_name):
+        return None
+    return {
+        "id":       f"raw_json_{tool_name}",
+        "type":     "function",
+        "function": {
+            "name":      tool_name,
+            "arguments": json.dumps(arguments),
+        },
+    }
+
+
+# ----------------------------------------------------------------------------------------------------
 def strip_cot_preamble(text: str) -> str:
     if not text:
         return text
@@ -260,13 +293,23 @@ def run_tool_loop(
                 _log_file_only(f"[thinking]\n{thinking}\n[/thinking]")
 
             if not result.tool_calls:
-                final_response = strip_cot_preamble(result.response)
-                run_success = bool(final_response)
-                _log(final_response)
-                _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
-                messages.append({"role": "assistant", "content": final_response})
-                context_map.append({"round": round_num, "role": "asst", "label": "final answer", "chars": len(final_response), "auto_key": None, "msg_idx": len(messages) - 1})
-                break
+                candidate = strip_cot_preamble(result.response)
+                # Guard: detect the "describing a tool call instead of invoking it" hallucination.
+                # Some models emit the raw JSON object {"tool": "...", "arguments": {...}} as text
+                # when they should have used the native tool-call mechanism.  Detect this pattern
+                # and synthesize a synthetic tool call so the round proceeds normally.
+                _synthetic_tc = _extract_raw_json_tool_call(candidate)
+                if _synthetic_tc is not None:
+                    _log_file_only(f"[warn] Round {round_num}: model emitted raw JSON tool call instead of invoking - forcing re-invocation.")
+                    result.tool_calls = [_synthetic_tc]
+                else:
+                    final_response = candidate
+                    run_success = bool(final_response)
+                    _log(final_response)
+                    _log_file_only(f"[progress] Round {round_num}: model gave final answer.")
+                    messages.append({"role": "assistant", "content": final_response})
+                    context_map.append({"round": round_num, "role": "asst", "label": "final answer", "chars": len(final_response), "auto_key": None, "msg_idx": len(messages) - 1})
+                    break
 
             _log(f"Round {round_num}: model requested {len(result.tool_calls)} tool call(s).")
             _log_file_only("[progress] Executing tool calls...")

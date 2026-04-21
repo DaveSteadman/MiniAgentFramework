@@ -24,7 +24,7 @@
                 "user": "Recall: what are the three preferences I told you at the start of our conversation?",
                 "assert": "contains|cobalt"
             },
-            { "user": "/ctx size 128000", "assert": "contains|128000" }
+            { "user": "/ctx size 128000", "assert": "contains|128,000" }
         ]
     }
 ]

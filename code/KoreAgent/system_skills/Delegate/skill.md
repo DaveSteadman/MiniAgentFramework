@@ -58,6 +58,12 @@ Invoke this skill when:
 Do NOT use for trivial one-step actions - prefer direct tool calls instead.
 If the subtask is a single `search`, `fetch`, or `lookup`, call that tool directly.
 
+## Critical: never describe a tool call as text
+Do NOT write the delegate call as a JSON literal in your response text, e.g.:
+  `{"tool": "delegate", "arguments": {"prompt": "..."}}`
+This is a hallucination - writing the action instead of doing it. Always invoke `delegate(...)` via
+the tool-call mechanism. If you intend to delegate, emit a tool call, not text.
+
 ## List-processing workflows
 - Prefer one delegate over the whole batch when the child can iterate internally.
 - If you truly need parallel delegates, launch siblings from the parent only.

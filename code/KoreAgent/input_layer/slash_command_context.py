@@ -14,3 +14,6 @@ class SlashCommandContext:
     switch_session: Callable[[str, str], None] | None = None
     rename_session: Callable[[str, str], None] | None = None
     delete_session_state: Callable[[str], None] | None = None
+    # Optional in-memory compression fallback used when KoreConversation is unavailable.
+    # Called with no arguments; returns a human-readable result string containing "compress".
+    compress_history: Callable[[], str] | None = None

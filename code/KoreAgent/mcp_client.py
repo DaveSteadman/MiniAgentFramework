@@ -50,9 +50,11 @@ _loop_thread: threading.Thread | None          = None
 _mcp_tool_defs:      list[dict] = []
 _mcp_tool_index:     dict[str, dict] = {}   # tool_name -> {"url": str, "server": str}
 _configured_servers: list[dict] = []        # raw server entries from config, populated by start()
+_server_reachable:   dict[str, bool] = {}   # url -> True/False; populated by start()/reconnect()
 
-_CALL_TIMEOUT   = 30.0  # seconds applied to call_tool
-_CONNECT_TIMEOUT = 5.0  # seconds to wait for list_tools during startup
+_CALL_TIMEOUT    = 30.0  # seconds applied to call_tool
+_CONNECT_TIMEOUT =  5.0  # seconds to wait for list_tools during startup
+_HEALTH_TIMEOUT  =  2.0  # seconds for fast-fail ping before first call to an unchecked server
 
 
 # ====================================================================================================
@@ -69,7 +71,7 @@ def start(config_path: Path) -> None:
 
     No-op when the mcp package is not installed or no servers are configured.
     """
-    global _loop, _loop_thread, _mcp_tool_defs, _mcp_tool_index, _configured_servers
+    global _loop, _loop_thread, _mcp_tool_defs, _mcp_tool_index, _configured_servers, _server_reachable
 
     if not _MCP_AVAILABLE:
         return
@@ -103,6 +105,10 @@ def start(config_path: Path) -> None:
     _mcp_tool_defs  = defs
     _mcp_tool_index = index
 
+    # Mark each server reachable/unreachable based on whether any tools were enumerated from it.
+    registered_urls = {info["url"] for info in _mcp_tool_index.values()}
+    _server_reachable = {srv.get("url", ""): srv.get("url", "") in registered_urls for srv in servers}
+
     count       = len(defs)
     server_list = ", ".join(s.get("name") or s["url"] for s in servers)
     print(f"[mcp] {count} tool(s) registered from: {server_list}", flush=True)
@@ -126,7 +132,7 @@ def reconnect() -> tuple[int, list[str]]:
     Starts the event loop thread if it was never started or died after a timeout.
     Returns (total_tool_count, [status_line, ...]) so the caller can report results.
     """
-    global _loop, _loop_thread, _mcp_tool_defs, _mcp_tool_index
+    global _loop, _loop_thread, _mcp_tool_defs, _mcp_tool_index, _server_reachable
 
     if not _MCP_AVAILABLE:
         return 0, ["mcp package not installed"]
@@ -157,6 +163,9 @@ def reconnect() -> tuple[int, list[str]]:
     registered_urls: dict[str, int] = {}
     for info in index.values():
         registered_urls[info["url"]] = registered_urls.get(info["url"], 0) + 1
+
+    # Refresh reachability cache after reconnect.
+    _server_reachable = {srv.get("url", ""): registered_urls.get(srv.get("url", ""), 0) > 0 for srv in servers}
 
     lines = []
     for srv in servers:
@@ -213,11 +222,34 @@ def call_mcp_tool(tool_name: str, arguments: dict) -> object:
     if entry is None:
         raise RuntimeError(f"MCP tool '{tool_name}' is not registered")
 
+    url         = entry["url"]
+    server_name = entry.get("server", url)
+
+    # Fast-fail: if the server is already known to be unreachable, skip the 30-second wait.
+    if _server_reachable.get(url) is False:
+        return f"Error: {server_name} is currently unreachable"
+
+    # If reachability is unknown (not populated by start/reconnect), do a quick 2-second ping.
+    if url not in _server_reachable:
+        ping_future = asyncio.run_coroutine_threadsafe(_ping_server_async(url), _loop)
+        try:
+            reachable = ping_future.result(timeout=_HEALTH_TIMEOUT)
+        except Exception:
+            reachable = False
+        _server_reachable[url] = reachable
+        if not reachable:
+            return f"Error: {server_name} is currently unreachable"
+
     future = asyncio.run_coroutine_threadsafe(
-        _call_tool_async(entry["url"], tool_name, arguments),
+        _call_tool_async(url, tool_name, arguments),
         _loop,
     )
-    return future.result(timeout=_CALL_TIMEOUT)
+    try:
+        return future.result(timeout=_CALL_TIMEOUT)
+    except Exception as exc:
+        # Mark the server unreachable so subsequent calls in this run fail fast.
+        _server_reachable[url] = False
+        raise RuntimeError(f"MCP call to {server_name}/{tool_name} failed: {exc}") from exc
 
 
 # ====================================================================================================
@@ -239,6 +271,19 @@ def _load_server_config(config_path: Path) -> list[dict]:
 # ====================================================================================================
 # MARK: INTERNAL - ASYNC OPERATIONS
 # ====================================================================================================
+async def _ping_server_async(url: str) -> bool:
+    # Lightweight connectivity check: open a session and initialise, then exit.
+    # Returns True if the server responds within the caller-imposed timeout, False otherwise.
+    try:
+        async with streamablehttp_client(url) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+        return True
+    except Exception:
+        return False
+
+
+# ----------------------------------------------------------------------------------------------------
 async def _enumerate_all_servers(servers: list[dict]) -> tuple[list[dict], dict]:
     defs:  list[dict] = []
     index: dict       = {}

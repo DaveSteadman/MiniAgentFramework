@@ -400,7 +400,13 @@ def _cmd_kccompress(arg: str, ctx: SlashCommandContext) -> None:
         )
         ctx.output("Check the log panel - compression will run on the next agent poll.", "dim")
     except RuntimeError as exc:
-        ctx.output(str(exc), "error")
+        # If KoreConversation is unavailable, fall back to the in-memory compression path
+        # when the caller has wired one up (e.g. CLI chat-sequence test mode).
+        if ctx.compress_history is not None:
+            result = ctx.compress_history()
+            ctx.output(result, "success")
+        else:
+            ctx.output(f"Cannot compress conversation: {exc}", "error")
 
 
 def register_session_slash_commands(registry: dict[str, Callable], descriptions: dict[str, str]) -> None:
