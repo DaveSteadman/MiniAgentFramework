@@ -554,7 +554,8 @@ body.splitter-drag-h { user-select: none; cursor: row-resize; }
     transition: border-color 0.15s;
     line-height: 1.5;
     min-height: 48px;
-    overflow-y: auto;
+    max-height: 180px;
+    overflow-y: hidden;
 }
 
 #chat-input:focus { border-color: var(--border-hi); }

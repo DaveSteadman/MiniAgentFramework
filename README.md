@@ -25,7 +25,7 @@ cd MiniAgentFramework
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python .\code\main.py
+python .\main.py
 ```
 
 Then open:
@@ -79,13 +79,13 @@ This is the core experience of the framework: local LLM, local tools, visible re
 
 ## Running the Framework
 
-Running `main.py` starts the local API server and Web UI. It loads defaults, connects to the configured model server, and exposes the REST/SSE endpoints used by the browser UI.
+Running `main.py` from the repository root starts the local API server and Web UI. It loads defaults, connects to the configured model server, and exposes the REST/SSE endpoints used by the browser UI.
 
 ```powershell
-python .\code\main.py
-python .\code\main.py --llmhost MONTBLANC
-python .\code\main.py --llmhost lmstudio
-python .\code\main.py --agentport 8010 --model 20b --ctx 65536
+python .\main.py
+python .\main.py --llmhost MONTBLANC
+python .\main.py --llmhost lmstudio
+python .\main.py --agentport 8010 --model 20b --ctx 65536
 ```
 
 ## Running the WebUI
@@ -356,7 +356,7 @@ External MCP tool providers are configured in `default.json` under `mcp_connecti
       "name": "KoreDocs",
       "url": "http://127.0.0.1:5500/mcp/sse",
       "enabled": true,
-      "purpose": "document navigation and structured editing",
+      "purpose": "document navigation, structured editing, and KoreFile authoring",
       "transport": "sse",
       "expected_prefix": "koredocs_"
     }
@@ -364,7 +364,7 @@ External MCP tool providers are configured in `default.json` under `mcp_connecti
 }
 ```
 
-For KoreDocs, prefer the canonical prefixed surface such as `koredocs_get_folder_structure`, `koredocs_get_file`, `koredocs_get_koredoc_outline`, `koredocs_read_koredoc_section`, `koredocs_replace_koredoc_section`, and the `koredocs_*sheet*` granular sheet tools. Legacy generic aliases may still exist on the server for compatibility, but MiniAgentFramework should expose the prefixed names.
+For KoreDocs, prefer the canonical prefixed surface such as `koredocs_get_folder_structure`, `koredocs_create_folder`, `koredocs_get_file`, `koredocs_get_koredoc_outline`, `koredocs_read_koredoc_section`, `koredocs_replace_koredoc_section`, `koredocs_describe_sheet`, `koredocs_find_sheet_rows`, `koredocs_get_named_value`, and the other `koredocs_*sheet*` semantic sheet tools. MiniAgentFramework should expose the prefixed names only.
 
 Use `/mcp status` to see configured connections and `/mcp reconnect` to re-enumerate tools after starting or changing an MCP server.
 

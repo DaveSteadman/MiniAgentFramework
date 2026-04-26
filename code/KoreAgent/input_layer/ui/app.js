@@ -31,7 +31,7 @@ const _ALL_COMMANDS = [
 ];
 
 // Sub-commands for /session.
-const _SESSION_SUBS = ["name", "list", "resume", "resumecopy", "park", "delete", "info"];
+const _SESSION_SUBS = ["new", "name", "list", "resume", "resumecopy", "park", "delete", "info"];
 
 // Sub-commands for /llmserverconfig.
 const _LLMSERVERCFG_SUBS = ["model", "ctx"];
@@ -1388,8 +1388,12 @@ function onInputChange() {
 
 function _resizeTextarea() {
     const ta = dom.input();
+    const minHeight = 48;
+    const maxHeight = 180;
     ta.style.height = "auto";
-    ta.style.height = ta.scrollHeight + "px";
+    const nextHeight = Math.max(minHeight, Math.min(ta.scrollHeight, maxHeight));
+    ta.style.height = nextHeight + "px";
+    ta.style.overflowY = ta.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
 // ====================================================================================================
@@ -1436,6 +1440,7 @@ function init() {
     dom.input().addEventListener("input", () => { _historyIdx = -1; onInputChange(); });
     dom.input().addEventListener("blur",  () => { setTimeout(_hideSuggest, 120); });
     dom.sendBtn().addEventListener("click", submitPrompt);
+    _resizeTextarea();
 
     _chatScrollCtl = _createPanelScrollController(dom.chat(), { initialLive: true });
     _logScrollCtl  = _createPanelScrollController(dom.log(), {
@@ -1461,7 +1466,10 @@ function init() {
     let _resizeTimer = null;
     window.addEventListener("resize", () => {
         clearTimeout(_resizeTimer);
-        _resizeTimer = setTimeout(refreshTimeline, 100);
+        _resizeTimer = setTimeout(() => {
+            _resizeTextarea();
+            refreshTimeline();
+        }, 100);
     });
 
     // Start live log stream.

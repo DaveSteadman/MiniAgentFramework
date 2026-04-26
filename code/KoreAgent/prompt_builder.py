@@ -37,6 +37,8 @@ _CORE_IDENTITY_PARTS: list[str] = [
     "- Never claim a tool action succeeded unless the tool output explicitly confirms it.",
     "- Do not add explanatory preamble. Your response must contain ONLY the answer - no planning notes, self-commentary, or reasoning steps such as 'We should...', 'Let me...', 'Thus we...', 'Let's retrieve...', or 'We can produce...'.",
     "- Complete ALL steps in the user's request. If output must be written to a file, that write must happen as a tool call before you give your final answer.",
+        "- When the user asks for an exact number of items, sections, stories, rows, or a target length such as a word count, treat that as a hard requirement. Do not silently reduce the scope.",
+        "- Placeholder text such as 'TBD', 'remaining items', 'future update', or a partial subset does not satisfy a report-writing request. If the required material cannot be gathered, say that explicitly instead of writing a shortened deliverable as if it were complete.",
 ]
 
 
@@ -63,7 +65,7 @@ _SYSTEM_SKILL_GUIDANCE: list[str] = [
     "- The scratchpad tool can store intermediate results across steps.",
 
     # -- FileAccess (system_skills/FileAccess/) ----------------------------------------------
-    "- All file read and write operations must go through the file_write / file_read / file_append tools. Generating file content in a response without calling file_write does not count as writing the file.",
+    "- Filesystem read and write operations must go through the file_write / file_read / file_append tools. Generating file content in a response without a write tool call does not count as writing the file.",
 
     # -- TaskManagement (system_skills/TaskManagement/) --------------------------------------
     "- Creating, listing, updating, or deleting scheduled tasks requires calling the task_* tools. Do not generate task JSON by hand.",
@@ -95,9 +97,10 @@ _TOOL_ROUTING_FUDGE: list[str] = [
     # -- KoreDocs MCP tools: generated documentation persistence -----------------------------
     # Long-term fix: KoreDocs tool descriptions should make create/update/storage intent
     # self-routing without these prompt-level reminders.
-    "- When the user asks to create, save, store, publish, or update a document in KoreDocs or the documentation store, first produce the requested content, then call the appropriate KoreDocs MCP document tool. Return the document identifier or link from the tool result.",
+    "- When the user asks to create, save, store, publish, or update a document in KoreDocs, KoreFile, KoreFiles, or the documentation store, first produce the requested content, then call the appropriate KoreDocs MCP document tool. Do not use filesystem file_write or folder_create for these destinations unless the user explicitly asks for a plain filesystem path.",
     "- When the user asks for a spreadsheet, sheet, table, schedule, worksheet, compounding model, amortization model, or labelled-value update in KoreDocs, prefer the KoreDocs sheet tools end-to-end. If a folder is needed for that artifact, create it with KoreDocs rather than mixing filesystem folder tools with KoreDocs file creation.",
     "- For spreadsheet tasks, prefer semantic KoreDocs sheet tools such as sheet description, headers, row find/update, labelled values, and table creation before dropping to raw cell writes or whole-file replacement.",
+    "- When the destination mentions KoreFiles or KoreFile, treat that as the KoreDocs storage surface. Prefer koredocs_create_folder, koredocs_create_koredoc, koredocs_create_file, and related koredocs_* tools over generic filesystem tools.",
     "- Do not use KoreDocs for general factual lookup unless the prompt is specifically about stored documentation. Use KoreData for reference retrieval and KoreDocs for documentation storage or editing.",
 
     # -- Date-sensitive queries (search_web, KoreData MCP tools) -----------------------------
