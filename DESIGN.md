@@ -171,7 +171,6 @@ System skills (bundled in `system_skills/`, woven into the framework):
 
 External skills (bolt-on, in `skills/`):
 - `DateTime` - current date/time
-- `KoreData` - search and retrieve from local KoreData services (feeds, encyclopedia, library, documents)
 - `SystemInfo` - host hardware and OS info
 - `WebFetch` - single-page fetch and extraction
 - `WebNavigate` - multi-step browser-like page traversal
@@ -179,10 +178,20 @@ External skills (bolt-on, in `skills/`):
 - `WebSearch` - web search results
 - `WebWikipedia` - live Wikipedia article lookup
 
+MCP connections (configured external tool providers):
+- `KoreData` - reference search and retrieval across feeds, encyclopedia, library, and internal documents.
+- `KoreDocs` - documentation storage, creation, and editing.
+
 **Claims:**
 - Each skill directory contains exactly one `skill.md` that defines its public interface for the catalog builder.
 - Skills do not import from each other directly; inter-skill data flows through the scratchpad.
 - Skill functions that take large values as arguments support `{scratch:key}` token substitution as an alternative to passing inline text.
+- MCP connections are declared in `default.json` under `mcp_connections`; the older `mcp_servers` key remains a backwards-compatible alias.
+- MCP connections can use `transport: "streamable_http"` (default) or `transport: "sse"` for classic MCP SSE endpoints.
+- MCP tool names are owned by the MCP server. The framework exposes the names returned by `list_tools()` unchanged, optionally validating them with `expected_prefix`.
+- Per-connection `allowed_tools` and `blocked_tools` lists can restrict which server-published tools are exposed to the model.
+- Duplicate MCP tool names are ignored from later connections during enumeration so one server cannot silently replace another server's tool route.
+- MCP calls are routed by the framework's tool index to the configured connection that supplied the tool definition.
 
 ---
 

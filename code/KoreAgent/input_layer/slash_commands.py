@@ -403,7 +403,7 @@ def _cmd_defaults(arg: str, ctx: SlashCommandContext) -> None:
     if sub == "set":
         existing = _load()
         new_cfg = {"model": ctx.config.resolved_model, "ctx": ctx.config.num_ctx, "llmhost": get_active_host()}
-        for key in ("agentport", "ControlDataFolder", "UserDataFolder", "korecommsurl", "korecomms_poll_secs", "mcp_servers"):
+        for key in ("agentport", "ControlDataFolder", "UserDataFolder", "korecommsurl", "korecomms_poll_secs", "mcp_connections", "mcp_servers"):
             if key in existing:
                 new_cfg[key] = existing[key]
         try:
@@ -437,11 +437,12 @@ def _cmd_mcp(arg: str, ctx: SlashCommandContext) -> None:
     if sub in ("", "status"):
         statuses = mcp_client.get_server_status()
         if not statuses:
-            ctx.output("No MCP servers configured.", "dim")
+            ctx.output("No MCP connections configured.", "dim")
             return
         for srv in statuses:
             ok_str = f"({srv['tool_count']} tool(s))" if srv["ok"] else "(no tools - server may be down)"
-            ctx.output(f"  {'OK  ' if srv['ok'] else 'FAIL'}  {srv['name']}  {srv['url']}  {ok_str}", "item")
+            purpose = f" - {srv['purpose']}" if srv.get("purpose") else ""
+            ctx.output(f"  {'OK  ' if srv['ok'] else 'FAIL'}  {srv['name']}  {srv['url']}  {ok_str}{purpose}", "item")
         return
 
     if sub == "reconnect":

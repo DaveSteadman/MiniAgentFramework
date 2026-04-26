@@ -216,7 +216,7 @@ _DEFAULTS_KEYS = {"model", "ctx", "agentport", "llmhost"}
 # All valid keys in default.json - superset of _DEFAULTS_KEYS.
 # Keys here that are not in _DEFAULTS_KEYS are read directly by skills or slash commands
 # and are not passed through argparse.
-_KNOWN_KEYS = _DEFAULTS_KEYS | {"koreconvurl", "korecommsurl", "korecomms_poll_secs", "ControlDataFolder", "UserDataFolder", "mcp_servers"}
+_KNOWN_KEYS = _DEFAULTS_KEYS | {"koreconvurl", "korecommsurl", "korecomms_poll_secs", "ControlDataFolder", "UserDataFolder", "mcp_connections", "mcp_servers"}
 
 
 # ====================================================================================================
@@ -482,12 +482,14 @@ def _run(args, logger, log_path) -> None:
 
     if sequence_file_path:
         # Sidecars are not used in sequence/test mode - skip startup entirely.
-        _seq_mcp = _raw_defaults.get("mcp_servers") or []
+        _seq_mcp = _raw_defaults.get("mcp_connections")
+        if _seq_mcp is None:
+            _seq_mcp = _raw_defaults.get("mcp_servers") or []
         for _srv in _seq_mcp:
             _srv_name = _srv.get("name") or _srv.get("url", "?")
             logger.log(f"MCP [{_srv_name}]: {_srv.get('url', '?')} (skipped in sequence mode)")
         if not _seq_mcp:
-            logger.log("MCP servers:     (none configured)")
+            logger.log("MCP connections: (none configured)")
         if _koreconv_url:
             logger.log(f"KoreConversation:{_koreconv_url} (skipped in sequence mode)")
         else:
@@ -500,9 +502,10 @@ def _run(args, logger, log_path) -> None:
         _mcp_status = _mcp_client.get_server_status()
         for _srv in _mcp_status:
             _ok_str = f"({_srv['tool_count']} tool(s))" if _srv["ok"] else "(failed to connect)"
-            logger.log(f"MCP [{_srv['name']}]: {_srv['url']} {_ok_str} {_tick if _srv['ok'] else _cross}")
+            _purpose = f" - {_srv['purpose']}" if _srv.get("purpose") else ""
+            logger.log(f"MCP [{_srv['name']}]: {_srv['url']} {_ok_str} {_tick if _srv['ok'] else _cross}{_purpose}")
         if not _mcp_status:
-            logger.log("MCP servers:     (none configured)")
+            logger.log("MCP connections: (none configured)")
 
         if _koreconv_url:
             _kc_ok = _service_reachable(_koreconv_url)

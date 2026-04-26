@@ -13,6 +13,7 @@ if str(CODE_DIR) not in sys.path:
     sys.path.insert(0, str(CODE_DIR))
 
 from KoreAgent.skill_executor import execute_tool_call
+from KoreAgent import mcp_client
 from KoreAgent.orchestration import _delegate_tls
 from KoreAgent.orchestration import delegate_subrun
 from KoreAgent.orchestration import OrchestratorConfig
@@ -142,6 +143,85 @@ class RegressionTests(unittest.TestCase):
             self.assertIn("name", tool["function"])
             self.assertIn("parameters", tool["function"])
             self.assertEqual(tool["function"]["parameters"]["type"], "object")
+
+    def test_mcp_connections_prefer_new_config_and_skip_disabled_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "default.json"
+            config_path.write_text(
+                '{\n'
+                '  "mcp_servers": [\n'
+                '    {"name": "Legacy", "url": "http://legacy/mcp"}\n'
+                '  ],\n'
+                '  "mcp_connections": [\n'
+                '    {"name": "KoreData", "url": "http://data/mcp", "purpose": "reference", "expected_prefix": "koredata_", "allowed_tools": ["koredata_search"], "blocked_tools": ["koredata_delete"]},\n'
+                '    {"name": "KoreDocs", "url": "http://docs/mcp", "enabled": false}\n'
+                '  ]\n'
+                '}\n',
+                encoding="utf-8",
+            )
+
+            servers = mcp_client._load_server_config(config_path)
+
+        self.assertEqual(len(servers), 1)
+        self.assertEqual(servers[0]["name"], "KoreData")
+        self.assertEqual(servers[0]["url"], "http://data/mcp")
+        self.assertEqual(servers[0]["purpose"], "reference")
+        self.assertEqual(servers[0]["expected_prefix"], "koredata_")
+        self.assertEqual(servers[0]["allowed_tools"], ["koredata_search"])
+        self.assertEqual(servers[0]["blocked_tools"], ["koredata_delete"])
+
+    def test_mcp_connections_accept_legacy_mcp_servers_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "default.json"
+            config_path.write_text(
+                '{\n'
+                '  "mcp_servers": [\n'
+                '    {"name": "Legacy", "url": "http://legacy/mcp", "tool_prefix": "legacy_"}\n'
+                '  ]\n'
+                '}\n',
+                encoding="utf-8",
+            )
+
+            servers = mcp_client._load_server_config(config_path)
+
+        self.assertEqual(len(servers), 1)
+        self.assertEqual(servers[0]["name"], "Legacy")
+        self.assertEqual(servers[0]["expected_prefix"], "legacy_")
+
+    def test_mcp_connection_error_formatter_unwraps_exception_groups(self) -> None:
+        inner = ConnectionRefusedError("connection refused")
+        outer = ExceptionGroup("unhandled errors in a TaskGroup", [inner])
+
+        message = mcp_client._format_connection_error(outer)
+
+        self.assertEqual(message, "connection refused")
+
+    def test_mcp_enumeration_ignores_duplicate_tool_names_from_later_connections(self) -> None:
+        async def fake_list_tools(server):
+            name = server["name"]
+            defs = [
+                {"type": "function", "function": {"name": "shared_tool", "description": name, "parameters": {"type": "object", "properties": {}}}},
+                {"type": "function", "function": {"name": f"{name}_only", "description": name, "parameters": {"type": "object", "properties": {}}}},
+            ]
+            index = {
+                "shared_tool": {"url": server["url"], "connection": name},
+                f"{name}_only": {"url": server["url"], "connection": name},
+            }
+            return defs, index
+
+        servers = [
+            {"name": "first", "url": "http://first/mcp"},
+            {"name": "second", "url": "http://second/mcp"},
+        ]
+
+        with patch.object(mcp_client, "_list_tools_async", side_effect=fake_list_tools):
+            defs, index = __import__("asyncio").run(mcp_client._enumerate_all_servers(servers))
+
+        tool_names = [tool["function"]["name"] for tool in defs]
+        self.assertEqual(tool_names.count("shared_tool"), 1)
+        self.assertIn("first_only", tool_names)
+        self.assertIn("second_only", tool_names)
+        self.assertEqual(index["shared_tool"]["connection"], "first")
 
     def test_normalize_tool_request_rewrites_assistant_delegate_wrapper(self) -> None:
         func_name, arguments, note = normalize_tool_request(

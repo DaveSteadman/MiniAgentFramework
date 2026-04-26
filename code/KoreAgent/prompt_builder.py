@@ -79,20 +79,28 @@ _SYSTEM_SKILL_GUIDANCE: list[str] = [
 
 _TOOL_ROUTING_FUDGE: list[str] = [
 
-    # -- koredata_search / research_traverse: factual and biographical content ---------------
+    # -- reference MCP tools / research_traverse: factual and biographical content -----------
     # Long-term fix: add a "requires_lookup" flag to skill.md for these tools so the
     # orchestrator can enforce the lookup-before-answer rule without a system-prompt override.
     "- When a prompt asks about a person, place, event, concept, or historical figure - always call a research or lookup skill first. Never generate biographical, historical, or factual content from model knowledge.",
 
-    # -- koredata_search: local-first routing ------------------------------------------------
-    # Long-term fix: koredata_search skill.md trigger list and a routing layer that checks
+    # -- KoreData MCP tools: local-first reference routing -----------------------------------
+    # Long-term fix: KoreData tool descriptions and a routing layer that checks
     # query intent before selecting between local and web tools.
-    "- When the prompt explicitly names 'KoreData' as the target (e.g. 'search KoreData for', 'find in KoreData', 'KoreData library', 'KoreRAG'), you MUST call koredata_search first. Do not call search_web or research_traverse for these prompts.",
-    "- For any factual, reference, news, book, internal document, or encyclopaedic query that does not explicitly say 'search the web' or 'search online', call koredata_search first. Fall back to web tools only if koredata_search returns empty results.",
-    "- When a prompt says 'search the web for', 'search online for', or 'find on the internet', call a web tool directly - skip koredata_search.",
-    "- When a prompt says 'search for', 'find information about', or 'look up' without specifying the web, call koredata_search first. Fall back to search_web only on empty results.",
+    "- When the prompt explicitly names 'KoreData' as the target (e.g. 'search KoreData for', 'find in KoreData', 'KoreData library', 'KoreRAG'), use the available KoreData MCP search/retrieval tools first. Do not call search_web or research_traverse for these prompts.",
+    "- For factual, reference, news, book, internal document, or encyclopaedic queries that do not explicitly say 'search the web' or 'search online', use KoreData MCP search/retrieval tools first when they are available. Fall back to web tools only if KoreData returns empty results.",
+    "- When a prompt says 'search the web for', 'search online for', or 'find on the internet', call a web tool directly - skip KoreData.",
+    "- When a prompt says 'search for', 'find information about', or 'look up' without specifying the web, use KoreData MCP search/retrieval tools first when they are available. Fall back to search_web only on empty results.",
 
-    # -- Date-sensitive queries (search_web, koredata_search) --------------------------------
+    # -- KoreDocs MCP tools: generated documentation persistence -----------------------------
+    # Long-term fix: KoreDocs tool descriptions should make create/update/storage intent
+    # self-routing without these prompt-level reminders.
+    "- When the user asks to create, save, store, publish, or update a document in KoreDocs or the documentation store, first produce the requested content, then call the appropriate KoreDocs MCP document tool. Return the document identifier or link from the tool result.",
+    "- When the user asks for a spreadsheet, sheet, table, schedule, worksheet, compounding model, amortization model, or labelled-value update in KoreDocs, prefer the KoreDocs sheet tools end-to-end. If a folder is needed for that artifact, create it with KoreDocs rather than mixing filesystem folder tools with KoreDocs file creation.",
+    "- For spreadsheet tasks, prefer semantic KoreDocs sheet tools such as sheet description, headers, row find/update, labelled values, and table creation before dropping to raw cell writes or whole-file replacement.",
+    "- Do not use KoreDocs for general factual lookup unless the prompt is specifically about stored documentation. Use KoreData for reference retrieval and KoreDocs for documentation storage or editing.",
+
+    # -- Date-sensitive queries (search_web, KoreData MCP tools) -----------------------------
     # Long-term fix: inject current date into each search tool call automatically so the
     # model never needs to be reminded to anchor to runtime date.
     "- Treat words like 'latest', 'recent', 'today', 'current', and 'new' as date-sensitive. Anchor them to the current runtime date already provided in system context. Do not invent year ranges unless the user explicitly requests them.",
@@ -107,7 +115,7 @@ _TOOL_ROUTING_FUDGE: list[str] = [
     # -- search_web / search_web_text: failure handling --------------------------------------
     # Long-term fix: tools should return structured error objects rather than a
     # 'Search failed' title so the orchestrator can handle failures without prompt instructions.
-    "- When search_web returns a result titled 'Search failed', this is a connectivity failure - not a query mismatch. Do not retry the same endpoint. Make at most one attempt with koredata_search as fallback, then report 'No results were found for [query].' and stop.",
+    "- When search_web returns a result titled 'Search failed', this is a connectivity failure - not a query mismatch. Do not retry the same endpoint. Make at most one attempt with KoreData MCP search as fallback when available, then report 'No results were found for [query].' and stop.",
     "- When a search returns empty results, you may try ONE alternative query phrasing. If the second attempt also returns empty, stop and report what you have.",
     "- When a web search or page-fetch tool returns no results, report that in a single short sentence only. Do not explain which tools you considered or why the tool failed.",
 
@@ -124,10 +132,10 @@ _TOOL_ROUTING_FUDGE: list[str] = [
     "- When a prompt says 'research', 'investigate', 'look into', 'find evidence', or 'deep dive into', you MUST call research_traverse. Never answer these prompts from training data.",
     "- After research_traverse, prefer page scratch keys from best_pages/page_manifest. Use scratch_query or scratch_peek on specific research_page_* entries instead of scratch_load on the full bundle.",
 
-    # -- koredata: grounding ------------------------------------------------------------------
+    # -- KoreData MCP tools: grounding -------------------------------------------------------
     # Long-term fix: this should be enforced structurally - e.g. requiring source URL citations
     # so the model cannot include a fact without a matching retrieved URL.
-    "- When using koredata_search, only include facts that appear in content you retrieved with a koredata_get_* call. Do not use training knowledge to fill gaps. If KoreData returns no content for a topic, say so explicitly rather than writing from memory.",
+    "- When using KoreData MCP search tools, only include facts that appear in content you retrieved with a matching KoreData retrieval tool. Do not use training knowledge to fill gaps. If KoreData returns no content for a topic, say so explicitly rather than writing from memory.",
 
     # -- system info: suppress redundant tool call -------------------------------------------
     # Long-term fix: add a guard in get_system_info_dict that returns cached data when

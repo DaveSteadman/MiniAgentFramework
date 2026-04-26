@@ -7,10 +7,21 @@
   "UserDataFolder": "datauser",
   "korecommsurl": "http://localhost:8900",
   "korecomms_poll_secs": 15,
-  "mcp_servers": [
+  "mcp_connections": [
     {
-      "name": "KoreDataGateway",
-      "url": "http://localhost:8800/mcp"
+      "name": "KoreData",
+      "url": "http://localhost:8800/mcp",
+      "enabled": true,
+      "purpose": "reference search and retrieval across feeds, encyclopedia, library, and internal documents",
+      "expected_prefix": "koredata_"
+    },
+    {
+      "name": "KoreDocs",
+      "url": "http://127.0.0.1:5500/mcp/sse",
+      "enabled": true,
+      "purpose": "document navigation, structured editing, and KoreFile authoring",
+      "transport": "sse",
+      "expected_prefix": "koredocs_"
     }
   ]
 }

@@ -310,25 +310,16 @@ adding structured metadata fields to skill.md.
 
 ---
 
-### MCP server integration
+### MCP connection policy hardening
 
-All tools must currently be written as local Python skill modules with a `skill.md`
-descriptor. The agent has no way to consume tools from an external MCP server.
+MCP tools are now consumed from configured external connections and merged into the tool
+list alongside local Python skills. The next useful step is finer-grained policy for
+write-capable MCP endpoints.
 
-Design: additive, not a replacement. MCP tools are a second source alongside local skills
-with their definitions merged before sending to the LLM.
-
-Changes required:
-- `mcp_client.py` - connect to configured MCP server, query tool list at startup,
-  dispatch tool calls, return `ToolCallResult` objects.
-- `skills_catalog_builder.py` - merge MCP tool definitions into the catalog.
-- `skill_executor.py` / `tool_loop.py` - check whether a tool name belongs to an MCP
-  server and dispatch via `mcp_client.py`; otherwise use the existing importlib path.
-
-MCP servers are configured in `default.json`. Local Python skills are unchanged.
-The existing allow-list security model is extended to cover MCP tool names.
-
-Note: `mcp_client.py` already exists in the codebase as a stub - review before starting.
+Possible changes:
+- Surface write-capable connections more clearly in `/mcp status`.
+- Add tests for duplicate MCP tool names, prefix validation, and disabled connections.
+- Consider a confirmation or audit path for destructive document-editing tools.
 
 ---
 
@@ -386,3 +377,41 @@ of queue state. Under idle conditions this is unnecessary HTTP traffic.
 
 Fix: exponential backoff on empty-poll responses (3s -> 6s -> 12s, capped at 30s),
 resetting to 3s immediately on a successful claim.
+
+
+
+
+
+
+
+
+# Test test_results_20260420_222941_all.csv
+
+
+Here is the full analysis - 8 explicit FAILs across 4 test suites, plus several significant quality observations.
+
+Top 10 Actionable Improvements
+1.  DONE
+2. DONE
+
+3. DONE
+
+4. Web search blind spot for well-known URLs
+Three tests fail (search_hackernews_url, multihop_hackernews, search_ai_coding) because the search tool returns zero results for HN and major tech news sites. Yet a direct fetch of https://news.ycombinator.com returns 74 links cleanly. When a query looks like a URL-discovery request ("search for X and tell me the URL"), add a fallback that attempts a direct fetch of the likely canonical URL if search returns nothing.
+
+5. LLM HTTP 500 XML syntax error (min_prompts and research contexts)
+Two separate runs hit HTTP 500: XML syntax error on line 5: element <function> closed by </parameter>. This is a malformed tool schema being sent to the API. The min_prompts.json config (and the research web-search invocations) trigger a code path that produces invalid XML. Audit the tool serialization in llm_client.py for the minimal/research config to find which tool definition is generating the broken <parameter> close tag.
+
+6. Research fails with no retry on connection errors
+research_local_inference and search_ai_coding immediately surface "no results / connection error" to the user. Compare with research_ollama_vs_llama, which manually tried different URLs and succeeded. The retry/fallback logic is not consistent. Add 2-3 automatic retries with varied query terms before surfacing a failure.
+
+7. Internal chain-of-thought leaks into final response
+research_ollama_vs_llama (marked PASS, 115s) has the agent's entire step-by-step internal monologue as the response: "Could use known info from memory store maybe... Let me try https://raw.githubusercontent.com..." - none of which should be user-visible. The scratchpad reasoning is being returned directly as the final answer. Add a final-response filter that strips raw tool-planning text.
+
+8. Code execution latency is highly variable
+Simple code tasks run in 2-5 seconds (fibonacci, factorial, sum to 100). But sin_cos.csv takes 78.9s, sales.csv 54.5s, primes.csv 35.9s. All the slow ones involve file writes. The fast ones are pure computation. Hypothesis: the slow path involves generating code, executing it, then the skill performing a separate read-back and validation loop. Profile whether unnecessary round-trips or file-content verification steps are the bottleneck.
+
+9. DONE
+
+10. Multi-turn assertion cascade: prior FAIL contaminates later turns
+Turns 7 and 8 of the compression exchange share the same log file and timestamp - all turns in the exchange are recorded together. Turn 8 (/ctx size 128000) appears to have produced a correct response ("Context window size changed: 512 → 128,000") but is marked FAIL, almost certainly because turn 5 and 7 already failed. The assertion framework should evaluate each turn independently against its own criteria rather than propagating a FAIL across the whole exchange - otherwise it is impossible to tell which turns genuinely produced wrong output.

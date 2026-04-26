@@ -338,6 +338,36 @@ python .\code\KoreAgent\inspect_tools.py --output tool_definitions.json
 | `--skills-summary PATH` | `code/KoreAgent/skills/skills_summary.md` | Path to the skills catalog file. |
 | `--output PATH` | *(stdout)* | Optional path to write the JSON Schema tool definitions. Omit to print to stdout. |
 
+### MCP connections
+
+External MCP tool providers are configured in `default.json` under `mcp_connections`. MiniAgentFramework calls each server's `list_tools()` endpoint at startup and exposes the returned tool names unchanged. Use server-owned prefixes such as `koredata_` and `koredocs_`; `expected_prefix` is a validation guard, not a renaming rule. Use `allowed_tools` or `blocked_tools` when a connection should expose only part of its server-side toolset.
+
+```json
+{
+  "mcp_connections": [
+    {
+      "name": "KoreData",
+      "url": "http://localhost:8800/mcp",
+      "enabled": true,
+      "purpose": "reference search and retrieval",
+      "expected_prefix": "koredata_"
+    },
+    {
+      "name": "KoreDocs",
+      "url": "http://127.0.0.1:5500/mcp/sse",
+      "enabled": true,
+      "purpose": "document navigation and structured editing",
+      "transport": "sse",
+      "expected_prefix": "koredocs_"
+    }
+  ]
+}
+```
+
+For KoreDocs, prefer the canonical prefixed surface such as `koredocs_get_folder_structure`, `koredocs_get_file`, `koredocs_get_koredoc_outline`, `koredocs_read_koredoc_section`, `koredocs_replace_koredoc_section`, and the `koredocs_*sheet*` granular sheet tools. Legacy generic aliases may still exist on the server for compatibility, but MiniAgentFramework should expose the prefixed names.
+
+Use `/mcp status` to see configured connections and `/mcp reconnect` to re-enumerate tools after starting or changing an MCP server.
+
 ### Monitor model server memory usage
 Samples process RSS before and during model inference to characterise memory requirements. Currently supports Ollama only:
 ```powershell
